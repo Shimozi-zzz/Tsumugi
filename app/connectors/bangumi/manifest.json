@@ -1,0 +1,11 @@
+{
+  "name": "bangumi",
+  "display_name": "Bangumi 番组计划",
+  "version": "0.1.0",
+  "auth_type": "none",
+  "base_url": "https://api.bgm.tv",
+  "rate_limit": {
+    "requests_per_minute": 20
+  },
+  "capabilities": ["search", "get_detail"]
+}

@@ -1,0 +1,340 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Tsumugi 主题系统
+   基于 CSS 变量：主题只需覆盖 --bg/--panel/--text/--accent 等。
+   html[data-theme="xxx"] 切换，前端通过 localStorage 记住选择。
+   保留主题：default（默认）、spring（春樱）、summer（夏空）。
+   ============================================================ */
+
+:root,
+html[data-theme="default"] {
+  --bg: #fafaf9;          /* stone-50 */
+  --panel: #ffffff;
+  --panel-border: #e7e5e4;
+  --text: #1c1917;
+  --text-secondary: #78716c;
+  --accent: #4f46e5;      /* indigo-600 */
+  --accent-hover: #4338ca;
+  --accent-soft: #eef2ff;
+  --danger: #dc2626;
+  --ok: #059669;
+  --tag-bg: #fef3c7;
+  --tag-text: #92400e;
+  --input-bg: #ffffff;
+  --input-border: #d6d3d1;
+  --glass-radius: 16px;
+  /* 结构玻璃（三栏/卡片） */
+  --rail-bg: rgba(255, 255, 255, 0.72);
+  --card-bg: rgba(255, 255, 255, 0.72);
+  --card-thumb: linear-gradient(150deg, rgba(226, 232, 240, 0.6), rgba(226, 232, 240, 0.3));
+  --card-text: #1c1917;
+}
+
+/* ============================================================
+   春樱（Sakura）—— 默认主题
+   45% 半透明白玻璃 + 樱粉细边框 + 深紫红文字 + 弥散光斑
+   ============================================================ */
+html[data-theme="spring"] {
+  --bg: #fff5f7;               /* 极浅樱粉底 */
+  --panel: rgba(255, 255, 255, 0.45);       /* 通透白玻璃 (45%) */
+  --panel-border: rgba(244, 114, 182, 0.20); /* 樱粉色极细微光边框 */
+  --text: #4a044e;             /* 深紫红文字（替代死黑） */
+  --text-secondary: #9d4edd;   /* 次要柔和文字 */
+  --accent: #ec4899;           /* 主点缀色 */
+  --accent-hover: #db2777;
+  --accent-soft: rgba(244, 114, 182, 0.12);
+  --danger: #be185d;
+  --ok: #059669;
+  --tag-bg: rgba(192, 132, 252, 0.12);
+  --tag-text: #9d4edd;
+  --input-bg: rgba(255, 255, 255, 0.5);
+  --input-border: rgba(244, 114, 182, 0.25);
+  --glass-radius: 20px;
+  /* 结构玻璃（三栏/卡片） */
+  --rail-bg: rgba(255, 255, 255, 0.45);    /* 导航栏/侧栏同款 45% 玻璃 */
+  --card-bg: rgba(255, 255, 255, 0.45);    /* 半透明白玻璃卡片 */
+  --card-thumb: linear-gradient(150deg, rgba(251, 207, 232, 0.45), rgba(192, 132, 252, 0.30)); /* 粉紫渐变占位 */
+  --card-text: #4a044e;                     /* 卡片深紫红文字 */
+}
+
+/* 春樱弥散光斑背景（毛玻璃透光的灵魂） */
+html[data-theme="spring"] body {
+  background:
+    radial-gradient(circle at 8% 10%, rgba(244, 114, 182, 0.28), transparent 60%),
+    radial-gradient(circle at 90% 12%, rgba(192, 132, 252, 0.22), transparent 60%),
+    radial-gradient(circle at 75% 88%, rgba(125, 211, 252, 0.16), transparent 55%),
+    linear-gradient(160deg, #fff7fa 0%, #fdeef4 55%, #f8ecff 100%);
+  background-attachment: fixed;
+}
+
+/* 春樱环境光斑（透过侧栏/卡片玻璃） */
+html[data-theme="spring"] .desk-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(460px 340px at 5% 12%, rgba(244, 114, 182, 0.20), transparent 70%),
+    radial-gradient(520px 400px at 90% 15%, rgba(192, 132, 252, 0.18), transparent 70%),
+    radial-gradient(400px 320px at 70% 90%, rgba(125, 211, 252, 0.12), transparent 70%);
+  pointer-events: none;
+}
+
+/* 春樱玻璃覆盖：卡片/查询栏统一 45% 白玻璃 */
+html[data-theme="spring"] .desk-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 4px 20px rgba(214, 120, 160, 0.10);
+}
+html[data-theme="spring"] .desk-card:hover {
+  border-color: rgba(236, 72, 153, 0.40);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 0 0 1px rgba(236, 72, 153, 0.18),
+    0 10px 30px rgba(236, 72, 153, 0.14);
+}
+html[data-theme="spring"] .desk-askbar,
+html[data-theme="spring"] .desk-answer-card {
+  background: var(--panel);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+html[data-theme="spring"] .tsm-input {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+html[data-theme="spring"] .tsm-source-badge {
+  background: rgba(236, 72, 153, 0.85);
+  color: #fff;
+  border-radius: 9999px;
+}
+
+/* ============================================================
+   夏空（Summer）—— 青空清爽
+   ============================================================ */
+html[data-theme="summer"] {
+  --bg: #f0f9ff;
+  --panel: #ffffff;
+  --panel-border: #cff1ff;
+  --text: #0c3346;
+  --text-secondary: #4a7a94;
+  --accent: #0ea5e9;
+  --accent-hover: #0284c7;
+  --accent-soft: #e0f2fe;
+  --danger: #dc2626;
+  --ok: #059669;
+  --tag-bg: #e0f2fe;
+  --tag-text: #075985;
+  --input-bg: #ffffff;
+  --input-border: #bae6fd;
+  --glass-radius: 20px;
+  /* 结构玻璃（三栏/卡片） */
+  --rail-bg: rgba(255, 255, 255, 0.6);
+  --card-bg: rgba(255, 255, 255, 0.6);
+  --card-thumb: linear-gradient(150deg, rgba(186, 230, 253, 0.5), rgba(224, 242, 254, 0.3));
+  --card-text: #0c3346;
+}
+
+/* 夏空弥散光斑背景 */
+html[data-theme="summer"] body {
+  background:
+    radial-gradient(circle at 10% 8%, rgba(56, 189, 248, 0.22), transparent 60%),
+    radial-gradient(circle at 88% 14%, rgba(125, 211, 252, 0.18), transparent 60%),
+    radial-gradient(circle at 72% 90%, rgba(224, 242, 254, 0.5), transparent 55%),
+    linear-gradient(160deg, #f0fbff 0%, #e8f7ff 55%, #f0faff 100%);
+  background-attachment: fixed;
+}
+
+html[data-theme="summer"] .desk-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(460px 340px at 5% 12%, rgba(56, 189, 248, 0.16), transparent 70%),
+    radial-gradient(520px 400px at 90% 15%, rgba(125, 211, 252, 0.14), transparent 70%);
+  pointer-events: none;
+}
+
+html[data-theme="summer"] .desk-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 4px 18px rgba(56, 130, 180, 0.10);
+}
+html[data-theme="summer"] .desk-card:hover {
+  border-color: rgba(14, 165, 233, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 0 1px rgba(14, 165, 233, 0.16),
+    0 10px 28px rgba(14, 165, 233, 0.14);
+}
+html[data-theme="summer"] .desk-askbar,
+html[data-theme="summer"] .desk-answer-card {
+  background: var(--panel);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+html[data-theme="summer"] .tsm-input {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+html[data-theme="summer"] .tsm-source-badge {
+  background: rgba(14, 165, 233, 0.85);
+  color: #fff;
+  border-radius: 9999px;
+}
+
+/* ============================================================
+   夜紫书斋（Violet Obsidian）—— 深色暗夜
+   极深黑曜石底 + 紫色/靛蓝光晕 + 25% 黑紫毛玻璃 + 浅紫文字
+   ============================================================ */
+html[data-theme="violet-obsidian"] {
+  --bg: #090A0F;               /* 极深黑曜石底色 */
+  --panel: rgba(18, 14, 28, 0.45);       /* 半透明黑紫毛玻璃 */
+  --panel-border: rgba(168, 85, 247, 0.25); /* 紫色微光边框 */
+  --text: #f3e8ff;             /* 浅紫白（主文字） */
+  --text-secondary: #a855f7;   /* 荧光紫（次要/标签） */
+  --accent: #c084fc;           /* 高亮紫 */
+  --accent-hover: #d8b4fe;
+  --accent-soft: rgba(168, 85, 247, 0.16);
+  --danger: #f0abfc;
+  --ok: #86efac;
+  --tag-bg: rgba(168, 85, 247, 0.14);
+  --tag-text: #d8b4fe;
+  --input-bg: rgba(255, 255, 255, 0.05);
+  --input-border: rgba(168, 85, 247, 0.28);
+  --glass-radius: 20px;
+  /* 结构玻璃（三栏/卡片）——导航栏/侧栏 25% 黑紫玻璃 */
+  --rail-bg: rgba(18, 14, 28, 0.25);
+  --card-bg: rgba(24, 18, 38, 0.45);
+  --card-thumb: linear-gradient(135deg, rgba(88, 28, 135, 0.30) 0%, rgba(15, 23, 42, 0.50) 100%);
+  --card-text: #f3e8ff;
+}
+
+/* 夜紫弥散光斑背景（紫/靛蓝） */
+html[data-theme="violet-obsidian"] body {
+  background:
+    radial-gradient(circle at 4% 6%, rgba(147, 51, 234, 0.22), transparent 55%),
+    radial-gradient(circle at 94% 10%, rgba(79, 70, 229, 0.18), transparent 55%),
+    radial-gradient(circle at 78% 90%, rgba(168, 85, 247, 0.10), transparent 50%),
+    linear-gradient(160deg, #070810 0%, #0b0a14 50%, #0a0a12 100%);
+  background-attachment: fixed;
+}
+
+html[data-theme="violet-obsidian"] .desk-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(560px 420px at 6% 10%, rgba(147, 51, 234, 0.20), transparent 70%),
+    radial-gradient(600px 460px at 90% 14%, rgba(79, 70, 229, 0.16), transparent 70%),
+    radial-gradient(420px 320px at 72% 90%, rgba(168, 85, 247, 0.10), transparent 70%);
+  pointer-events: none;
+}
+
+/* 夜紫玻璃覆盖：卡片/查询栏 */
+html[data-theme="violet-obsidian"] .desk-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow:
+    inset 0 1px 0 rgba(216, 180, 254, 0.08),
+    0 4px 20px rgba(4, 4, 12, 0.5);
+}
+html[data-theme="violet-obsidian"] .desk-card:hover {
+  border-color: rgba(168, 85, 247, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(216, 180, 254, 0.12),
+    0 0 0 1px rgba(168, 85, 247, 0.22),
+    0 12px 34px rgba(147, 51, 234, 0.20);
+}
+html[data-theme="violet-obsidian"] .desk-askbar,
+html[data-theme="violet-obsidian"] .desk-answer-card {
+  background: var(--panel);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: inset 0 1px 0 rgba(216, 180, 254, 0.08);
+}
+html[data-theme="violet-obsidian"] .tsm-input {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+html[data-theme="violet-obsidian"] .tsm-source-badge {
+  background: rgba(192, 132, 252, 0.85);
+  color: #1b1024;
+  border-radius: 9999px;
+}
+
+/* ============================================================
+   通用组件样式（所有主题共用，用 CSS 变量映射）
+   ============================================================ */
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* 历史记录下拉：丝滑展开动画 */
+.history-dropdown {
+  transform-origin: top right;
+  animation: history-dropdown-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes history-dropdown-in {
+  from { opacity: 0; transform: scale(0.94) translateY(-6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 文字涂鸦 */
+.text-overlay {
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+  transition: opacity 0.25s ease;
+}
+
+/* 用户自定义背景图层：盖在主题背景之上、内容之下 */
+.app-root {
+  position: relative;
+}
+.bg-custom-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.tsm-panel {
+  background-color: var(--panel);
+  border-color: var(--panel-border);
+}
+.tsm-text-secondary {
+  color: var(--text-secondary);
+}
+.tsm-accent {
+  background-color: var(--accent);
+  color: #ffffff;
+}
+.tsm-accent:hover {
+  background-color: var(--accent-hover);
+}
+.tsm-accent-soft {
+  background-color: var(--accent-soft);
+}
+.tsm-danger {
+  color: var(--danger);
+}
+.tsm-input {
+  background-color: var(--input-bg);
+  border-color: var(--input-border);
+}
+.tsm-tag {
+  background-color: var(--tag-bg);
+  color: var(--tag-text);
+}

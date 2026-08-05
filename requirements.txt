@@ -1,0 +1,31 @@
+# FastAPI和Web服务器
+fastapi==0.115.6
+uvicorn[standard]==0.30.6
+python-multipart==0.0.12
+
+# 数据库
+sqlalchemy==2.0.36
+pydantic==2.10.4
+pydantic-settings==2.6.1
+
+# 向量库
+# 0.4.x/0.5.x 在 Windows/Python3.12 上没有 chroma-hnswlib 的 cp312 wheel，
+# 且 0.4.x 运行时与 pydantic v2 冲突。1.0.x 使用 Rust core，无此依赖。
+chromadb==1.0.13
+
+# Embedding模型
+sentence-transformers==2.3.1
+
+# HTTP客户端（用于API调用）
+httpx==0.28.1
+
+# 测试
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==5.0.0
+
+# 环境变量
+python-dotenv==1.0.1
+
+# 其他工具
+aiofiles==23.2.1
