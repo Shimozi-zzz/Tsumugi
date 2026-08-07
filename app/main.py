@@ -1,6 +1,7 @@
 """FastAPI 应用入口"""
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -11,6 +12,10 @@ from app.connectors import registry as connector_registry
 from app.database import Base, engine, ensure_schema
 from app.api.routes import router
 import app.models  # noqa: F401  确保 ORM 模型注册到 metadata
+
+# 把 .env（含 UI 直接填 Key 写入的 TSUMUGI_API_KEY_* 等）加载进 os.environ，
+# 使环境变量占位符 {VAR} 在重启后仍能解析（pydantic-settings 只读 Settings 字段）
+load_dotenv()
 
 # 确保数据目录存在
 os.makedirs(settings.upload_dir, exist_ok=True)
@@ -30,6 +35,9 @@ for config in connector_persistence.load_declarative_configs():
         connector_registry.register_declarative(config, enabled=enabled)
     except ValueError as e:
         print(f"[connector] 恢复声明式数据源 {config.get('name')} 失败：{e}")
+
+# 应用各 Connector 的通用设置（出站代理）
+connector_registry.apply_settings(connector_persistence.get_connector_settings())
 
 app = FastAPI(
     title="Tsumugi RAG System",

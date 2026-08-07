@@ -381,6 +381,54 @@ def ingest_external(
             db.close()
 
 
+def set_item_tags(
+    item_id: int,
+    tag_names: Optional[List[str]],
+    mode: str = "add",
+    db: Optional[Session] = None,
+) -> Item:
+    """给条目增/删/设置标签（单条或批量复用）。mode: add=追加 / remove=移除 /
+    set=替换为给定集合。返回刷新后的 Item。"""
+    own_session = db is None
+    db = db or SessionLocal()
+    try:
+        item = db.get(Item, item_id)
+        if item is None:
+            raise ValueError(f"item {item_id} 不存在")
+        names = [n.strip() for n in (tag_names or []) if n and n.strip()]
+        if mode == "set":
+            item.tags = []
+            _apply_tags(db, item, names)
+        elif mode == "remove":
+            remove_names = set(names)
+            item.tags = [t for t in item.tags if t.name not in remove_names]
+        else:  # add
+            _apply_tags(db, item, names)
+        db.commit()
+        db.refresh(item)
+        if mode in ("remove", "set"):
+            _cleanup_orphan_tags(db)
+        return item
+    finally:
+        if own_session:
+            db.close()
+
+
+def delete_items(item_ids: List[int], db: Optional[Session] = None) -> int:
+    """批量删除条目（复用 delete_item 的向量/附件/孤儿标签清理）。返回删除数。"""
+    own_session = db is None
+    db = db or SessionLocal()
+    try:
+        deleted = 0
+        for iid in item_ids:
+            if delete_item(iid, db=db):
+                deleted += 1
+        return deleted
+    finally:
+        if own_session:
+            db.close()
+
+
 def delete_item(item_id: int, db: Optional[Session] = None) -> bool:
     """删除条目：先删 Chroma 向量，再删 SQLite 记录（chunks 级联删除），
     最后清理不再被任何条目引用的孤立标签；图片条目同时删除本地附件文件。"""

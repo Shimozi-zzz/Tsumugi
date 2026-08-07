@@ -22,13 +22,15 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 env/
 ENV/
 
 # Environment variables
 .env
 
-# Database
+# 运行时数据（DB/Chroma/上传/令牌——含 Bangumi OAuth token，绝不可提交）
+data/
 *.db
 *.db-shm
 *.db-wal

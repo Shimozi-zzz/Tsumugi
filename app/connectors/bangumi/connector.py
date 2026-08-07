@@ -1,27 +1,27 @@
 """Bangumi Connector - search/get_detail/normalize 实现（Phase 3）
 
 API 文档：https://bangumi.github.io/api/
-- GET /v0/search/subjects?keyword=...&type=...&limit=20
+- POST /v0/search/subjects  body: {"keyword": "...", "limit": 20, "filter": {...}}
+  （注意：搜索端点是 **POST**，GET 返回 404；经本地代理打通后实测确认）
 - GET /v0/subjects/{subject_id}
 搜索响应每条 subject 含：id, name, name_cn, summary, images, rating,
 tags, date 等。
 """
-import json
-import sqlite3
-import threading
-import time
-from typing import Any, Dict, List, Optional
-
 import httpx
+from typing import Any, Dict, List
 
-from app.config import settings
 from app.connectors.base import (
     ConnectorError,
     ConnectorManifest,
     ItemDetail,
     RateLimitError,
+    RequestCache,
     SearchResult,
+    TokenBucket,
+    http_get,
+    http_post,
     load_manifest,
+    normalize_characters,
 )
 from app.models import Item
 
@@ -30,74 +30,6 @@ _MANIFEST_PATH = __file__ and (__import__("pathlib").Path(__file__).parent / "ma
 # Bangumi 条目类型：2=动画 3=书籍 4=音乐 6=游戏
 TYPE_ANIME = 2
 TYPE_GAME = 6
-
-
-# ---------------------------------------------------------------- 请求缓存/限流
-
-class _TokenBucket:
-    """进程内简单令牌桶限流：尊重 manifest 的 requests_per_minute。"""
-
-    def __init__(self, rate_per_minute: int):
-        self.rate = max(rate_per_minute, 1)
-        self.interval = 60.0 / self.rate
-        self._next_time = 0.0
-        self._lock = threading.Lock()
-
-    def acquire(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            wait = self._next_time - now
-            if wait > 0:
-                time.sleep(wait)
-                self._next_time += self.interval
-            else:
-                self._next_time = now + self.interval
-
-
-class _Cache:
-    """SQLite 简单缓存表：同一 query 短时间内不重复打外部 API。"""
-
-    def __init__(self, db_path: str = None):
-        self.db_path = db_path or (str(settings.chroma_persist_directory) + "/.connector_cache.db")
-        self._init()
-
-    def _conn(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init(self):
-        with self._conn() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS connector_cache (
-                    key TEXT PRIMARY KEY,
-                    payload TEXT NOT NULL,
-                    fetched_at REAL NOT NULL
-                )
-                """
-            )
-
-    def get(self, key: str, ttl_seconds: int = 600):
-        with self._conn() as conn:
-            row = conn.execute(
-                "SELECT payload, fetched_at FROM connector_cache WHERE key = ?", (key,)
-            ).fetchone()
-        if not row:
-            return None
-        if time.time() - row["fetched_at"] > ttl_seconds:
-            return None  # 过期视为 miss
-        try:
-            return json.loads(row["payload"])
-        except json.JSONDecodeError:
-            return None
-
-    def set(self, key: str, payload: Any):
-        with self._conn() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO connector_cache (key, payload, fetched_at) VALUES (?, ?, ?)",
-                (key, json.dumps(payload, ensure_ascii=False), time.time()),
-            )
 
 
 # ---------------------------------------------------------------- 数据转换
@@ -139,6 +71,25 @@ def _subject_to_detail(subject: Dict[str, Any]) -> ItemDetail:
     )
 
 
+def _characters_to_normalized(chars_data: Any) -> List[dict]:
+    """把 /v0/subjects/{id}/characters 返回的角色列表规范化。
+
+    Bangumi 角色结构：{id, name, images:{small/grid/large/medium},
+    relation, summary, actors:[{id,name,...}]}。先抽出 image_url 再走
+    base.normalize_characters 统一字段（见 ADR 0016）。
+    """
+    rows = []
+    for c in chars_data or []:
+        if not isinstance(c, dict):
+            continue
+        img = c.get("images") or {}
+        rows.append({
+            **c,
+            "image_url": img.get("large") or img.get("medium") or img.get("grid") or img.get("small"),
+        })
+    return normalize_characters(rows)
+
+
 # ---------------------------------------------------------------- Connector
 
 class BangumiConnector:
@@ -150,15 +101,19 @@ class BangumiConnector:
     def __init__(self):
         self.manifest = load_manifest(_MANIFEST_PATH)
         rpm = (self.manifest.rate_limit or {}).get("requests_per_minute", 20)
-        self._bucket = _TokenBucket(rpm)
-        self._cache = _Cache()
+        self._bucket = TokenBucket(rpm)
+        self._cache = RequestCache(namespace=self.name)
+        self.proxy_url = None  # 出站代理（可选，registry.apply_settings 注入）
 
     # ---- HTTP ----
     def _request(self, method: str, path: str, **kwargs) -> Any:
         self._bucket.acquire()
         url = self.manifest.base_url.rstrip("/") + path
         try:
-            resp = httpx.get(url, timeout=15.0, **kwargs)
+            if method == "POST":
+                resp = http_post(url, timeout=15.0, proxy=self.proxy_url, **kwargs)
+            else:
+                resp = http_get(url, timeout=15.0, proxy=self.proxy_url, **kwargs)
         except httpx.HTTPError as e:
             raise ConnectorError(f"Bangumi API 请求失败：{e}") from e
         if resp.status_code == 429:
@@ -177,22 +132,76 @@ class BangumiConnector:
         if cached is not None:
             return [_subject_to_search_result(s) for s in cached]
 
-        params = {"keyword": query.strip(), "limit": 20}
+        body = {"keyword": query.strip(), "limit": 20}
         if subject_type is not None:
-            params["type"] = subject_type
-        data = self._request("GET", "/v0/search/subjects", params=params)
+            body["filter"] = {"type": [subject_type]}
+        # 注意：Bangumi v0 搜索端点是 POST（GET 会 404），经本地代理打通后实测确认
+        data = self._request("POST", "/v0/search/subjects", json_body=body)
         subjects = data.get("data") or []
         self._cache.set(cache_key, subjects)
         return [_subject_to_search_result(s) for s in subjects]
 
     def get_detail(self, external_id: str) -> ItemDetail:
         cache_key = f"detail:{external_id}"
+        chars_key = f"detail_chars:{external_id}"
         cached = self._cache.get(cache_key)
         if cached is not None:
-            return _subject_to_detail(cached)
-        data = self._request("GET", f"/v0/subjects/{external_id}")
-        self._cache.set(cache_key, data)
-        return _subject_to_detail(data)
+            detail = _subject_to_detail(cached)
+            detail.metadata["characters"] = self._cache.get(chars_key) or []
+            return detail
+
+        subject = self._request("GET", f"/v0/subjects/{external_id}")
+        self._cache.set(cache_key, subject)
+
+        # 角色列表是独立端点（subject 详情不含角色）；失败不阻塞详情
+        chars: List[dict] = []
+        try:
+            chars_data = self._request("GET", f"/v0/subjects/{external_id}/characters")
+            chars = _characters_to_normalized(chars_data)
+        except ConnectorError:
+            chars = []
+        self._cache.set(chars_key, chars)
+
+        detail = _subject_to_detail(subject)
+        detail.metadata["characters"] = chars
+        return detail
+
+    def get_collections(self, access_token: str, offset: int = 0, limit: int = 30,
+                        subject_type: int = 2) -> Dict[str, Any]:
+        """分页拉取当前用户收藏（批量导入用，OAuth 鉴权）。
+
+        复用 `_request`（令牌桶限流 + 代理），不另起一套调用逻辑。
+        返回 {"data": [...], "total": N, "limit", "offset"}，条目含
+        subject_id / rate / type（1想看 2看过 3在看 4搁置 5抛弃）/ subject 摘要。
+        """
+        username = self._resolve_username(access_token)
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "User-Agent": "Tsumugi/0.1 (personal knowledge base)",
+        }
+        params = {"offset": offset, "limit": limit, "subject_type": subject_type}
+        return self._request("GET", f"/v0/users/{username}/collections",
+                             params=params, headers=headers)
+
+    def _resolve_username(self, access_token: str) -> str:
+        """收藏接口需要真实用户名（`/v0/users/-` 无效）。先从 token 文件缓存取，
+        没有则调 `/v0/me` 解析并缓存。"""
+        from app import bangumi_oauth
+        cached = bangumi_oauth.get_username_from_tokens()
+        if cached:
+            return cached
+        resp = http_get(
+            "https://api.bgm.tv/v0/me", timeout=20.0, proxy=self.proxy_url,
+            headers={"Authorization": f"Bearer {access_token}",
+                     "User-Agent": "Tsumugi/0.1 (personal knowledge base)"},
+        )
+        if resp.status_code >= 400:
+            raise ConnectorError(f"Bangumi 获取用户信息返回 {resp.status_code}")
+        username = (resp.json() or {}).get("username")
+        if not username:
+            raise ConnectorError("Bangumi /v0/me 未返回 username")
+        bangumi_oauth.save_username(username)
+        return username
 
     def normalize(self, raw: dict) -> dict:
         """把外部 API 原始返回转换成本地 Item 的字段字典（用于收藏入库）。"""

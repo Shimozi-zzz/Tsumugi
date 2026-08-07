@@ -44,6 +44,19 @@ Connector插件、前端UI——由Agent自主设计并实现。用户角色是�
    项目方向/实现方案，Agent应主动、先行向用户反馈（附理由与影响范围），
    由用户决策后再实施；与当前任务强相关的小优化可直接实施，但需在变更
    记录中说明原因与取舍。
+6. **硬性规则：涉及含中文内容的文件，一律用编辑工具（str_replace /
+   create_file）操作，禁止用 Shell 重写**（PowerShell 的
+   `Set-Content`/`Out-File`/`Add-Content` 等会以非 UTF-8 编码重写文件，
+   导致中文乱码损坏；历史教训见简报"编码事故"条目）。
+7. **Electron 冒烟测试必须验证真实数据请求（不只是 health 检查）**：任何
+   涉及 Electron 相关改动（preload / 打包 / 后端端口 / 路径拼接）后，冒烟
+   测试除了 `GET /health` 外，**必须额外实际发一次数据请求**（如
+   `GET /api/items` 或 `GET /api/connectors`），断言返回非 404 且含预期
+   数据。历史教训：`preload.cjs` 的 `apiBase` 缺 `/api` 前缀导致 Electron
+   客户端**所有 API 请求 404**，但只测 health 的冒烟测试全部通过，问题被
+   "冒烟测试通过"掩盖（详见简报对应条目）。默认动作：改完 Electron 相关
+   代码后在真实 Electron（`--remote-debugging-port` 驱动）或至少在后端进程
+   上验证一次真实数据请求。
 
 ---
 

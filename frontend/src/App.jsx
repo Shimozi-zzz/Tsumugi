@@ -1,22 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { fetchItems, fetchTags } from "./api.js";
-import { loadTheme, applyTheme } from "./themes.js";
+import { loadTheme, loadCustom, applyTheme, saveCustom } from "./themes.js";
 import DesktopView from "./components/DesktopView.jsx";
 
 const PAGE_SIZE = 100;
 
-// 背景设置持久化
-const BG_STORAGE_KEY = "tsumugi-bg";
 // 文字涂鸦设置持久化
 const TEXT_OVERLAYS_KEY = "tsumugi-text-overlays";
-
-function loadBg() {
-  try {
-    const raw = localStorage.getItem(BG_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return { image: null, opacity: 0.5, blur: 20 };
-}
 
 function loadTextOverlays() {
   try {
@@ -28,20 +18,20 @@ function loadTextOverlays() {
 
 export default function App() {
   const [theme, setTheme] = useState(() => loadTheme());
-  const [bg, setBg] = useState(() => loadBg());
+  const [custom, setCustom] = useState(() => loadCustom());
   const [textOverlays, setTextOverlays] = useState(() => loadTextOverlays());
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [allTags, setAllTags] = useState([]);
 
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    applyTheme(theme, custom);
+  }, [theme, custom]);
 
-  const updateBg = (patch) => {
-    setBg((prev) => {
+  const updateCustom = (patch) => {
+    setCustom((prev) => {
       const next = { ...prev, ...patch };
-      try { localStorage.setItem(BG_STORAGE_KEY, JSON.stringify(next)); } catch { /* 超限时忽略 */ }
+      saveCustom(next);
       return next;
     });
   };
@@ -65,25 +55,11 @@ export default function App() {
   return (
     <div className="min-h-screen app-root"
       style={{ backgroundColor: "var(--bg)", color: "var(--text)" }}>
-      {/* 用户自定义背景图层 */}
-      {bg.image && (
-        <div className="bg-custom-layer" aria-hidden="true"
-          style={{
-            backgroundImage: `url(${bg.image})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            opacity: bg.opacity,
-            filter: `blur(${bg.blur}px)`,
-          }} />
-      )}
-
       {/* 顶栏：品牌 */}
       <header className="border-b px-5 py-3 flex items-center justify-between"
         style={{
           backgroundColor: "var(--panel)",
           borderColor: "var(--panel-border)",
-          backdropFilter: "blur(18px) saturate(150%)",
-          WebkitBackdropFilter: "blur(18px) saturate(150%)",
           position: "sticky",
           top: 0,
           zIndex: 30,
@@ -101,10 +77,10 @@ export default function App() {
         total={total}
         allTags={allTags}
         refresh={refresh}
-        bg={bg}
-        updateBg={updateBg}
         theme={theme}
         setTheme={setTheme}
+        custom={custom}
+        updateCustom={updateCustom}
         textOverlays={textOverlays}
         updateTextOverlays={updateTextOverlays}
       />

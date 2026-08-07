@@ -55,6 +55,34 @@ def is_enabled(name: str) -> bool:
     return _enabled.get(name, False)
 
 
+def apply_settings(settings: dict) -> None:
+    """把持久化的 connector 设置（含出站代理）应用到已注册实例。
+
+    约定：settings = {"<connector_name>": {"proxy_url": "..."}}，
+    值为空串/None 表示直连（清除代理）。启动与保存代理时调用。
+    """
+    for name, conf in (settings or {}).items():
+        conn = _registry.get(name)
+        if conn is None:
+            continue
+        proxy = (conf or {}).get("proxy_url") or None
+        conn.proxy_url = proxy
+
+
+def set_proxy(name: str, proxy_url: Optional[str]) -> bool:
+    """设置某 Connector 的出站代理（不持久化，持久化由调用方负责）。"""
+    conn = _registry.get(name)
+    if conn is None:
+        return False
+    conn.proxy_url = (proxy_url or "").strip() or None
+    return True
+
+
+def get_proxy(name: str) -> Optional[str]:
+    conn = _registry.get(name)
+    return getattr(conn, "proxy_url", None) if conn else None
+
+
 def discover() -> List[str]:
     """扫描 app/connectors 子目录，自动发现并注册内置 Connector。
 

@@ -63,3 +63,55 @@ def delete_declarative_config(name: str) -> bool:
         return True
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------- Connector 通用设置（出站代理）
+
+# sources 表里保存"全量 connector 设置"的固定行名（避免与任意 connector 名冲突，
+# 因为 Source.name 是唯一键，声明式数据源已占用各自 name 的行）。
+_SETTINGS_ROW = "connector_settings"
+_SETTINGS_TYPE = "settings"
+
+
+def get_connector_settings() -> dict:
+    """读取所有 Connector 的通用设置（当前为出站代理）。
+
+    返回 {connector_name: {"proxy_url": "..."}}，无设置则空 dict。
+    """
+    db = _session()
+    try:
+        row = db.query(Source).filter(
+            Source.name == _SETTINGS_ROW, Source.type == _SETTINGS_TYPE
+        ).first()
+        if row is None or not row.config_ref:
+            return {}
+        try:
+            data = json.loads(row.config_ref)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+    finally:
+        db.close()
+
+
+def save_connector_proxy(name: str, proxy_url: str) -> None:
+    """保存某 Connector 的出站代理（空串=清除，即直连）。"""
+    settings = get_connector_settings()
+    proxy_url = (proxy_url or "").strip()
+    if proxy_url:
+        settings[name] = {"proxy_url": proxy_url}
+    else:
+        settings.pop(name, None)
+    db = _session()
+    try:
+        row = db.query(Source).filter(
+            Source.name == _SETTINGS_ROW, Source.type == _SETTINGS_TYPE
+        ).first()
+        if row is None:
+            row = Source(name=_SETTINGS_ROW, type=_SETTINGS_TYPE)
+            db.add(row)
+        row.config_ref = json.dumps(settings, ensure_ascii=False)
+        row.enabled = 1
+        db.commit()
+    finally:
+        db.close()

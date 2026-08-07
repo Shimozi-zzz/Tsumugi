@@ -15,6 +15,10 @@ chromadb==1.0.13
 
 # Embedding模型
 sentence-transformers==2.3.1
+# numpy/scipy 锁定 1.x：PyInstaller 打包时 numpy 2.x 有 "cannot load module
+# more than once" 的 C 扩展重复加载 bug（无法打包运行），1.26.4 稳定。
+numpy==1.26.4
+scipy==1.11.4
 
 # HTTP客户端（用于API调用）
 httpx==0.28.1

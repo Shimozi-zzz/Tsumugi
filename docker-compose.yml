@@ -1,10 +1,5 @@
-# Tsumugi 个人知识库 - docker compose（后端 + 前端）
-# 使用：docker compose up --build
-# 说明：
-# - 数据持久化：./data 挂载到容器（SQLite + Chroma + uploads）
-# - 模型下载：首次启动需联网下载 embedding 模型（HF）
-# - 前端 nginx 将 /api 代理到后端，浏览器直接访问 http://localhost:5173 或后端端口
-
+﻿# Tsumugi 涓汉鐭ヨ瘑搴?- docker compose锛堝悗绔?+ 鍓嶇锛?# 浣跨敤锛歞ocker compose up --build
+# 璇存槑锛?# - 鏁版嵁鎸佷箙鍖栵細./data 鎸傝浇鍒板鍣紙SQLite + Chroma + uploads锛?# - 妯″瀷涓嬭浇锛氶娆″惎鍔ㄩ渶鑱旂綉涓嬭浇 embedding 妯″瀷锛圚F锛?# - 鍓嶇 nginx 灏?/api 浠ｇ悊鍒板悗绔紝娴忚鍣ㄧ洿鎺ヨ闂?http://localhost:5173 鎴栧悗绔鍙?
 services:
   backend:
     build:
@@ -20,6 +15,8 @@ services:
       - TSUMUGI_PORT=8001
     volumes:
       - ./data:/app/data
+      # 鎸傝浇鏈満 HF 妯″瀷缂撳瓨锛岄伩鍏嶅鍣ㄥ唴閲嶆柊涓嬭浇 embedding 妯″瀷
+      - ${HF_HOME_CACHE}:/root/.cache/huggingface:ro
     ports:
       - "8001:8001"
     restart: unless-stopped

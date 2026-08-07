@@ -19,7 +19,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def ensure_schema():
     """轻量迁移：create_all 只建新表，不会给已有表加列。
-    对已存在的旧库补上新 ORM 列/表（item 外部字段、content_hash、sources 表）。"""
+    对已存在的旧库补上新 ORM 列（item 外部字段、content_hash、chunk.review_id）。"""
     insp = inspect(engine)
     if "items" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("items")}
@@ -34,9 +34,20 @@ def ensure_schema():
             for col, ddl_type in item_additions.items():
                 if col not in cols:
                     conn.execute(text(f"ALTER TABLE items ADD COLUMN {col} {ddl_type}"))
-    # sources 表由 create_all 负责（新表），这里仅确保幂等提示
-    if "sources" not in insp.get_table_names():
-        pass  # create_all 会创建
+    if "chunks" in insp.get_table_names():
+        chunk_cols = {c["name"] for c in insp.get_columns("chunks")}
+        if "review_id" not in chunk_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE chunks ADD COLUMN review_id INTEGER"))
+    if "reviews" in insp.get_table_names():
+        review_cols = {c["name"] for c in insp.get_columns("reviews")}
+        if "source" not in review_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE reviews ADD COLUMN source VARCHAR(20)"))
+        if "font_size" not in review_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE reviews ADD COLUMN font_size INTEGER"))
+    # reviews 表其余列由 create_all 负责（新表）
 
 
 def get_db():

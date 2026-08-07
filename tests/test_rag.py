@@ -108,7 +108,16 @@ class FakeAsyncClient:
 
 @pytest.fixture(scope="function")
 def fake_http(monkeypatch):
-    monkeypatch.setattr(rag.settings, "deepseek_api_key", SecretStr("test-key"))
+    # 注入一个启用的 provider（否则 _active_provider 查库报 AIAnswerDisabled）。
+    # 用公网 IP 字面量 8.8.8.8：SSRF 放行且无需 DNS 解析。
+    from app.providers import OpenAICompatibleProvider
+    monkeypatch.setattr(
+        rag, "_active_provider",
+        lambda: OpenAICompatibleProvider(
+            name="test", base_url="https://8.8.8.8/v1",
+            api_key="test-key", model_id="test-model",
+        ),
+    )
 
     def install(client):
         monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: client)
@@ -163,19 +172,15 @@ class TestGenerateAnswer:
             await generate_answer_non_stream("问题", [chunk("内容")])
         assert "重试" in str(exc.value) or "失败" in str(exc.value)
 
-    async def test_missing_api_key(self, monkeypatch):
-        monkeypatch.setattr(rag.settings, "deepseek_api_key", SecretStr(""))
-        with pytest.raises(LLMError) as exc:
-            await generate_answer_non_stream("问题", [chunk("内容")])
-        assert "DEEPSEEK_API_KEY" in str(exc.value)
-
-    async def test_placeholder_api_key_rejected(self, monkeypatch):
+    async def test_no_provider_raises_ai_disabled(self, monkeypatch):
+        """未配置任何 provider 时抛 AIAnswerDisabled（可选项提示而非故障）。"""
         monkeypatch.setattr(
-            rag.settings, "deepseek_api_key", SecretStr("your_deepseek_api_key_here")
+            "app.rag._active_provider",
+            lambda: (_ for _ in ()).throw(rag.AIAnswerDisabled("AI 问答未启用")),
         )
-        with pytest.raises(LLMError) as exc:
+        with pytest.raises(rag.AIAnswerDisabled) as exc:
             await generate_answer_non_stream("问题", [chunk("内容")])
-        assert "占位符" in str(exc.value)
+        assert "未启用" in str(exc.value)
 
     async def test_messages_sent_correctly(self, fake_http):
         client = FakeAsyncClient(lines=[sse_line("好的")])

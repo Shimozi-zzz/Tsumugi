@@ -86,6 +86,88 @@ export async function deleteItem(id) {
   if (!resp.ok) throw new Error("删除失败");
 }
 
+// ---- 批量操作 / 单条标签（交互打磨）----
+export async function batchTagItems(itemIds, tagNames, mode = "add") {
+  const resp = await fetch(`${API_BASE}/items/batch/tags`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds, tag_names: tagNames, mode }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "批量打标签失败");
+  return body;
+}
+
+export async function batchDeleteItems(itemIds) {
+  const resp = await fetch(`${API_BASE}/items/batch/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "批量删除失败");
+  return body;
+}
+
+export async function setItemTags(itemId, tagNames, mode = "add") {
+  const resp = await fetch(`${API_BASE}/items/${itemId}/tags`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tag_names: tagNames, mode }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "标签更新失败");
+  return body;
+}
+
+// ---- Bangumi OAuth + 批量导入 ----
+
+export async function fetchBangumiOAuthStatus() {
+  const resp = await fetch(`${API_BASE}/bangumi/oauth/status`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取 Bangumi 连接状态失败");
+  return body;
+}
+
+export async function saveBangumiOAuthConfig(cfg) {
+  const resp = await fetch(`${API_BASE}/bangumi/oauth/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cfg),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "保存应用凭证失败");
+  return body;
+}
+
+export async function fetchBangumiAuthorizeUrl() {
+  const resp = await fetch(`${API_BASE}/bangumi/oauth/authorize-url`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取授权链接失败");
+  return body;
+}
+
+export async function disconnectBangumi() {
+  const resp = await fetch(`${API_BASE}/bangumi/oauth/disconnect`, { method: "POST" });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "断开连接失败");
+  return body;
+}
+
+export async function startBangumiImport() {
+  const resp = await fetch(`${API_BASE}/bangumi/import`, { method: "POST" });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "启动导入失败");
+  return body;
+}
+
+export async function fetchBangumiImportStatus(jobId) {
+  const resp = await fetch(`${API_BASE}/bangumi/import/status?job_id=${encodeURIComponent(jobId)}`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取导入进度失败");
+  return body;
+}
+
 // 上传条目封面图
 export async function uploadItemCover(id, file) {
   const fd = new FormData();
@@ -94,6 +176,96 @@ export async function uploadItemCover(id, file) {
   const body = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(body.detail || `上传封面失败（${resp.status}）`);
   return body;
+}
+
+// ---- Review 读后感 ----
+
+export async function fetchItemReviews(itemId) {
+  const resp = await fetch(`${API_BASE}/items/${itemId}/reviews`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取书评失败");
+  return body;
+}
+
+export async function createReview(itemId, payload) {
+  const resp = await fetch(`${API_BASE}/items/${itemId}/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "创建书评失败");
+  return body;
+}
+
+export async function updateReview(reviewId, payload) {
+  const resp = await fetch(`${API_BASE}/reviews/${reviewId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "更新书评失败");
+  return body;
+}
+
+export async function deleteReview(reviewId) {
+  const resp = await fetch(`${API_BASE}/reviews/${reviewId}`, { method: "DELETE" });
+  if (!resp.ok) throw new Error("删除书评失败");
+}
+
+// ---- LLM Provider（可插拔化）----
+
+export async function fetchLLMProviders() {
+  const resp = await fetch(`${API_BASE}/llm/providers`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取 Provider 失败");
+  return body; // { providers, enabled_name }
+}
+
+export async function saveLLMProvider(payload) {
+  const resp = await fetch(`${API_BASE}/llm/providers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "保存 Provider 失败");
+  return body;
+}
+
+export async function enableLLMProvider(name, enabled = true) {
+  const resp = await fetch(`${API_BASE}/llm/providers/${name}/enable?enabled=${enabled}`, {
+    method: "PATCH",
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "切换 Provider 失败");
+  return body;
+}
+
+export async function deleteLLMProvider(name) {
+  const resp = await fetch(`${API_BASE}/llm/providers/${name}`, { method: "DELETE" });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "删除 Provider 失败");
+  return body;
+}
+
+export async function testLLMConnection(payload) {
+  const resp = await fetch(`${API_BASE}/llm/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "测试连接失败");
+  return body; // { ok, message }
+}
+
+export async function fetchOllamaStatus() {
+  const resp = await fetch(`${API_BASE}/llm/ollama-status`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error("检测 Ollama 失败");
+  return body; // { available, models, reason }
 }
 
 // JSON 方式创建条目（note / image）
@@ -153,6 +325,28 @@ export async function deleteConnector(name) {
   return body;
 }
 
+export async function saveConnectorProxy(name, proxyUrl) {
+  const resp = await fetch(`${API_BASE}/connectors/${name}/proxy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proxy_url: proxyUrl }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "设置代理失败");
+  return body;
+}
+
+export async function testConnectorProxy(name, proxyUrl) {
+  const resp = await fetch(`${API_BASE}/connectors/${name}/test-proxy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proxy_url: proxyUrl }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "测试失败");
+  return body;
+}
+
 // ---- 收藏入库（Save to Library，Phase 3）----
 
 export async function saveExternal(item) {
@@ -163,6 +357,29 @@ export async function saveExternal(item) {
   });
   const body = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(body.detail || "收藏入库失败");
+  return body;
+}
+
+// ---- 角色图鉴（详情 / 角色墙）----
+
+export async function fetchCharacters() {
+  const resp = await fetch(`${API_BASE}/characters`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取角色墙失败");
+  return body.characters;
+}
+
+export async function fetchItemDetail(itemId) {
+  const resp = await fetch(`${API_BASE}/items/${itemId}/detail`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取条目详情失败");
+  return body;
+}
+
+export async function fetchExternalDetail(source, externalId) {
+  const resp = await fetch(`${API_BASE}/external/detail?source=${encodeURIComponent(source)}&external_id=${encodeURIComponent(externalId)}`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取外部详情失败");
   return body;
 }
 

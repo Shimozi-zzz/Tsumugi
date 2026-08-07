@@ -6,8 +6,24 @@ import {
   fetchItems, fetchTags, streamRag, federatedSearch, deleteItem, saveExternal,
   filePathToUrl, createItem, uploadItem, uploadItemCover,
   fetchConnectors, createDeclarativeConnector, deleteConnector,
+  saveConnectorProxy, testConnectorProxy,
+  fetchCharacters, fetchItemDetail, fetchExternalDetail,
+  batchTagItems, batchDeleteItems, setItemTags,
 } from "../api.js";
 import InspectorPanel from "./InspectorPanel.jsx";
+import ReviewStudio from "./ReviewStudio.jsx";
+import ProviderSettings from "./ProviderSettings.jsx";
+import ItemDetailModal from "./ItemDetailModal.jsx";
+import CharacterWall from "./CharacterWall.jsx";
+import ShareCardModal from "./ShareCardModal.jsx";
+import Bookshelf from "./Bookshelf.jsx";
+import ToastHost from "./ToastHost.jsx";
+import ContextMenu from "./ContextMenu.jsx";
+import ShortcutsModal from "./ShortcutsModal.jsx";
+import TagEditModal from "./TagEditModal.jsx";
+import BangumiPanel from "./BangumiPanel.jsx";
+import { toast } from "../toast.js";
+import { THEMES, ACCENT_HUE_RANGE, RADIUS_RANGE } from "../themes.js";
 
 // 可排序的功能按钮（settings 固定底部、ask 固定顶部，不可移）
 const NAV = {
@@ -26,6 +42,11 @@ const NAV = {
       <path d="M3 3v18h18" /><path d="M7 14l4-4 3 3 5-6" />
     </svg>
   ) },
+  characters: { key: "characters", label: "角色", icon: (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="8" r="3.2" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><circle cx="17.5" cy="9" r="2.5" /><path d="M16 20a4.5 4.5 0 0 1 5.5-4.4" />
+    </svg>
+  ) },
   settings: { key: "settings", label: "设置", icon: (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
@@ -35,7 +56,7 @@ const NAV = {
 };
 
 // 可自由排序的键（settings 除外）
-const SORTABLE_KEYS = ["ask", "library", "inspector"];
+const SORTABLE_KEYS = ["ask", "library", "inspector", "characters"];
 
 const NAV_ORDER_KEY = "tsumugi-nav-order";
 
@@ -52,7 +73,7 @@ function loadNavOrder() {
   return [...SORTABLE_KEYS];
 }
 
-export default function DesktopView({ items, total, allTags, refresh, bg, updateBg, theme, setTheme, textOverlays, updateTextOverlays }) {
+export default function DesktopView({ items, total, allTags, refresh, theme, setTheme, custom, updateCustom, textOverlays, updateTextOverlays }) {
   const [section, setSection] = useState("ask"); // 默认打开问答
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTag, setActiveTag] = useState(null);
@@ -65,6 +86,30 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
   const [navRearrangeMode, setNavRearrangeMode] = useState(false);
   // 设置保存提示
   const [savedToast, setSavedToast] = useState(false);
+  // 书评面板：当前打开 review 面板的 item（null=关闭）
+  const [reviewItem, setReviewItem] = useState(null);
+  // 作品详情弹层：{detail, saved}；null=关闭（角色图鉴）
+  const [detailView, setDetailView] = useState(null);
+  // 安利卡弹层：当前生成安利卡的 item id（null=关闭）
+  const [shareItem, setShareItem] = useState(null);
+  // 图书馆视图模式：网格 / 书架（localStorage 记忆，复用主题持久化模式）
+  const [libView, setLibView] = useState(() => {
+    try { return localStorage.getItem("tsumugi-lib-view") || "grid"; } catch { return "grid"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("tsumugi-lib-view", libView); } catch { /* ignore */ }
+  }, [libView]);
+  // 角色墙刷新计数（收藏新作品后 +1）
+  const [charRefreshKey, setCharRefreshKey] = useState(0);
+  // 批量选择模式
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  // 右键菜单：{x, y, item}
+  const [ctxMenu, setCtxMenu] = useState(null);
+  // 标签编辑弹层：{itemIds, title}
+  const [tagEdit, setTagEdit] = useState(null);
+  // 快捷键说明
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // 侧栏可拖拽宽度（最大页面 1/3）
   const [sidebarWidth, setSidebarWidth] = useState(224);
@@ -155,6 +200,11 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
     result_path: "", field_map_title: "", field_map_external_id: "",
     field_map_description: "",
   });
+  // 出站代理编辑
+  const [proxyEditName, setProxyEditName] = useState(null); // 正在编辑代理的数据源名
+  const [proxyDraft, setProxyDraft] = useState("");
+  const [proxyTesting, setProxyTesting] = useState(false);
+  const [proxyTestMsg, setProxyTestMsg] = useState(null); // {ok, message}
 
   // 设置页分类 tab
   const [settingsTab, setSettingsTab] = useState("appearance"); // appearance | nav | sources
@@ -325,24 +375,182 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
         description: r.description, image_url: r.image_url, tags: r.tags,
       });
       refresh();
+      setCharRefreshKey((k) => k + 1);
+      toast.success(`已收藏「${r.title}」`);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  // ---- 角色图鉴：详情弹层 ----
+  async function openExternalDetail(r) {
+    try {
+      const d = await fetchExternalDetail(r.source, r.external_id);
+      setDetailView({ detail: d, saved: false });
     } catch (err) {
       setAskError(err.message);
     }
   }
 
+  async function openItemDetail(it) {
+    try {
+      const d = await fetchItemDetail(it.id);
+      setDetailView({ detail: d, saved: true });
+    } catch (err) {
+      setAskError(err.message);
+    }
+  }
+
+  function openWorkDetail(w) {
+    openItemDetail({ id: w.item_id });
+  }
+
+  async function detailSave() {
+    if (!detailView) return;
+    const d = detailView.detail;
+    try {
+      await saveExternal({
+        source: d.source, external_id: d.external_id, title: d.title,
+        description: d.description, image_url: d.image_url, tags: d.tags,
+      });
+      setDetailView((v) => (v ? { ...v, saved: true } : v));
+      refresh();
+      setCharRefreshKey((k) => k + 1);
+      toast.success(`已收藏「${d.title}」`);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  // ---- 批量选择 ----
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  async function handleBatchDelete() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (!window.confirm(`确认删除选中的 ${ids.length} 项？该操作不可撤销。`)) return;
+    try {
+      const r = await batchDeleteItems(ids);
+      toast.success(`已删除 ${r.deleted} 项`);
+      refresh();
+      setCharRefreshKey((k) => k + 1);
+      exitSelectMode();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  async function applyTags(tags, mode) {
+    if (!tagEdit) return;
+    const ids = tagEdit.itemIds;
+    try {
+      if (ids.length === 1) {
+        await setItemTags(ids[0], tags, mode);
+      } else {
+        await batchTagItems(ids, tags, mode);
+      }
+      const action = mode === "remove" ? "移除" : mode === "set" ? "替换为" : "添加";
+      toast.success(`已${action}标签 ${tags.length} 个 · ${ids.length} 项`);
+      refresh();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  // ---- 右键菜单 ----
+  function openCtxMenu(e, it) {
+    e.preventDefault();
+    if (selectMode) return; // 选择模式下右键不干扰
+    setCtxMenu({ x: e.clientX, y: e.clientY, item: it });
+  }
+
+  function ctxItems() {
+    if (!ctxMenu) return [];
+    const it = ctxMenu.item;
+    return [
+      { label: "查看详情", onClick: () => openItemDetail(it) },
+      { label: "编辑标签", onClick: () => setTagEdit({ itemIds: [it.id], title: `编辑「${it.title.slice(0, 12)}」标签` }) },
+      { label: "写读后感", onClick: () => setReviewItem(it) },
+      { label: "生成安利卡", onClick: () => setShareItem(it.id) },
+      { divider: true },
+      {
+        label: "删除", danger: true,
+        onClick: async () => {
+          if (!window.confirm(`确认删除「${it.title}」？`)) return;
+          try {
+            await deleteItem(it.id);
+            toast.success("已删除");
+            refresh();
+          } catch (err) {
+            toast.error(err.message);
+          }
+        },
+      },
+    ];
+  }
+
+  // ---- 键盘快捷键（/ Ctrl+K 聚焦、Esc 关闭、? 快捷键说明；方向键跳过见 ADR 0021）----
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target && e.target.tagName) || "";
+      const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSection("ask");
+        setTimeout(() => askInputRef.current?.focus?.(), 30);
+        return;
+      }
+      if (e.key === "/" && !typing) {
+        e.preventDefault();
+        setSection("ask");
+        setTimeout(() => askInputRef.current?.focus?.(), 30);
+        return;
+      }
+      if (e.key === "?" && !typing) {
+        e.preventDefault();
+        setShowShortcuts((v) => !v);
+        return;
+      }
+      if (e.key === "Escape") {
+        if (ctxMenu) { setCtxMenu(null); return; }
+        if (tagEdit) { setTagEdit(null); return; }
+        if (showShortcuts) { setShowShortcuts(false); return; }
+        if (selectMode) { exitSelectMode(); return; }
+        if (detailView) { setDetailView(null); return; }
+        if (shareItem != null) { setShareItem(null); return; }
+        if (reviewItem) { setReviewItem(null); return; }
+        if (showImport) { setShowImport(false); return; }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   async function handleImport(e) {
     e.preventDefault();
-    if (!file) return setImportMsg("请先选择文件");
+    if (!file) return toast.info("请先选择文件");
     setUploading(true);
     setImportMsg("");
     try {
       const result = await uploadItem(file, null, importTags);
-      setImportMsg(result.duplicated ? "内容已存在，跳过导入" : `已导入「${result.title}」`);
+      if (result.duplicated) toast.info("内容已存在，跳过导入");
+      else toast.success(`已导入「${result.title}」`);
       setFile(null);
       setImportTags("");
       refresh();
     } catch (err) {
-      setImportMsg(err.message);
+      toast.error(err.message);
     } finally {
       setUploading(false);
     }
@@ -351,7 +559,7 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
   async function handleCreateNote(e) {
     e.preventDefault();
     if (!noteTitle.trim() || !noteContent.trim()) {
-      return setImportMsg("笔记需要标题和内容");
+      return toast.info("笔记需要标题和内容");
     }
     setCreatingNote(true);
     setImportMsg("");
@@ -362,7 +570,8 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
         content: noteContent,
         tag_names: noteTags ? noteTags.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
       });
-      setImportMsg(result.duplicated ? "内容已存在，跳过导入" : `已创建笔记「${result.title}」`);
+      if (result.duplicated) toast.info("内容已存在，跳过导入");
+      else toast.success(`已创建笔记「${result.title}」`);
       setNoteTitle("");
       setNoteContent("");
       setNoteTags("");
@@ -469,28 +678,41 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
     }
   }
 
-  // 背景设置
-  const bgFileRef = useRef(null);
+  function openProxyEditor(c) {
+    setProxyEditName(c.name);
+    setProxyDraft(c.proxy_url || "");
+    setProxyTestMsg(null);
+  }
+
+  async function handleSaveProxy(name) {
+    try {
+      await saveConnectorProxy(name, proxyDraft.trim());
+      setConnMsg(`已保存「${name}」出站代理`);
+      setProxyEditName(null);
+      setProxyTestMsg(null);
+      loadConnectors();
+    } catch (err) {
+      setConnMsg(err.message);
+    }
+  }
+
+  async function handleTestProxy(name) {
+    setProxyTesting(true);
+    setProxyTestMsg(null);
+    try {
+      const r = await testConnectorProxy(name, proxyDraft.trim());
+      setProxyTestMsg({ ok: r.ok, message: r.message || r.detail });
+    } catch (err) {
+      setProxyTestMsg({ ok: false, message: err.message });
+    } finally {
+      setProxyTesting(false);
+    }
+  }
+
   function handleSaveSettings() {
     // 所有设置均实时持久化到 localStorage，此按钮仅作确认反馈
     setSavedToast(true);
     setTimeout(() => setSavedToast(false), 1500);
-  }
-  function handleBgFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      if (dataUrl.length > 4 * 1024 * 1024) {
-        setConnMsg("图片过大（>4MB），请换一张较小的图片。");
-        return;
-      }
-      updateBg({ image: dataUrl });
-      setConnMsg("背景图已设置");
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
   }
 
   function coverLabel(it) {
@@ -506,6 +728,8 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
   const sortedNavKeys = navOrder.filter((k) => k !== "ask");
   const settingsTabList = [
     { key: "appearance", label: "外观" },
+    { key: "model", label: "模型" },
+    { key: "bangumi", label: "Bangumi" },
     { key: "nav", label: "导航栏" },
     { key: "sources", label: "数据源" },
   ];
@@ -521,7 +745,6 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
   return (
     <div className="desktop-view flex relative"
       style={{ minHeight: "calc(100vh - 60px)" }}>
-      <div className="desk-ambient pointer-events-none" aria-hidden="true" />
 
       {/* 文字涂鸦层（可拖动，编辑模式显示蒙版）——z 高于蒙版才能拖动 */}
       {textOverlays.map((o) => (
@@ -636,30 +859,38 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
             backgroundColor: section === "settings" ? "var(--accent-soft)" : "transparent" }}>
           {NAV.settings.icon}
         </button>
+        {/* 快捷键帮助 */}
+        <button onClick={() => setShowShortcuts(true)} title="快捷键 (?)"
+          className="p-2 rounded-xl transition-colors"
+          style={{ color: "var(--text-secondary)" }}>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.6"
+            strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" /><path d="M9.2 9a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2.2-2.6 3.6" /><path d="M12 17.2h.01" />
+          </svg>
+        </button>
       </nav>
 
-      {/* 2. 半透明侧栏（可拖拽调宽） */}
-      <aside ref={sidebarRef} className="flex flex-col z-10"
+      {/* 2. 半透明侧栏（可拖拽调宽 + 中心收缩按钮） */}
+      <aside ref={sidebarRef} className="relative flex flex-col z-10"
         style={{
           width: sidebarOpen ? sidebarWidth : 36,
           backgroundColor: "var(--rail-bg)",
           borderRight: "1px solid var(--panel-border)",
-          backdropFilter: "blur(14px)",
-          WebkitBackdropFilter: "blur(14px)",
-          transition: "width 0.05s ease",
-          position: "relative",
+          transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
         }}>
-        {/* 拖拽手柄 */}
+        {/* 拖拽手柄（收缩时隐藏并禁用交互） */}
         <div ref={dragRef}
           className="absolute right-0 top-0 bottom-0 z-20"
-          style={{ width: 5, cursor: "col-resize", opacity: sidebarOpen ? 1 : 0 }} />
-        <button onClick={() => setSidebarOpen((v) => !v)}
-          className="self-end mr-1.5 mt-2 text-xs px-1 rounded"
-          style={{ color: "var(--text-secondary)" }}>
-          {sidebarOpen ? "«" : "»"}
-        </button>
-        {sidebarOpen && (
-          <div className="flex-1 flex flex-col min-h-0">
+          style={{ width: 5, cursor: "col-resize", opacity: sidebarOpen ? 1 : 0, pointerEvents: sidebarOpen ? "auto" : "none" }} />
+        {/* 侧栏内容（淡入淡出；收缩时裁剪到细条，实现完全收缩） */}
+        <div className="flex-1 min-h-0 overflow-hidden"
+          style={{
+            opacity: sidebarOpen ? 1 : 0,
+            transition: "opacity 0.18s ease",
+            transitionDelay: sidebarOpen ? "0.12s" : "0s",
+            pointerEvents: sidebarOpen ? "auto" : "none",
+          }}>
+          <div className="h-full flex flex-col min-h-0">
             {/* 图书馆侧栏内容（分组 + 标签）或 问答提示 */}
             <div className="flex-1 overflow-y-auto px-2.5 pb-2 pt-3">
               {section === "library" && (
@@ -789,7 +1020,31 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
               )}
             </div>
           </div>
-        )}
+          </div>
+        {/* 展开/收缩按钮：垂直居中于侧栏边缘；收缩时滑到细条中央 */}
+        <button onClick={() => setSidebarOpen((v) => !v)}
+          title={sidebarOpen ? "收起侧栏" : "展开侧栏"}
+          aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"}
+          className="absolute z-30 flex items-center justify-center"
+          style={{
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: 22, height: 22,
+            borderRadius: "9999px",
+            backgroundColor: "var(--rail-bg)",
+            border: "1px solid var(--panel-border)",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.18)",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            transition: "right 0.3s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s, color 0.2s",
+            right: sidebarOpen ? -11 : 7,  // 展开=跨骑右边缘；收缩=细条(36px)居中
+          }}>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2"
+            strokeLinecap="round" strokeLinejoin="round"
+            style={{ transform: sidebarOpen ? "rotate(0deg)" : "rotate(180deg)", transition: "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)" }}>
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
       </aside>
 
       {/* 3. 中央工作区 */}
@@ -805,7 +1060,28 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
                 <span className="text-[11px] px-2 py-0.5 rounded-full"
                   style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{gridTotal}</span>
               </div>
-              {/* 图书馆本地查找（按标题/内容过滤当前网格） */}
+            <div className="flex items-center gap-2">
+              {/* 批量选择模式 */}
+              <button onClick={() => { setSelectMode((v) => !v); setSelectedIds(new Set()); }}
+                title="批量选择"
+                className="px-3 py-1.5 rounded-full text-[11px]"
+                style={{ backgroundColor: selectMode ? "var(--accent)" : "var(--accent-soft)",
+                  color: selectMode ? "#fff" : "var(--accent)" }}>
+                选择
+              </button>
+              {/* 视图切换：网格 / 书架 */}
+              <div className="flex items-center gap-0.5 rounded-full px-1 py-0.5"
+                style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
+                <button onClick={() => setLibView("grid")} title="网格视图"
+                  className="px-2 py-1 rounded-full text-[11px]"
+                  style={{ backgroundColor: libView === "grid" ? "var(--accent)" : "transparent",
+                    color: libView === "grid" ? "#fff" : "var(--text-secondary)" }}>▦</button>
+                <button onClick={() => setLibView("shelf")} title="书架视图"
+                  className="px-2 py-1 rounded-full text-[11px]"
+                  style={{ backgroundColor: libView === "shelf" ? "var(--accent)" : "transparent",
+                    color: libView === "shelf" ? "#fff" : "var(--text-secondary)" }}>▤</button>
+              </div>
+              {/* 图书馆本地查找（按标题/内容过滤当前视图） */}
               <div className="flex items-center gap-2 rounded-full px-3.5 py-2 w-64"
                 style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"
@@ -819,6 +1095,7 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
                   style={{ color: "var(--text)" }} />
               </div>
             </div>
+          </div>
 
             {gridLoading ? (
               <div className="flex items-center justify-center h-64 text-sm"
@@ -828,12 +1105,19 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
                 style={{ color: "var(--text-secondary)" }}>
                 {gridItems.length === 0 ? "暂无资料，在左侧「导入」添加吧。" : "没有匹配的存储内容。"}
               </div>
+            ) : libView === "shelf" ? (
+              <Bookshelf items={libFiltered} coverOf={cardCover} onOpenItem={(it) => openItemDetail(it)}
+                selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={toggleSelect}
+                onContextMenu={openCtxMenu} />
             ) : (
-              <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
-                {libFiltered.map((it) => (
-                  <div key={it.id} className="desk-card group"
-                    style={{ borderRadius: 20, overflow: "hidden", border: "1px solid var(--panel-border)",
-                      backgroundColor: "var(--card-bg)", transition: "transform 0.2s ease, border-color 0.2s ease" }}>
+              <div className="grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(var(--d-grid-min), 1fr))`, gap: "var(--d-card-gap)" }}>
+                {libFiltered.map((it) => {
+                  const selected = selectedIds.has(it.id);
+                  return (
+                  <div key={it.id} className="desk-card group cursor-pointer"
+                    onClick={() => { if (selectMode) toggleSelect(it.id); else if (it.source !== "local") openItemDetail(it); }}
+                    onContextMenu={(e) => openCtxMenu(e, it)}
+                    style={selected ? { borderColor: "var(--accent)", boxShadow: "0 0 0 2px var(--accent-soft)" } : undefined}>
                     <div className="relative" style={{ aspectRatio: "3/4", background: "var(--card-thumb)" }}>
                       {cardCover(it) ? (
                         <img src={cardCover(it)} alt={it.title} loading="lazy"
@@ -843,35 +1127,69 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
                         <div className="w-full h-full flex items-center justify-center text-2xl"
                           style={{ color: "var(--accent)" }}>{coverLabel(it)}</div>
                       )}
-                      {it.source !== "local" && (
+                      {it.source !== "local" && !selectMode && (
                         <span className="absolute top-1.5 left-1.5 text-[10px] px-1.5 py-0.5 rounded-full"
                           style={{ backgroundColor: "var(--accent)", color: "#fff" }}>{it.source}</span>
                       )}
+                      {selectMode && (
+                        <span className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[11px]"
+                          style={{ backgroundColor: selected ? "var(--accent)" : "rgba(255,255,255,0.9)",
+                            color: selected ? "#fff" : "var(--text-secondary)",
+                            border: "1px solid var(--accent)" }}>
+                          {selected ? "✓" : ""}
+                        </span>
+                      )}
                       {/* 更换封面（hover 显示） */}
                       <button
-                        onClick={() => { coverTargetRef.current = it.id; coverFileRef.current?.click(); }}
+                        onClick={(e) => { e.stopPropagation(); coverTargetRef.current = it.id; coverFileRef.current?.click(); }}
                         className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                         style={{ backgroundColor: "rgba(8,10,18,0.65)", color: "#fff" }}>
                         换封面
                       </button>
                     </div>
-                    <div className="p-2">
-                      <div className="text-[13px] font-medium leading-snug line-clamp-2"
-                        style={{ color: "var(--card-text)", minHeight: 34 }}>{it.title}</div>
+                    <div className="p-2" style={{ padding: "var(--d-card-pad)" }}>
+                      <div className="font-medium leading-snug line-clamp-2"
+                        style={{ color: "var(--card-text)", fontSize: "var(--d-card-title)", minHeight: 34 }}>{it.title}</div>
                       <div className="flex items-center justify-between mt-0.5">
                         <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
                           {it.type === "external_ref" ? it.source : it.type === "image" ? "图片" : `${it.chunks_count} 块`}
                         </span>
-                        <button onClick={async () => { await deleteItem(it.id); refresh(); }}
-                          className="text-[11px] opacity-0 group-hover:opacity-100 transition-opacity"
-                          style={{ color: "var(--danger)" }}>删除</button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={(e) => { e.stopPropagation(); setReviewItem(it); }}
+                            className="text-[11px] opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ color: "var(--accent)" }}>书评</button>
+                          <button onClick={async (e) => { e.stopPropagation(); if (window.confirm(`确认删除「${it.title}」？`)) { try { await deleteItem(it.id); toast.success("已删除"); refresh(); } catch (err) { toast.error(err.message); } } }}
+                            className="text-[11px] opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ color: "var(--danger)" }}>删除</button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </>
+        )}
+
+        {/* 批量操作栏：选择模式下固定底部居中 */}
+        {selectMode && (
+          <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2"
+            data-testid="batch-bar"
+            style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)",
+              borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-md)" }}>
+            <span className="text-sm" style={{ color: "var(--text)" }}>已选中 {selectedIds.size} 项</span>
+            <button onClick={() => setTagEdit({ itemIds: [...selectedIds], title: `为 ${selectedIds.size} 项打标签` })}
+              disabled={selectedIds.size === 0}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium disabled:opacity-40"
+              style={{ backgroundColor: "var(--accent)", color: "#fff" }}>打标签</button>
+            <button onClick={handleBatchDelete} disabled={selectedIds.size === 0}
+              className="px-3 py-1.5 rounded-xl text-xs disabled:opacity-40"
+              style={{ backgroundColor: "var(--accent-soft)", color: "var(--danger)" }}>删除</button>
+            <button onClick={exitSelectMode}
+              className="px-3 py-1.5 rounded-xl text-xs"
+              style={{ color: "var(--text-secondary)" }}>取消</button>
+          </div>
         )}
 
         {section === "ask" && (
@@ -889,10 +1207,8 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
                   style={{
                     backgroundColor: "var(--input-bg)",
                     border: "1px solid var(--input-border)",
-                    backdropFilter: "blur(12px)",
-                    WebkitBackdropFilter: "blur(12px)",
                     transition: "border-color 0.2s ease, box-shadow 0.2s ease",
-                    boxShadow: "0 2px 16px rgba(0,0,0,0.08)",
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
                   }}>
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"
                     className="shrink-0" style={{ color: "var(--text-secondary)" }}>
@@ -924,7 +1240,7 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
                 {/* 历史记录下拉 */}
                 {historyOpen && (
                   <div className="history-dropdown absolute right-0 top-full mt-2 w-full max-w-sm rounded-2xl p-3 z-30"
-                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(20px)" }}>
+                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-medium" style={{ color: "var(--text)" }}>搜索历史</span>
                       {searchHistory.length > 0 && (
@@ -964,17 +1280,23 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
               <div className="flex-1 overflow-y-auto space-y-3">
                 {fedResults.length > 0 && (
                   <div className="desk-answer-card rounded-2xl p-4"
-                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(14px)" }}>
+                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
                     <div className="text-[11px] mb-2 tracking-wider" style={{ color: "var(--accent)" }}>外部检索</div>
                     {fedResults.slice(0, 4).map((r, i) => (
                       <div key={i} className="flex items-center justify-between py-1.5 text-sm">
-                        <div className="flex items-center min-w-0">
-                          <span className="mr-2 truncate" style={{ color: "var(--text)" }}>{r.title}</span>
+                        <button onClick={() => openExternalDetail(r)}
+                          className="flex items-center min-w-0 text-left"
+                          style={{ color: "var(--text)" }}>
+                          <span className="mr-2 truncate hover:underline">{r.title}</span>
                           <span className="text-[11px] px-1.5 py-0.5 rounded-full shrink-0"
                             style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{r.source}</span>
+                        </button>
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          <button onClick={() => openExternalDetail(r)} className="text-xs"
+                            style={{ color: "var(--text-secondary)" }}>详情</button>
+                          <button onClick={() => handleSave(r)} className="text-xs"
+                            style={{ color: "var(--accent)" }}>收藏</button>
                         </div>
-                        <button onClick={() => handleSave(r)} className="text-xs shrink-0 ml-2"
-                          style={{ color: "var(--accent)" }}>收藏</button>
                       </div>
                     ))}
                   </div>
@@ -991,7 +1313,7 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
                 )}
                 {answer && (
                   <div className="desk-answer-card rounded-2xl p-4"
-                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(14px)" }}>
+                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
                     <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed"
                       style={{ color: "var(--text)" }}>{answer}</pre>
                   </div>
@@ -1004,6 +1326,23 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
         {section === "inspector" && (
           <div className="max-w-3xl mx-auto mt-6">
             <InspectorPanel />
+          </div>
+        )}
+
+        {section === "characters" && (
+          <div className="max-w-4xl mx-auto mt-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-[15px] font-medium" style={{ color: "var(--text)" }}>角色墙</h2>
+                <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
+                  已收藏作品里登场的角色（点击角色看关联作品，点作品回详情）
+                </div>
+              </div>
+              <button onClick={() => setCharRefreshKey((k) => k + 1)}
+                className="px-3 py-1.5 rounded-xl text-xs"
+                style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>刷新</button>
+            </div>
+            <CharacterWall refreshKey={charRefreshKey} onOpenWork={openWorkDetail} />
           </div>
         )}
 
@@ -1022,67 +1361,74 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
               ))}
             </div>
 
-            {/* 外观：主题 + 背景 */}
+            {/* 外观：主题 + 有约束的自定义（强调色/密度/圆角） */}
             {settingsTab === "appearance" && (
               <div className="space-y-4">
-                <div className="desk-askbar rounded-2xl p-5"
-                  style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(16px)" }}>
-                  <h3 className="text-sm font-medium mb-3">主题</h3>
+                <div className="desk-askbar p-5">
+                  <h3 className="text-sm font-medium mb-1">主题</h3>
+                  <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
+                    三套主题共享同一套间距/圆角/阴影/密度规则，只切换色彩。
+                  </p>
                   <div className="flex flex-wrap gap-2">
-                    {["spring", "summer", "violet-obsidian", "default"].map((k) => (
-                      <button key={k} onClick={() => setTheme(k)}
+                    {THEMES.map((t) => (
+                      <button key={t.key} onClick={() => setTheme(t.key)}
                         className="px-3 py-1.5 rounded-xl text-sm"
-                        style={{ backgroundColor: theme === k ? "var(--accent)" : "var(--accent-soft)",
-                          color: theme === k ? "#fff" : "var(--accent)" }}>
-                        {k === "spring" ? "春樱" : k === "summer" ? "夏空" : k === "violet-obsidian" ? "夜紫" : "默认"}
+                        style={{ backgroundColor: theme === t.key ? "var(--accent)" : "var(--accent-soft)",
+                          color: theme === t.key ? "#fff" : "var(--accent)" }}>
+                        {t.label}
                       </button>
                     ))}
                   </div>
-                  <p className="text-xs mt-2" style={{ color: "var(--text-secondary)" }}>
-                    当前主题随选择即时切换，保存于本地浏览器。
+                </div>
+
+                <div className="desk-askbar p-5">
+                  <h3 className="text-sm font-medium mb-3">自定义</h3>
+
+                  <label className="flex flex-col gap-2 mb-4">
+                    <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                      强调色色相（{ACCENT_HUE_RANGE.min}° ~ +{ACCENT_HUE_RANGE.max}°）
+                    </span>
+                    <input type="range" min={ACCENT_HUE_RANGE.min} max={ACCENT_HUE_RANGE.max} step="1"
+                      value={custom.accentHue}
+                      onChange={(e) => updateCustom({ accentHue: Number(e.target.value) })}
+                      className="w-full" />
+                    <span className="text-xs" style={{ color: "var(--accent)" }}>
+                      预览：{custom.accentHue > 0 ? `+${custom.accentHue}°` : `${custom.accentHue}°`}</span>
+                  </label>
+
+                  <div className="mb-4">
+                    <span className="text-xs block mb-2" style={{ color: "var(--text-secondary)" }}>信息密度</span>
+                    <div className="flex gap-2">
+                      {["comfortable", "compact"].map((d) => (
+                        <button key={d} onClick={() => updateCustom({ density: d })}
+                          className="px-3 py-1.5 rounded-xl text-sm"
+                          style={{ backgroundColor: custom.density === d ? "var(--accent)" : "var(--accent-soft)",
+                            color: custom.density === d ? "#fff" : "var(--accent)" }}>
+                          {d === "comfortable" ? "舒适" : "紧凑"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="flex flex-col gap-2">
+                    <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                      圆角大小（{RADIUS_RANGE.min}~{RADIUS_RANGE.max}px）
+                    </span>
+                    <input type="range" min={RADIUS_RANGE.min} max={RADIUS_RANGE.max} step="1"
+                      value={custom.radius}
+                      onChange={(e) => updateCustom({ radius: Number(e.target.value) })}
+                      className="w-full" />
+                    <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                      当前 {custom.radius}px</span>
+                  </label>
+
+                  <p className="text-xs mt-3" style={{ color: "var(--text-secondary)" }}>
+                    自定义仅在预设范围内微调，避免调出不协调效果；实时生效并保存在本地。
                   </p>
                 </div>
 
-                <div className="desk-askbar rounded-2xl p-5"
-                  style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(16px)" }}>
-                  <h3 className="text-sm font-medium mb-3">背景</h3>
-                  <div className="flex flex-col gap-3 text-sm">
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => bgFileRef.current?.click()}
-                        className="px-3 py-1.5 rounded-xl text-sm font-medium"
-                        style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
-                        {bg?.image ? "更换背景图" : "选择背景图"}
-                      </button>
-                      <input ref={bgFileRef} type="file" accept="image/*"
-                        onChange={handleBgFile} className="hidden" />
-                      {bg?.image && (
-                        <button onClick={() => { updateBg({ image: null }); setConnMsg("背景图已清除"); }}
-                          className="px-3 py-1.5 rounded-xl text-sm"
-                          style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>清除背景</button>
-                      )}
-                    </div>
-                    <label className="flex items-center gap-2">
-                      <span className="text-xs w-16" style={{ color: "var(--text-secondary)" }}>透明度</span>
-                      <input type="range" min="0.05" max="0.95" step="0.05"
-                        value={bg?.opacity ?? 0.5}
-                        onChange={(e) => updateBg({ opacity: Number(e.target.value) })} className="flex-1" />
-                      <span className="text-xs w-8 text-right" style={{ color: "var(--text-secondary)" }}>
-                        {Math.round((bg?.opacity ?? 0.5) * 100)}%</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <span className="text-xs w-16" style={{ color: "var(--text-secondary)" }}>模糊</span>
-                      <input type="range" min="0" max="40" step="1"
-                        value={bg?.blur ?? 20}
-                        onChange={(e) => updateBg({ blur: Number(e.target.value) })} className="flex-1" />
-                      <span className="text-xs w-8 text-right" style={{ color: "var(--text-secondary)" }}>
-                        {bg?.blur ?? 20}px</span>
-                    </label>
-                  </div>
-                </div>
-
                 {/* 文字涂鸦（自定义位置） */}
-                <div className="desk-askbar rounded-2xl p-5"
-                  style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(16px)" }}>
+                <div className="desk-askbar p-5">
                   <h3 className="text-sm font-medium mb-3">文字涂鸦</h3>
                   <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
                     在界面上添加自定义文字（如标题、标语），可自由拖动位置、调整大小与颜色。
@@ -1110,10 +1456,20 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
               </div>
             )}
 
+            {/* 模型 Provider */}
+            {settingsTab === "model" && (
+              <ProviderSettings />
+            )}
+
+            {/* Bangumi 连接 + 批量导入 */}
+            {settingsTab === "bangumi" && (
+              <BangumiPanel />
+            )}
+
             {/* 导航栏：排序（除 settings 外的按键） */}
             {settingsTab === "nav" && (
               <div className="desk-askbar rounded-2xl p-5"
-                style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(16px)" }}>
+                style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
                 <h3 className="text-sm font-medium mb-1">导航栏排列</h3>
                 <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
                   调整左侧功能按钮顺序（问答固定首位、设置固定底部）。保存于本地浏览器。
@@ -1145,7 +1501,7 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
             {/* 数据源 */}
             {settingsTab === "sources" && (
               <div className="desk-askbar rounded-2xl p-5"
-                style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(16px)" }}>
+                style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-medium">数据源管理</h3>
                   <button onClick={() => setShowConnForm((v) => !v)}
@@ -1190,19 +1546,60 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
                 ) : (
                   <ul className="divide-y">
                     {connectors.map((c) => (
-                      <li key={c.name} className="py-2 flex items-center justify-between text-sm">
-                        <div>
-                          <span className="font-medium">{c.display_name}</span>
-                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full"
-                            style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}>{c.name}</span>
-                          <span className="ml-2 text-xs" style={{ color: "var(--text-secondary)" }}>
-                            {c.capabilities.join(", ")}</span>
-                          <span className={`ml-2 text-xs ${c.enabled ? "" : "opacity-50"}`}
-                            style={{ color: c.enabled ? "var(--ok)" : "var(--text-secondary)" }}>
-                            {c.enabled ? "已启用" : "已停用"}</span>
+                      <li key={c.name} className="py-2 text-sm">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-medium">{c.display_name}</span>
+                            <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full"
+                              style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}>{c.name}</span>
+                            <span className="ml-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+                              {c.capabilities.join(", ")}</span>
+                            <span className={`ml-2 text-xs ${c.enabled ? "" : "opacity-50"}`}
+                              style={{ color: c.enabled ? "var(--ok)" : "var(--text-secondary)" }}>
+                              {c.enabled ? "已启用" : "已停用"}</span>
+                            {c.proxy_url && (
+                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full"
+                                style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+                                代理
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button onClick={() => openProxyEditor(c)}
+                              className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                              {c.proxy_url ? "改代理" : "设代理"}
+                            </button>
+                            <button onClick={() => handleDeleteConnector(c.name)}
+                              className="text-xs" style={{ color: "var(--danger)" }}>删除</button>
+                          </div>
                         </div>
-                        <button onClick={() => handleDeleteConnector(c.name)}
-                          className="text-xs" style={{ color: "var(--danger)" }}>删除</button>
+                        {proxyEditName === c.name && (
+                          <div className="mt-2 pl-2 flex flex-col gap-1.5">
+                            <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                              出站代理（留空=直连），如 http://127.0.0.1:7890</div>
+                            <div className="flex items-center gap-2">
+                              <input placeholder="http://host:port" value={proxyDraft}
+                                onChange={(e) => { setProxyDraft(e.target.value); setProxyTestMsg(null); }}
+                                className="tsm-input border rounded px-2 py-1.5 text-xs flex-1" />
+                              <button onClick={() => handleTestProxy(c.name)} disabled={proxyTesting}
+                                className="px-2 py-1 rounded-lg text-xs disabled:opacity-40"
+                                style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+                                {proxyTesting ? "测试中…" : "测试连接"}
+                              </button>
+                              <button onClick={() => handleSaveProxy(c.name)}
+                                className="px-2 py-1 rounded-lg text-xs font-medium"
+                                style={{ backgroundColor: "var(--accent)", color: "#fff" }}>保存</button>
+                              <button onClick={() => setProxyEditName(null)}
+                                className="px-2 py-1 rounded-lg text-xs"
+                                style={{ color: "var(--text-secondary)" }}>取消</button>
+                            </div>
+                            {proxyTestMsg && (
+                              <p className="text-xs" style={{ color: proxyTestMsg.ok ? "var(--ok)" : "var(--danger)" }}>
+                                {proxyTestMsg.message}
+                              </p>
+                            )}
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -1213,17 +1610,17 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
         )}
       </div>
 
-      {/* 设置页：左下角固定保存按钮 */}
+      {/* 设置页：右下角固定保存按钮 */}
       {section === "settings" && (
         <>
           {savedToast && (
-            <div className="fixed bottom-6 left-6 z-40 px-4 py-2 rounded-full text-sm"
+            <div className="fixed bottom-6 right-6 z-40 px-4 py-2 rounded-full text-sm"
               style={{ backgroundColor: "var(--ok)", color: "#fff", boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}>
               设置已保存 ✓
             </div>
           )}
           <button onClick={handleSaveSettings}
-            className="fixed bottom-6 left-6 z-40 px-5 py-2 rounded-full text-sm font-medium transition-transform hover:scale-105"
+            className="fixed bottom-6 right-6 z-40 px-5 py-2 rounded-full text-sm font-medium transition-transform hover:scale-105"
             style={{ backgroundColor: "var(--accent)", color: "#fff", boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}>
             保存设置
           </button>
@@ -1234,6 +1631,47 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
       <input ref={coverFileRef} type="file" accept="image/*" className="hidden"
         onChange={handleCoverFile} />
 
+      {/* 书评工作室 */}
+      {reviewItem && (
+        <ReviewStudio
+          item={reviewItem}
+          onClose={() => setReviewItem(null)}
+          refreshItems={refresh}
+        />
+      )}
+
+      {/* 作品详情弹层（角色图鉴入口） */}
+      {detailView && (
+        <ItemDetailModal
+          detail={detailView.detail}
+          saved={detailView.saved}
+          onClose={() => setDetailView(null)}
+          onSave={detailView.saved ? null : detailSave}
+          onShare={(id) => setShareItem(id)}
+        />
+      )}
+
+      {/* 安利卡弹层（分享卡片：封面 + 标题 + 我的评分 + 短评） */}
+      {shareItem != null && (
+        <ShareCardModal item={{ id: shareItem }} onClose={() => setShareItem(null)} />
+      )}
+
+      {/* 右键上下文菜单 */}
+      {ctxMenu && (
+        <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={ctxItems()} onClose={() => setCtxMenu(null)} />
+      )}
+
+      {/* 标签编辑弹层（单条 / 批量） */}
+      {tagEdit && (
+        <TagEditModal title={tagEdit.title} onApply={applyTags} onClose={() => setTagEdit(null)} />
+      )}
+
+      {/* 快捷键说明 */}
+      {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
+
+      {/* 全局 toast */}
+      <ToastHost />
+
       {/* 新建分组浮层 */}
       {showGroupModal && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4"
@@ -1241,7 +1679,7 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
           onClick={() => setShowGroupModal(false)}>
           <div className="desk-askbar rounded-2xl p-5 w-full max-w-sm"
             onClick={(e) => e.stopPropagation()}
-            style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(20px)" }}>
+            style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-medium">新建分组</h3>
               <button onClick={() => setShowGroupModal(false)}
@@ -1285,7 +1723,7 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
           onClick={() => setShowImport(false)}>
           <div className="desk-askbar rounded-2xl p-5 w-full max-w-md"
             onClick={(e) => e.stopPropagation()}
-            style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(20px)" }}>
+            style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-medium">导入资料</h3>
               <button onClick={() => setShowImport(false)}
@@ -1307,8 +1745,12 @@ export default function DesktopView({ items, total, allTags, refresh, bg, update
 
             {importTab === "file" && (
               <form onSubmit={handleImport} className="flex flex-col gap-3">
-                <input type="file" onChange={(e) => setFile(e.target.files[0] || null)}
+                <input type="file" accept=".md,.markdown,.txt,.txt.md"
+                  onChange={(e) => setFile(e.target.files[0] || null)}
                   className="text-sm" />
+                <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                  支持 Markdown（.md / .markdown / .txt.md）与纯文本（.txt）；图片自动存为附件。
+                </p>
                 <input placeholder="标签（逗号分隔，可选）" value={importTags}
                   onChange={(e) => setImportTags(e.target.value)}
                   className="tsm-input border rounded px-2 py-1.5 text-sm" />

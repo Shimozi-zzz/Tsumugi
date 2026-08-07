@@ -39,20 +39,24 @@ class Item(Base):
     # 关系
     chunks = relationship("Chunk", back_populates="item", cascade="all, delete-orphan")
     tags = relationship("Tag", secondary=item_tag_association, back_populates="items")
+    reviews = relationship("Review", back_populates="item", cascade="all, delete-orphan")
 
 
 class Chunk(Base):
-    """文本切分块 - 仅note类型产生"""
+    """文本切分块 - note / external_ref / review 内容均产生"""
     __tablename__ = "chunks"
 
     id = Column(Integer, primary_key=True, index=True)
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    # 可空：NULL=条目自身内容；非空=该 review 的内容（RAG 检索区分来源）
+    review_id = Column(Integer, ForeignKey("reviews.id"), nullable=True, index=True)
     content = Column(Text, nullable=False)  # 切分后的文本
     chunk_index = Column(Integer, nullable=False)  # 在原文中的顺序
     embedding_ref = Column(String(255), nullable=True)  # Chroma中的向量ID
 
     # 关系
     item = relationship("Item", back_populates="chunks")
+    review = relationship("Review", back_populates="chunks")
 
 
 class Tag(Base):
@@ -66,6 +70,27 @@ class Tag(Base):
     items = relationship("Item", secondary=item_tag_association, back_populates="tags")
 
 
+class Review(Base):
+    """作品读后感/书评 - 一个 Item 可有多条（日记式多次记录）"""
+    __tablename__ = "reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=True)  # 评论标题，可空
+    content = Column(Text, nullable=False)  # markdown 文本
+    rating = Column(Integer, nullable=True)  # 0-10，可空
+    status = Column(String(20), nullable=True)  # 想看/在看/看完/搁置/弃坑
+    spoiler = Column(Integer, default=0)  # 0/1，SQLite 无 Boolean
+    source = Column(String(20), nullable=True)  # 自动导入来源（如 bangumi_collection），去重用
+    font_size = Column(Integer, nullable=True)  # 书评编辑器字号（px），null=默认
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # 关系
+    item = relationship("Item", back_populates="reviews")
+    chunks = relationship("Chunk", back_populates="review", cascade="all, delete-orphan")
+
+
 class Source(Base):
     """已注册的数据源/插件清单（Phase 3）"""
     __tablename__ = "sources"
@@ -75,4 +100,23 @@ class Source(Base):
     type = Column(String(50), default="local")  # "local" | "connector"
     enabled = Column(Integer, default=1)  # SQLite 无 Boolean，用 0/1
     config_ref = Column(String(500), nullable=True)  # 指向加密密钥引用，不落库明文
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class LLMProviderConfig(Base):
+    """LLM Provider 配置（LLM Provider 可插拔化）
+
+    复用 Phase 4 Connector 的持久化模式：config_ref 存 JSON（含环境变量
+    占位符如 {DEEPSEEK_API_KEY}，密钥不落明文）；同一时间仅一个 enabled=1。
+    """
+    __tablename__ = "llm_providers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(50), unique=True, nullable=False)  # "deepseek" | "ollama" | ...
+    provider_type = Column(String(30), nullable=False)  # "openai_compatible" | "ollama"
+    base_url = Column(String(500), nullable=False)
+    model_id = Column(String(100), nullable=False)
+    # api_key 引用：环境变量占位符（如 "{DEEPSEEK_API_KEY}"），不落明文
+    api_key_ref = Column(String(200), nullable=True)
+    enabled = Column(Integer, default=0)  # 同一时间仅一个启用
     created_at = Column(DateTime(timezone=True), server_default=func.now())

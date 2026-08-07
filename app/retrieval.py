@@ -58,6 +58,18 @@ def _build_item_where(item_ids: List[int]) -> dict:
     return {"$or": [{"item_id": i} for i in item_ids]}
 
 
+def _get_spoiler_review_ids(db: Session, review_ids: List[Optional[int]]) -> set:
+    """批量查出 spoiler=1 的 review id（用于检索过滤，见 ADR 0017）。"""
+    ids = [r for r in review_ids if r is not None]
+    if not ids:
+        return set()
+    from app.models import Review
+    rows = db.query(Review.id).filter(
+        Review.id.in_(ids), Review.spoiler == 1
+    ).all()
+    return {r[0] for r in rows}
+
+
 def retrieve_chunks(
     query: str,
     top_k: int = 5,
@@ -125,6 +137,7 @@ def _retrieve(
         item_id = meta.get("item_id")
         if item_id is None:
             continue
+        review_id = meta.get("review_id")
         hits.append(
             RetrievedChunk(
                 content=doc,
@@ -132,8 +145,15 @@ def _retrieve(
                 item_title="",  # 稍后批量填充
                 score=round(1.0 - float(dist), 4),  # cosine distance -> similarity
                 tags=[],
+                source_type="review" if review_id is not None else "item",
+                review_id=int(review_id) if review_id is not None else None,
             )
         )
+
+    # 过滤 spoiler 剧透内容（Review spoiler=true 的 chunk 不参与检索，见 ADR 0017）
+    spoilered = _get_spoiler_review_ids(db, [h.review_id for h in hits])
+    if spoilered:
+        hits = [h for h in hits if h.review_id not in spoilered]
 
     # 1) 内容去重
     seen_content = set()
@@ -157,12 +177,23 @@ def _retrieve(
         if len(deduped) >= top_k:
             break
 
-    # 4) 填充标题与标签
+    # 4) 填充标题与标签（含 review 标题）
     need = {h.item_id for h in deduped}
     meta_map = _resolve_item_meta(db, list(need))
     for h in deduped:
         title, tag_names = meta_map.get(h.item_id, ("", []))
         h.item_title = title
         h.tags = tag_names
+        if h.review_id is not None:
+            h.review_title = _resolve_review_title(db, h.review_id)
 
     return deduped
+
+
+def _resolve_review_title(db: Session, review_id: int) -> Optional[str]:
+    """拉取 review 标题（无标题时给占位提示，便于 prompt 标注来源）。"""
+    from app.models import Review
+    r = db.get(Review, review_id)
+    if r is None:
+        return None
+    return r.title or "读后感"

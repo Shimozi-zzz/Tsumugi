@@ -12,23 +12,45 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import ingest, rag, retrieval, stats
+from app import ingest, provider_store, providers, rag, retrieval, reviews, stats
 from app.connectors import persistence as connector_persistence
 from app.connectors import registry as connector_registry
+from app.connectors.base import ConnectorError, validate_proxy_url
 from app.database import get_db
 from app.embeddings import EmbeddingError
-from app.models import Item, Tag, item_tag_association
+from app.models import Item, Review, Tag, item_tag_association
 from app.schemas import (
+    BangumiAuthorizeOut,
+    BangumiImportStartOut,
+    BangumiImportStatusOut,
+    BangumiOAuthConfig,
+    BangumiOAuthStatusOut,
+    BatchDeleteRequest,
+    BatchTagsRequest,
+    CharacterOut,
+    CharactersResponse,
     DeclarativeConnectorConfig,
+    ConnectorProxyRequest,
+    ExternalDetailOut,
     ExternalResult,
     FederatedSearchResponse,
     IngestResponse,
     ItemCreate,
+    ItemDetailOut,
     ItemListResponse,
     ItemOut,
+    ItemTagsRequest,
+    LLMProviderCreate,
+    LLMProviderList,
+    LLMProviderOut,
+    LLMTestRequest,
+    LLMTestResponse,
     QueryRequest,
     RAGResponse,
     RetrievedChunk,
+    ReviewCreate,
+    ReviewOut,
+    ReviewUpdate,
     SaveExternalRequest,
     SearchResponse,
     TagMerge,
@@ -41,6 +63,21 @@ router = APIRouter()
 
 TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+
+
+def _strip_text_ext(filename: str) -> str:
+    """剥掉文件名末尾的已知文本扩展名链，作为文档标题。
+
+    例：`notes.txt.md` → `notes`（先剥 .md 再剥 .txt）；`a.txt` → `a`。
+    """
+    stem = os.path.basename(filename)
+    while True:
+        base, ext = os.path.splitext(stem)
+        if base and ext.lower() in TEXT_EXTENSIONS:
+            stem = base
+        else:
+            break
+    return stem
 
 
 def _item_out(item: Item) -> ItemOut:
@@ -186,7 +223,7 @@ async def upload_item(
     放线程池。"""
     filename = file.filename or "untitled"
     ext = os.path.splitext(filename)[1].lower()
-    doc_title = (title or "").strip() or os.path.splitext(os.path.basename(filename))[0]
+    doc_title = (title or "").strip() or _strip_text_ext(filename)
     tag_names = _split_tags(tags)
 
     try:
@@ -293,6 +330,154 @@ async def delete_item(item_id: int, db: Session = Depends(get_db)):
     return {"deleted": item_id}
 
 
+def _batch_tags_sync(body: BatchTagsRequest) -> int:
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        updated = 0
+        for iid in body.item_ids:
+            try:
+                ingest.set_item_tags(iid, body.tag_names, body.mode, db=db)
+                updated += 1
+            except ValueError:
+                continue
+        return updated
+    finally:
+        db.close()
+
+
+# 注意：/items/batch/... 必须在 /items/{item_id}/... 之前声明，
+# 否则 "batch" 会被 {item_id} 捕获。
+@router.post("/items/batch/tags")
+async def batch_item_tags(body: BatchTagsRequest):
+    """批量打标签（对选中的条目）。mode: add/remove/set。"""
+    if not body.item_ids:
+        return {"updated": 0, "requested": 0}
+    updated = await run_in_threadpool(_batch_tags_sync, body)
+    return {"updated": updated, "requested": len(body.item_ids)}
+
+
+@router.post("/items/batch/delete")
+async def batch_delete_items(body: BatchDeleteRequest):
+    """批量删除条目（前端需二次确认）。"""
+    if not body.item_ids:
+        return {"deleted": 0}
+    deleted = await run_in_threadpool(ingest.delete_items, body.item_ids)
+    return {"deleted": deleted}
+
+
+@router.post("/items/{item_id}/tags", response_model=ItemOut)
+async def update_item_tags(item_id: int, body: ItemTagsRequest, db: Session = Depends(get_db)):
+    """给单个条目增/删/设置标签（右键菜单"编辑标签"用）。"""
+    try:
+        await run_in_threadpool(
+            ingest.set_item_tags, item_id, body.tag_names, body.mode,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    fresh = db.get(Item, item_id)
+    if fresh is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return _item_out(fresh)
+
+
+# ========== Bangumi OAuth + 批量导入 ==========
+
+def _bangumi_redirect_uri() -> str:
+    return f"http://127.0.0.1:{settings.tsumugi_port}/api/bangumi/oauth/callback"
+
+
+@router.get("/bangumi/oauth/status", response_model=BangumiOAuthStatusOut)
+async def bangumi_oauth_status():
+    """连接状态（不返回任何令牌明文）。"""
+    from app import bangumi_oauth
+    tokens = bangumi_oauth.get_tokens() or {}
+    uid = tokens.get("user_id")
+    return BangumiOAuthStatusOut(
+        connected=bangumi_oauth.is_connected(),
+        config_configured=bangumi_oauth.is_config_configured(),
+        user_id=str(uid) if uid is not None else None,
+        expires_at=tokens.get("expires_at"),
+        redirect_uri=_bangumi_redirect_uri(),
+    )
+
+
+@router.post("/bangumi/oauth/config")
+async def bangumi_oauth_config(body: BangumiOAuthConfig):
+    """保存 Bangumi 应用凭证（client_id/secret 写入 .env，不落库明文）。"""
+    from app import bangumi_oauth
+    try:
+        bangumi_oauth.save_client_config(body.client_id, body.client_secret)
+    except bangumi_oauth.OAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.get("/bangumi/oauth/authorize-url", response_model=BangumiAuthorizeOut)
+async def bangumi_oauth_authorize():
+    """生成跳转 Bangumi 授权页的 URL（前端 window.open）。"""
+    from app import bangumi_oauth
+    try:
+        url = bangumi_oauth.build_authorize_url(_bangumi_redirect_uri())
+    except bangumi_oauth.OAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return BangumiAuthorizeOut(authorize_url=url, redirect_uri=_bangumi_redirect_uri())
+
+
+@router.get("/bangumi/oauth/callback")
+async def bangumi_oauth_callback(code: str, state: Optional[str] = None):
+    """Bangumi 授权回调：code 换 token。返回可展示的 HTML 提示关闭页面。"""
+    from app import bangumi_oauth
+    try:
+        bangumi_oauth.exchange_code(code, _bangumi_redirect_uri(), state=state)
+    except bangumi_oauth.OAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(
+        "<html><body style='font-family:sans-serif;padding:2rem;background:#fafafa;color:#18181b'>"
+        "<h2>Bangumi 授权成功 ✓</h2><p>可以关闭此页面，回到 Tsumugi 继续导入。</p></body></html>"
+    )
+
+
+@router.post("/bangumi/oauth/refresh")
+async def bangumi_oauth_refresh():
+    """手动刷新令牌（通常在 token 临近过期时由 get_valid_access_token 自动触发）。"""
+    from app import bangumi_oauth
+    try:
+        bangumi_oauth.refresh_access_token()
+    except bangumi_oauth.NeedsReauthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    return {"ok": True}
+
+
+@router.post("/bangumi/oauth/disconnect")
+async def bangumi_oauth_disconnect():
+    from app import bangumi_oauth
+    bangumi_oauth.disconnect()
+    return {"ok": True}
+
+
+@router.post("/bangumi/import", response_model=BangumiImportStartOut)
+async def bangumi_import_start():
+    """启动批量导入（后台线程，进度轮询 /bangumi/import/status）。"""
+    from app import bangumi_import, bangumi_oauth
+    try:
+        token = bangumi_oauth.get_valid_access_token()
+    except bangumi_oauth.NeedsReauthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    job_id = bangumi_import.start_import(token)
+    return BangumiImportStartOut(job_id=job_id)
+
+
+@router.get("/bangumi/import/status", response_model=BangumiImportStatusOut)
+async def bangumi_import_status(job_id: str):
+    from app import bangumi_import
+    job = bangumi_import.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="import job not found")
+    return BangumiImportStatusOut(job_id=job_id, **job)
+
+
 @router.post("/items/{item_id}/cover", response_model=ItemOut)
 async def upload_item_cover(
     item_id: int,
@@ -323,6 +508,233 @@ async def upload_item_cover(
     db.commit()
     db.refresh(item)
     return _item_out(item)
+
+
+# ========== Review 读后感/书评 ==========
+
+def _review_out(review: Review, db: Session) -> ReviewOut:
+    item = db.get(Item, review.item_id)  # 显式加载，避免 DetachedInstanceError
+    return ReviewOut(
+        id=review.id,
+        item_id=review.item_id,
+        item_title=item.title if item else "",
+        title=review.title,
+        content=review.content,
+        rating=review.rating,
+        status=review.status,
+        spoiler=bool(review.spoiler),
+        font_size=review.font_size,
+        public_rating=reviews.get_public_rating(item) if item else None,
+        created_at=review.created_at,
+        updated_at=review.updated_at,
+    )
+
+
+@router.post("/items/{item_id}/reviews", response_model=ReviewOut)
+async def create_review(item_id: int, body: ReviewCreate, db: Session = Depends(get_db)):
+    """创建一条 review（内容参与 RAG 检索）。"""
+    try:
+        review = await run_in_threadpool(
+            reviews.create_review,
+            item_id=item_id,
+            content=body.content,
+            title=body.title,
+            rating=body.rating,
+            status=body.status,
+            spoiler=body.spoiler,
+            font_size=body.font_size,
+        )
+        return _review_out(review, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except EmbeddingError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建 review 失败：{e}")
+
+
+@router.get("/items/{item_id}/reviews", response_model=List[ReviewOut])
+async def list_reviews(item_id: int, db: Session = Depends(get_db)):
+    """某 item 的全部 review（时间倒序）。"""
+    if db.get(Item, item_id) is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    rows = reviews.list_reviews(item_id, db=db)
+    return [_review_out(r, db) for r in rows]
+
+
+@router.patch("/reviews/{review_id}", response_model=ReviewOut)
+async def update_review(review_id: int, body: ReviewUpdate, db: Session = Depends(get_db)):
+    """编辑 review（内容变化时同步更新向量）。"""
+    try:
+        review = await run_in_threadpool(
+            reviews.update_review,
+            review_id=review_id,
+            content=body.content,
+            title=body.title,
+            rating=body.rating,
+            status=body.status,
+            spoiler=body.spoiler,
+            font_size=body.font_size,
+        )
+        return _review_out(review, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except EmbeddingError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新 review 失败：{e}")
+
+
+@router.delete("/reviews/{review_id}")
+async def delete_review(review_id: int):
+    """删除 review（含向量清理）。"""
+    ok = reviews.delete_review(review_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"deleted": review_id}
+
+
+@router.get("/reviews", response_model=List[ReviewOut])
+async def list_all_reviews(
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """全局 review 列表（最近写的，时间倒序）。"""
+    rows = db.query(Review).order_by(Review.created_at.desc()) \
+        .offset(skip).limit(limit).all()
+    return [_review_out(r, db) for r in rows]
+
+
+# ========== LLM Provider 管理 ==========
+
+def _provider_out(p: dict) -> LLMProviderOut:
+    return LLMProviderOut(**p)
+
+
+@router.get("/llm/providers", response_model=LLMProviderList)
+async def list_llm_providers():
+    """列出全部 provider 配置 + 当前启用名。"""
+    providers_list = provider_store.list_providers()
+    enabled = provider_store.get_enabled_provider()
+    return LLMProviderList(
+        providers=[_provider_out(p) for p in providers_list],
+        enabled_name=enabled["name"] if enabled else None,
+    )
+
+
+@router.post("/llm/providers", response_model=LLMProviderOut)
+async def save_llm_provider(body: LLMProviderCreate):
+    """保存 provider 配置（name 唯一，存在则覆盖）。保存前做 SSRF 校验。
+
+    api_key 两种方式（UI 可任选）：
+    - 占位符 {ENV_VAR}：原样存 api_key_ref；
+    - 真实 key（明文）：由后端写入 .env（生成 {TSUMUGI_API_KEY_*} 占位符引用
+      存库），**不落数据库明文**（见 ADR 0017）。
+    """
+    if body.provider_type not in ("openai_compatible", "ollama"):
+        raise HTTPException(status_code=400, detail="provider_type 必须是 openai_compatible 或 ollama")
+    # 先分类 api_key 输入（畸形占位符拒绝）
+    try:
+        mode = providers.classify_api_key_ref(body.api_key_ref)
+    except providers.ProviderError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # SSRF 配置期校验（resolve=False）：内网/回环地址拒绝（Ollama 放行 localhost）
+    try:
+        providers.provider_from_config(
+            {"provider_type": body.provider_type, "base_url": body.base_url,
+             "model_id": body.model_id, "api_key_ref": body.api_key_ref},
+            validate=True,
+        )
+    except providers.ProviderError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # 明文 key → 落地 .env 换成占位符引用（不落库明文）
+    stored_ref = body.api_key_ref
+    if mode == "plaintext":
+        try:
+            stored_ref = providers.persist_api_key_placeholder(body.name, body.api_key_ref)
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"写入 .env 失败：{e}")
+    try:
+        saved = provider_store.save_provider(
+            name=body.name,
+            provider_type=body.provider_type,
+            base_url=body.base_url,
+            model_id=body.model_id,
+            api_key_ref=stored_ref,
+            enabled=body.enabled,
+        )
+        return _provider_out(saved)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存 provider 失败：{e}")
+
+
+@router.patch("/llm/providers/{name}/enable", response_model=LLMProviderOut)
+async def enable_llm_provider(name: str, enabled: bool = True):
+    """启用/停用 provider（启用时清其它）。"""
+    saved = provider_store.set_enabled(name, enabled)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return _provider_out(saved)
+
+
+@router.delete("/llm/providers/{name}")
+async def delete_llm_provider(name: str):
+    ok = provider_store.delete_provider(name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return {"deleted": name}
+
+
+@router.post("/llm/test", response_model=LLMTestResponse)
+async def test_llm_connection(body: LLMTestRequest):
+    """测试连接：优先用已保存配置（name），否则用请求内临时配置。"""
+    if body.name:
+        cfg = provider_store.get_provider(body.name)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="Provider not found")
+    else:
+        if not body.base_url or not body.model_id:
+            raise HTTPException(status_code=400, detail="测试连接需要 base_url 和 model_id")
+        # 临时配置的 api_key：占位符原样引用；明文直接作为 api_key（不持久化）
+        try:
+            mode = providers.classify_api_key_ref(body.api_key_ref)
+        except providers.ProviderError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        cfg = {
+            "name": "test", "provider_type": body.provider_type or "openai_compatible",
+            "base_url": body.base_url, "model_id": body.model_id,
+        }
+        if mode == "placeholder":
+            cfg["api_key_ref"] = body.api_key_ref
+        elif mode == "plaintext":
+            cfg["api_key"] = body.api_key_ref.strip()
+    try:
+        message = await run_in_threadpool(providers.test_connection, cfg)
+        return LLMTestResponse(ok=True, message=message)
+    except providers.ProviderError as e:
+        return LLMTestResponse(ok=False, message=str(e))
+    except Exception as e:
+        return LLMTestResponse(ok=False, message=f"测试连接失败：{e}")
+
+
+@router.get("/llm/ollama-status")
+async def ollama_status():
+    """检测本机 Ollama 服务是否可访问（localhost:11434/v1/models）。"""
+    import httpx
+    try:
+        resp = httpx.get("http://localhost:11434/v1/models", timeout=3.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            models = [m.get("id") for m in data.get("data", [])]
+            return {"available": True, "models": models}
+        return {"available": False, "models": [], "reason": f"HTTP {resp.status_code}"}
+    except httpx.ConnectError:
+        return {"available": False, "models": [], "reason": "无法连接 localhost:11434"}
+    except httpx.TimeoutException:
+        return {"available": False, "models": [], "reason": "连接超时"}
+    except Exception as e:
+        return {"available": False, "models": [], "reason": str(e)}
 
 
 # ========== 标签 ==========
@@ -511,7 +923,7 @@ async def federated_search(q: QueryRequest):
 
 @router.get("/connectors")
 async def list_connectors():
-    """列出已注册/启用的数据源。"""
+    """列出已注册/启用的数据源（含出站代理配置）。"""
     manifests = connector_registry.list_manifests()
     return [
         {
@@ -520,9 +932,66 @@ async def list_connectors():
             "version": m.version,
             "capabilities": m.capabilities,
             "enabled": connector_registry.is_enabled(m.name),
+            "proxy_url": connector_registry.get_proxy(m.name),
         }
         for m in manifests
     ]
+
+
+@router.post("/connectors/{name}/proxy")
+async def save_connector_proxy(name: str, body: ConnectorProxyRequest):
+    """设置某数据源的出站代理（HTTP/HTTPS）。空串=清除（直连）。
+
+    代理地址同样过 SSRF 校验（代理目标不能指向内网/回环/云元数据，
+    代理场景不放行回环，见 ADR 0015）。
+    """
+    if connector_registry.get_connector(name) is None:
+        raise HTTPException(status_code=404, detail=f"数据源 {name} 未注册")
+    proxy_url = (body.proxy_url or "").strip()
+    try:
+        if proxy_url:
+            validate_proxy_url(proxy_url)
+    except ConnectorError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    connector_registry.set_proxy(name, proxy_url)
+    connector_persistence.save_connector_proxy(name, proxy_url)
+    return {
+        "name": name,
+        "proxy_url": connector_registry.get_proxy(name),
+        "message": "代理已设置" if proxy_url else "已清除代理（直连）",
+    }
+
+
+@router.post("/connectors/{name}/test-proxy")
+async def test_connector_proxy(name: str, body: ConnectorProxyRequest):
+    """验证某数据源能否通过指定代理访问其 base_url。
+
+    只校验代理地址的 SSRF + TCP 连通性（任何 HTTP 响应都算连通，
+    连接失败/超时才算不可用），不触发真实业务请求。
+    """
+    conn = connector_registry.get_connector(name)
+    if conn is None:
+        raise HTTPException(status_code=404, detail=f"数据源 {name} 未注册")
+    proxy_url = (body.proxy_url or "").strip()
+    try:
+        if proxy_url:
+            validate_proxy_url(proxy_url)
+    except ConnectorError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    base_url = getattr(conn, "manifest", None).base_url if getattr(conn, "manifest", None) else None
+    if not base_url:
+        raise HTTPException(status_code=400, detail=f"数据源 {name} 没有 base_url 可测试")
+    import httpx
+    try:
+        resp = httpx.get(base_url, timeout=8.0, proxy=proxy_url or None,
+                         follow_redirects=True)
+        if proxy_url:
+            return {"ok": True, "message": f"通过代理连接成功（{base_url} → HTTP {resp.status_code}）"}
+        return {"ok": True, "message": f"直连成功（{base_url} → HTTP {resp.status_code}）"}
+    except httpx.HTTPError as e:
+        mode = "代理" if proxy_url else "直连"
+        return {"ok": False, "message": f"{mode}连接失败（{base_url}）：{e}"}
 
 
 @router.post("/connectors")
@@ -556,22 +1025,60 @@ async def delete_declarative_connector(name: str):
 
 
 def _save_external_sync(req: SaveExternalRequest) -> IngestResponse:
-    """在子线程中执行收藏入库。外部封面图缓存到本地（失败不阻塞）。"""
+    """在子线程中执行收藏入库。外部封面图缓存到本地（失败不阻塞）。
+
+    若 Connector 支持 get_detail，收藏时**顺带拉一次详情**存入
+    raw_metadata（含角色列表，供角色墙聚合），详情失败则降级为搜索级信息。
+    """
     from app.database import SessionLocal
     from app.images import cache_external_image
+    from app.connectors.base import ConnectorError
 
-    local_thumb = cache_external_image(req.image_url)
+    # 1) 尝试拉详情（角色/标签/简介/封面），失败不阻塞入库
+    detail = None
+    conn = connector_registry.get_connector(req.source)
+    if conn is not None and "get_detail" in (conn.manifest.capabilities or []):
+        try:
+            detail = conn.get_detail(req.external_id)
+        except ConnectorError:
+            detail = None
+
+    title = detail.title if detail and detail.title else req.title
+    description = detail.description if detail and detail.description else req.description or ""
+    image_url = detail.image_url if detail and detail.image_url else req.image_url
+    tags = (detail.metadata.get("tags") or req.tags) if detail else req.tags
+    raw_metadata = None
+    if detail is not None:
+        # 统一 raw_metadata 结构（见 ADR 0016）：{"source","detail":{title,
+        # description,image_url,metadata(含 characters/rating/tags)}}
+        raw_metadata = {
+            "source": req.source,
+            "detail": {
+                "title": detail.title,
+                "description": detail.description,
+                "image_url": detail.image_url,
+                "metadata": detail.metadata,
+            },
+        }
+
+    local_thumb = cache_external_image(image_url)
     db = SessionLocal()
     try:
         obj = ingest.ingest_external(
             source=req.source,
             external_id=req.external_id,
-            title=req.title,
-            content=req.description or "",
-            image_url=req.image_url,
-            tags=req.tags,
+            title=title,
+            content=description,
+            image_url=image_url,
+            tags=tags,
+            raw_metadata=raw_metadata,
             db=db,
         )
+        # 幂等命中/详情回填：raw_metadata 有内容则覆盖（保证角色墙数据落库）
+        if raw_metadata is not None:
+            obj.raw_metadata = raw_metadata
+            db.commit()
+            db.refresh(obj)
         # 本地缩略图路径存到 file_path（与 image_url 区分：本地 vs 外部）
         if local_thumb and not obj.file_path:
             obj.file_path = local_thumb
@@ -596,6 +1103,128 @@ async def save_external(req: SaveExternalRequest):
         raise HTTPException(status_code=500, detail=f"收藏入库失败：{e}")
 
 
+def _detail_to_out(detail) -> ExternalDetailOut:
+    meta = detail.metadata or {}
+    return ExternalDetailOut(
+        source=detail.source,
+        title=detail.title,
+        external_id=detail.external_id,
+        description=detail.description or "",
+        image_url=detail.image_url,
+        rating=meta.get("rating"),
+        tags=meta.get("tags") or [],
+        characters=meta.get("characters") or [],
+        metadata=meta,
+    )
+
+
+@router.get("/external/detail", response_model=ExternalDetailOut)
+async def external_detail(source: str, external_id: str):
+    """live 拉取某数据源 get_detail（联合搜索结果点开详情用，不落库）。"""
+    conn = connector_registry.get_connector(source)
+    if conn is None or "get_detail" not in (conn.manifest.capabilities or []):
+        raise HTTPException(status_code=404, detail=f"数据源 {source} 不支持详情")
+    from app.connectors.base import ConnectorError
+    try:
+        detail = await run_in_threadpool(conn.get_detail, external_id)
+    except ConnectorError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return _detail_to_out(detail)
+
+
+@router.get("/items/{item_id}/detail", response_model=ItemDetailOut)
+async def item_detail(item_id: int, db: Session = Depends(get_db)):
+    """已收藏条目详情：从 raw_metadata 提炼 detail（含角色），供详情弹层。"""
+    item = db.get(Item, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="条目不存在")
+    raw = item.raw_metadata if isinstance(item.raw_metadata, dict) else None
+    detail = (raw or {}).get("detail")
+    if not isinstance(detail, dict):
+        detail = None
+    meta = detail.get("metadata") if isinstance(detail, dict) else {}
+    if not isinstance(meta, dict):
+        meta = {}
+    return ItemDetailOut(
+        id=item.id,
+        title=item.title,
+        source=item.source,
+        external_id=item.external_id,
+        image_url=item.image_url or (detail or {}).get("image_url"),
+        file_path=item.file_path,
+        description=(detail or {}).get("description") or item.content,
+        rating=meta.get("rating"),
+        my_rating=reviews.get_my_rating(item_id, db=db),
+        tags=[t.name for t in item.tags] or meta.get("tags") or [],
+        characters=meta.get("characters") or [],
+        raw_metadata=raw,
+        created_at=item.created_at,
+    )
+
+
+def _extract_characters(item: Item) -> list:
+    """从条目的 raw_metadata 提取角色列表（统一结构，见 ADR 0016）。"""
+    raw = item.raw_metadata
+    if not isinstance(raw, dict):
+        return []
+    detail = raw.get("detail")
+    if not isinstance(detail, dict):
+        return []
+    meta = detail.get("metadata")
+    if not isinstance(meta, dict):
+        return []
+    chars = meta.get("characters")
+    if isinstance(chars, list):
+        return [c for c in chars if isinstance(c, dict)]
+    return []
+
+
+def bangumi_import_backfill(limit: int = 10) -> bool:
+    """角色墙懒加载补详情（非阻塞后台单飞；单次最多补 limit 条）。"""
+    from app import bangumi_import
+    try:
+        return bangumi_import.backfill_async(limit=limit)
+    except Exception:
+        return False
+
+
+@router.get("/characters", response_model=CharactersResponse)
+async def list_characters(db: Session = Depends(get_db)):
+    """角色墙：跨已收藏外部作品聚合角色（按 source+角色id 去重合并作品）。
+
+    批量导入的 bangumi 条目没有角色详情，这里做**懒加载补详情**（后台非阻塞
+    单飞，受令牌桶限流约束分批推进），多次查看角色墙逐步补齐；本响应不等待
+    补详情完成，立即返回当前已聚合的角色。
+    """
+    bangumi_import_backfill()  # 非阻塞触发补详情
+    items = db.query(Item).filter(Item.source != "local").all()
+    by_char: dict = {}
+    for it in items:
+        for c in _extract_characters(it):
+            name = c.get("name")
+            if not name:
+                continue
+            key = (it.source, c.get("id") or name)
+            entry = by_char.setdefault(key, {
+                "id": c.get("id"),
+                "name": str(name),
+                "image_url": c.get("image_url"),
+                "relation": c.get("relation"),
+                "summary": c.get("summary") or "",
+                "actors": c.get("actors") or [],
+                "source": it.source,
+                "works": [],
+            })
+            entry["works"].append({
+                "item_id": it.id,
+                "title": it.title,
+                "image_url": it.image_url,
+                "source": it.source,
+            })
+    chars = sorted(by_char.values(), key=lambda c: c["name"])
+    return {"characters": chars}
+
+
 # ========== RAG 问答 ==========
 
 @router.post("/rag/query", response_model=RAGResponse)
@@ -614,6 +1243,12 @@ async def rag_query(q: QueryRequest):
         answer = await rag.generate_answer_non_stream(q.query, chunks)
     except EmbeddingError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except rag.AIAnswerDisabled as e:
+        # AI 问答未启用：返回明确的引导提示（非故障）
+        return RAGResponse(
+            answer=f"⚠️ {e}",
+            retrieved_chunks=[],
+        )
     except rag.LLMError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:

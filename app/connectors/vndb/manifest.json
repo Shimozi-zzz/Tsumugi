@@ -1,0 +1,11 @@
+{
+  "name": "vndb",
+  "display_name": "VNDB",
+  "version": "0.1.0",
+  "auth_type": "none",
+  "base_url": "https://api.vndb.org/kana",
+  "rate_limit": {
+    "requests_per_minute": 40
+  },
+  "capabilities": ["search", "get_detail"]
+}

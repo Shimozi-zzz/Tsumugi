@@ -12,4 +12,10 @@ export default defineConfig({
       "/static": { target: `http://localhost:${process.env.TSUMUGI_PORT || 8001}`, changeOrigin: true },
     },
   },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test/setup.js"],
+    css: false,
+  },
 });

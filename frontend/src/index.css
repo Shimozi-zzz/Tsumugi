@@ -1,285 +1,195 @@
 @import "tailwindcss";
 
 /* ============================================================
-   Tsumugi 主题系统
-   基于 CSS 变量：主题只需覆盖 --bg/--panel/--text/--accent 等。
-   html[data-theme="xxx"] 切换，前端通过 localStorage 记住选择。
-   保留主题：default（默认）、spring（春樱）、summer（夏空）。
+   Tsumugi 主题系统（收敛版，见 ADR 0020）
+   - 共享设计 token（间距/圆角/阴影/信息密度）只在 :root 定义一次，
+     三套主题只覆盖色彩变量，不各自改布局节奏；
+   - 视觉基调：低装饰、高信息密度、边框分隔为主、克制阴影、无大范围
+     磨砂模糊/渐变光斑；
+   - 自定义层：强调色色相微调（inline --accent*）、信息密度
+     （html[data-density]）、圆角大小（inline --radius-lg）。
    ============================================================ */
 
-:root,
-html[data-theme="default"] {
-  --bg: #fafaf9;          /* stone-50 */
+:root {
+  /* ---- 间距 ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* ---- 圆角（--radius-lg 为主表面圆角，自定义可 inline 覆盖） ---- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* ---- 阴影（克制：分隔用边框，阴影仅用于浮起/浮层） ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
+
+  /* ---- 信息密度（comfortable 默认；compact 在下方覆盖） ---- */
+  --d-card-gap: 16px;
+  --d-card-pad: 12px;
+  --d-card-title: 13px;
+  --d-grid-min: 160px;
+  --d-font: 14px;
+
+  /* ---- 经典白（默认主题，最克制） ---- */
+  --bg: #fafafa;
   --panel: #ffffff;
-  --panel-border: #e7e5e4;
-  --text: #1c1917;
-  --text-secondary: #78716c;
-  --accent: #4f46e5;      /* indigo-600 */
-  --accent-hover: #4338ca;
-  --accent-soft: #eef2ff;
+  --panel-border: #e8e8e8;
+  --text: #18181b;
+  --text-secondary: #71717a;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #eff6ff;
   --danger: #dc2626;
   --ok: #059669;
-  --tag-bg: #fef3c7;
-  --tag-text: #92400e;
+  --tag-bg: #f4f4f5;
+  --tag-text: #3f3f46;
   --input-bg: #ffffff;
-  --input-border: #d6d3d1;
-  --glass-radius: 16px;
-  /* 结构玻璃（三栏/卡片） */
-  --rail-bg: rgba(255, 255, 255, 0.72);
-  --card-bg: rgba(255, 255, 255, 0.72);
-  --card-thumb: linear-gradient(150deg, rgba(226, 232, 240, 0.6), rgba(226, 232, 240, 0.3));
-  --card-text: #1c1917;
+  --input-border: #e4e4e7;
+  --rail-bg: #fafafa;
+  --card-bg: #ffffff;
+  --card-thumb: linear-gradient(150deg, #f0f0f0, #e6e6e6);
+  --card-text: #18181b;
+}
+
+/* ---- 信息密度：紧凑档 ---- */
+html[data-density="compact"] {
+  --d-card-gap: 10px;
+  --d-card-pad: 8px;
+  --d-card-title: 12px;
+  --d-grid-min: 140px;
+  --d-font: 13px;
 }
 
 /* ============================================================
-   春樱（Sakura）—— 默认主题
-   45% 半透明白玻璃 + 樱粉细边框 + 深紫红文字 + 弥散光斑
+   薄荷绿 × 浅蓝（清醒）：强调=薄荷绿，次级信息=浅蓝
    ============================================================ */
-html[data-theme="spring"] {
-  --bg: #fff5f7;               /* 极浅樱粉底 */
-  --panel: rgba(255, 255, 255, 0.45);       /* 通透白玻璃 (45%) */
-  --panel-border: rgba(244, 114, 182, 0.20); /* 樱粉色极细微光边框 */
-  --text: #4a044e;             /* 深紫红文字（替代死黑） */
-  --text-secondary: #9d4edd;   /* 次要柔和文字 */
-  --accent: #ec4899;           /* 主点缀色 */
-  --accent-hover: #db2777;
-  --accent-soft: rgba(244, 114, 182, 0.12);
-  --danger: #be185d;
-  --ok: #059669;
-  --tag-bg: rgba(192, 132, 252, 0.12);
-  --tag-text: #9d4edd;
-  --input-bg: rgba(255, 255, 255, 0.5);
-  --input-border: rgba(244, 114, 182, 0.25);
-  --glass-radius: 20px;
-  /* 结构玻璃（三栏/卡片） */
-  --rail-bg: rgba(255, 255, 255, 0.45);    /* 导航栏/侧栏同款 45% 玻璃 */
-  --card-bg: rgba(255, 255, 255, 0.45);    /* 半透明白玻璃卡片 */
-  --card-thumb: linear-gradient(150deg, rgba(251, 207, 232, 0.45), rgba(192, 132, 252, 0.30)); /* 粉紫渐变占位 */
-  --card-text: #4a044e;                     /* 卡片深紫红文字 */
-}
-
-/* 春樱弥散光斑背景（毛玻璃透光的灵魂） */
-html[data-theme="spring"] body {
-  background:
-    radial-gradient(circle at 8% 10%, rgba(244, 114, 182, 0.28), transparent 60%),
-    radial-gradient(circle at 90% 12%, rgba(192, 132, 252, 0.22), transparent 60%),
-    radial-gradient(circle at 75% 88%, rgba(125, 211, 252, 0.16), transparent 55%),
-    linear-gradient(160deg, #fff7fa 0%, #fdeef4 55%, #f8ecff 100%);
-  background-attachment: fixed;
-}
-
-/* 春樱环境光斑（透过侧栏/卡片玻璃） */
-html[data-theme="spring"] .desk-ambient {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background:
-    radial-gradient(460px 340px at 5% 12%, rgba(244, 114, 182, 0.20), transparent 70%),
-    radial-gradient(520px 400px at 90% 15%, rgba(192, 132, 252, 0.18), transparent 70%),
-    radial-gradient(400px 320px at 70% 90%, rgba(125, 211, 252, 0.12), transparent 70%);
-  pointer-events: none;
-}
-
-/* 春樱玻璃覆盖：卡片/查询栏统一 45% 白玻璃 */
-html[data-theme="spring"] .desk-card {
-  background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.55),
-    0 4px 20px rgba(214, 120, 160, 0.10);
-}
-html[data-theme="spring"] .desk-card:hover {
-  border-color: rgba(236, 72, 153, 0.40);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.65),
-    0 0 0 1px rgba(236, 72, 153, 0.18),
-    0 10px 30px rgba(236, 72, 153, 0.14);
-}
-html[data-theme="spring"] .desk-askbar,
-html[data-theme="spring"] .desk-answer-card {
-  background: var(--panel);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
-}
-html[data-theme="spring"] .tsm-input {
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-html[data-theme="spring"] .tsm-source-badge {
-  background: rgba(236, 72, 153, 0.85);
-  color: #fff;
-  border-radius: 9999px;
-}
-
-/* ============================================================
-   夏空（Summer）—— 青空清爽
-   ============================================================ */
-html[data-theme="summer"] {
-  --bg: #f0f9ff;
+html[data-theme="mint"] {
+  --bg: #f4faf7;
   --panel: #ffffff;
-  --panel-border: #cff1ff;
-  --text: #0c3346;
-  --text-secondary: #4a7a94;
-  --accent: #0ea5e9;
-  --accent-hover: #0284c7;
-  --accent-soft: #e0f2fe;
+  --panel-border: #e0ece6;
+  --text: #12463f;
+  --text-secondary: #5f7b94;
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-soft: #ecfdf5;
   --danger: #dc2626;
   --ok: #059669;
   --tag-bg: #e0f2fe;
-  --tag-text: #075985;
+  --tag-text: #0369a1;
   --input-bg: #ffffff;
-  --input-border: #bae6fd;
-  --glass-radius: 20px;
-  /* 结构玻璃（三栏/卡片） */
-  --rail-bg: rgba(255, 255, 255, 0.6);
-  --card-bg: rgba(255, 255, 255, 0.6);
-  --card-thumb: linear-gradient(150deg, rgba(186, 230, 253, 0.5), rgba(224, 242, 254, 0.3));
-  --card-text: #0c3346;
-}
-
-/* 夏空弥散光斑背景 */
-html[data-theme="summer"] body {
-  background:
-    radial-gradient(circle at 10% 8%, rgba(56, 189, 248, 0.22), transparent 60%),
-    radial-gradient(circle at 88% 14%, rgba(125, 211, 252, 0.18), transparent 60%),
-    radial-gradient(circle at 72% 90%, rgba(224, 242, 254, 0.5), transparent 55%),
-    linear-gradient(160deg, #f0fbff 0%, #e8f7ff 55%, #f0faff 100%);
-  background-attachment: fixed;
-}
-
-html[data-theme="summer"] .desk-ambient {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background:
-    radial-gradient(460px 340px at 5% 12%, rgba(56, 189, 248, 0.16), transparent 70%),
-    radial-gradient(520px 400px at 90% 15%, rgba(125, 211, 252, 0.14), transparent 70%);
-  pointer-events: none;
-}
-
-html[data-theme="summer"] .desk-card {
-  background: var(--card-bg);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    0 4px 18px rgba(56, 130, 180, 0.10);
-}
-html[data-theme="summer"] .desk-card:hover {
-  border-color: rgba(14, 165, 233, 0.4);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.6),
-    0 0 0 1px rgba(14, 165, 233, 0.16),
-    0 10px 28px rgba(14, 165, 233, 0.14);
-}
-html[data-theme="summer"] .desk-askbar,
-html[data-theme="summer"] .desk-answer-card {
-  background: var(--panel);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
-}
-html[data-theme="summer"] .tsm-input {
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-html[data-theme="summer"] .tsm-source-badge {
-  background: rgba(14, 165, 233, 0.85);
-  color: #fff;
-  border-radius: 9999px;
+  --input-border: #d3e4dc;
+  --rail-bg: #f2f9f6;
+  --card-bg: #ffffff;
+  --card-thumb: linear-gradient(150deg, #d1fae5, #e0f2fe);
+  --card-text: #12463f;
 }
 
 /* ============================================================
-   夜紫书斋（Violet Obsidian）—— 深色暗夜
-   极深黑曜石底 + 紫色/靛蓝光晕 + 25% 黑紫毛玻璃 + 浅紫文字
+   樱花粉（ACG 向）：淡粉为主，克制，避免装饰堆砌
    ============================================================ */
-html[data-theme="violet-obsidian"] {
-  --bg: #090A0F;               /* 极深黑曜石底色 */
-  --panel: rgba(18, 14, 28, 0.45);       /* 半透明黑紫毛玻璃 */
-  --panel-border: rgba(168, 85, 247, 0.25); /* 紫色微光边框 */
-  --text: #f3e8ff;             /* 浅紫白（主文字） */
-  --text-secondary: #a855f7;   /* 荧光紫（次要/标签） */
-  --accent: #c084fc;           /* 高亮紫 */
-  --accent-hover: #d8b4fe;
-  --accent-soft: rgba(168, 85, 247, 0.16);
-  --danger: #f0abfc;
-  --ok: #86efac;
-  --tag-bg: rgba(168, 85, 247, 0.14);
-  --tag-text: #d8b4fe;
-  --input-bg: rgba(255, 255, 255, 0.05);
-  --input-border: rgba(168, 85, 247, 0.28);
-  --glass-radius: 20px;
-  /* 结构玻璃（三栏/卡片）——导航栏/侧栏 25% 黑紫玻璃 */
-  --rail-bg: rgba(18, 14, 28, 0.25);
-  --card-bg: rgba(24, 18, 38, 0.45);
-  --card-thumb: linear-gradient(135deg, rgba(88, 28, 135, 0.30) 0%, rgba(15, 23, 42, 0.50) 100%);
-  --card-text: #f3e8ff;
-}
-
-/* 夜紫弥散光斑背景（紫/靛蓝） */
-html[data-theme="violet-obsidian"] body {
-  background:
-    radial-gradient(circle at 4% 6%, rgba(147, 51, 234, 0.22), transparent 55%),
-    radial-gradient(circle at 94% 10%, rgba(79, 70, 229, 0.18), transparent 55%),
-    radial-gradient(circle at 78% 90%, rgba(168, 85, 247, 0.10), transparent 50%),
-    linear-gradient(160deg, #070810 0%, #0b0a14 50%, #0a0a12 100%);
-  background-attachment: fixed;
-}
-
-html[data-theme="violet-obsidian"] .desk-ambient {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background:
-    radial-gradient(560px 420px at 6% 10%, rgba(147, 51, 234, 0.20), transparent 70%),
-    radial-gradient(600px 460px at 90% 14%, rgba(79, 70, 229, 0.16), transparent 70%),
-    radial-gradient(420px 320px at 72% 90%, rgba(168, 85, 247, 0.10), transparent 70%);
-  pointer-events: none;
-}
-
-/* 夜紫玻璃覆盖：卡片/查询栏 */
-html[data-theme="violet-obsidian"] .desk-card {
-  background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  box-shadow:
-    inset 0 1px 0 rgba(216, 180, 254, 0.08),
-    0 4px 20px rgba(4, 4, 12, 0.5);
-}
-html[data-theme="violet-obsidian"] .desk-card:hover {
-  border-color: rgba(168, 85, 247, 0.45);
-  box-shadow:
-    inset 0 1px 0 rgba(216, 180, 254, 0.12),
-    0 0 0 1px rgba(168, 85, 247, 0.22),
-    0 12px 34px rgba(147, 51, 234, 0.20);
-}
-html[data-theme="violet-obsidian"] .desk-askbar,
-html[data-theme="violet-obsidian"] .desk-answer-card {
-  background: var(--panel);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  box-shadow: inset 0 1px 0 rgba(216, 180, 254, 0.08);
-}
-html[data-theme="violet-obsidian"] .tsm-input {
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-html[data-theme="violet-obsidian"] .tsm-source-badge {
-  background: rgba(192, 132, 252, 0.85);
-  color: #1b1024;
-  border-radius: 9999px;
+html[data-theme="sakura"] {
+  --bg: #fdf6f7;
+  --panel: #ffffff;
+  --panel-border: #f2dfe3;
+  --text: #451f2f;
+  --text-secondary: #9a6a7d;
+  --accent: #ec4899;
+  --accent-hover: #db2777;
+  --accent-soft: #fdf2f6;
+  --danger: #be185d;
+  --ok: #059669;
+  --tag-bg: #fce7f0;
+  --tag-text: #be185d;
+  --input-bg: #ffffff;
+  --input-border: #f0d8df;
+  --rail-bg: #fdf3f5;
+  --card-bg: #ffffff;
+  --card-thumb: linear-gradient(150deg, #fde7ef, #f5e6f5);
+  --card-text: #451f2f;
 }
 
 /* ============================================================
-   通用组件样式（所有主题共用，用 CSS 变量映射）
+   共享组件样式（所有主题统一，用 token）
    ============================================================ */
 
 body {
   background-color: var(--bg);
   color: var(--text);
+  font-size: var(--d-font);
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* 主表面：边框分隔为主 + 克制阴影；圆角走 --radius-lg（自定义可调） */
+.desk-card {
+  background: var(--card-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.desk-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border));
+}
+
+.desk-askbar,
+.desk-answer-card,
+.desk-searchbar {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.desk-nav {
+  background: var(--rail-bg);
+  border-right: 1px solid var(--panel-border);
+}
+
+.tsm-input {
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-md);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.tsm-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tsm-panel {
+  background-color: var(--panel);
+  border: 1px solid var(--panel-border);
+}
+.tsm-text-secondary {
+  color: var(--text-secondary);
+}
+.tsm-accent {
+  background-color: var(--accent);
+  color: #ffffff;
+}
+.tsm-accent:hover {
+  background-color: var(--accent-hover);
+}
+.tsm-accent-soft {
+  background-color: var(--accent-soft);
+}
+.tsm-danger {
+  color: var(--danger);
+}
+.tsm-tag {
+  background-color: var(--tag-bg);
+  color: var(--tag-text);
 }
 
 /* 历史记录下拉：丝滑展开动画 */
@@ -299,42 +209,148 @@ body {
   transition: opacity 0.25s ease;
 }
 
-/* 用户自定义背景图层：盖在主题背景之上、内容之下 */
 .app-root {
   position: relative;
 }
-.bg-custom-layer {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-}
 
-.tsm-panel {
-  background-color: var(--panel);
-  border-color: var(--panel-border);
+/* 文档渲染（书评 markdown 预览 / 列表展示），复用主题 token */
+.doc {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text);
 }
-.tsm-text-secondary {
+.doc h1, .doc h2, .doc h3 {
+  font-weight: 600;
+  margin: 0.9em 0 0.4em;
+  color: var(--text);
+  line-height: 1.4;
+}
+.doc h1 { font-size: 1.5em; }
+.doc h2 { font-size: 1.25em; }
+.doc h3 { font-size: 1.1em; }
+.doc p { margin: 0.5em 0; }
+.doc ul { list-style: disc; padding-left: 1.5em; margin: 0.5em 0; }
+.doc li { margin: 0.25em 0; }
+.doc code {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.doc pre {
+  background: var(--input-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  padding: 0.8em 1em;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.doc pre code { background: transparent; color: var(--text); padding: 0; }
+.doc blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1em;
+  margin: 0.6em 0;
   color: var(--text-secondary);
 }
-.tsm-accent {
-  background-color: var(--accent);
-  color: #ffffff;
+.doc a { color: var(--accent); }
+.doc del { color: var(--text-secondary); }
+
+/* ============================================================
+   沉浸式书评工作室（Review Studio）
+   Violet Obsidian 玻璃拟态：深紫透玻璃 + 1px 发光紫边框 + 模糊封面背景。
+   作用域独立（--rs-*），不影响全局主题收敛（ADR 0020）。
+   ============================================================ */
+.review-studio {
+  --rs-bg: rgba(10, 8, 20, 0.84);
+  --rs-panel: rgba(26, 20, 44, 0.52);
+  --rs-panel-strong: rgba(18, 14, 32, 0.72);
+  --rs-border: rgba(168, 85, 247, 0.3);
+  --rs-accent: #c084fc;
+  --rs-accent-soft: rgba(168, 85, 247, 0.18);
+  --rs-text: #f3e8ff;
+  --rs-text-secondary: #a78bfa;
+  color: var(--rs-text);
 }
-.tsm-accent:hover {
-  background-color: var(--accent-hover);
+.review-studio .rs-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(34px) saturate(1.2) brightness(0.6);
+  transform: scale(1.15);
 }
-.tsm-accent-soft {
-  background-color: var(--accent-soft);
+.review-studio .rs-overlay {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 90% at 15% 10%, rgba(88, 28, 135, 0.32), transparent 60%),
+    radial-gradient(120% 90% at 90% 85%, rgba(79, 70, 229, 0.20), transparent 55%),
+    linear-gradient(160deg, rgba(10, 8, 20, 0.55), rgba(12, 10, 24, 0.78));
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
-.tsm-danger {
-  color: var(--danger);
+.review-studio .rs-panel {
+  background: var(--rs-panel);
+  border: 1px solid var(--rs-border);
+  border-radius: 18px;
+  box-shadow:
+    0 0 0 1px rgba(168, 85, 247, 0.08),
+    0 24px 70px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(216, 180, 254, 0.08);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
 }
-.tsm-input {
-  background-color: var(--input-bg);
-  border-color: var(--input-border);
+.review-studio .rs-tab {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid transparent;
+  color: var(--rs-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
-.tsm-tag {
-  background-color: var(--tag-bg);
-  color: var(--tag-text);
+.review-studio .rs-tab.on {
+  background: var(--rs-accent-soft);
+  border-color: var(--rs-border);
+  color: var(--rs-text);
+}
+.review-studio .rs-field {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--rs-border);
+  border-radius: 10px;
+  color: var(--rs-text);
+}
+.review-studio .rs-field:focus {
+  outline: none;
+  border-color: var(--rs-accent);
+  box-shadow: 0 0 0 3px var(--rs-accent-soft);
+}
+/* 作用域内文档渲染：紫罗兰高对比 */
+.review-studio .doc { color: var(--rs-text); }
+.review-studio .doc h1,
+.review-studio .doc h2,
+.review-studio .doc h3 { color: var(--rs-text); }
+.review-studio .doc a { color: var(--rs-accent); }
+.review-studio .doc blockquote { color: var(--rs-text-secondary); border-left-color: var(--rs-accent); }
+.review-studio .doc code { background: var(--rs-accent-soft); color: var(--rs-accent); }
+.review-studio .doc pre { background: rgba(0, 0, 0, 0.35); border-color: var(--rs-border); }
+.review-studio .doc del { color: var(--rs-text-secondary); }
+/* 浮动引用卡 */
+.review-studio .rs-quote {
+  position: absolute;
+  left: 20px;
+  bottom: 86px;
+  max-width: 250px;
+  background: var(--rs-panel-strong);
+  border: 1px solid var(--rs-border);
+  border-left: 3px solid var(--rs-accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--rs-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }

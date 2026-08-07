@@ -113,6 +113,120 @@ class TestSearch:
         assert len(first) == 1
         assert first[0].external_id == "301"
 
+    def test_search_uses_post_with_keyword_body(self, monkeypatch):
+        # 代理打通后确认：Bangumi v0 搜索端点是 POST（GET 返回 404）
+        captured = {}
+
+        def fake_request(method, path, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            captured["json_body"] = kwargs.get("json_body")
+            return {"data": [SAMPLE_SUBJECT]}
+
+        conn = BangumiConnector()
+        monkeypatch.setattr(conn, "_request", fake_request)
+        monkeypatch.setattr(conn._cache, "get", lambda k, ttl=600: None)
+        monkeypatch.setattr(conn._cache, "set", lambda k, v: None)
+        conn.search("辉夜")
+        assert captured["method"] == "POST"
+        assert captured["path"] == "/v0/search/subjects"
+        assert captured["json_body"]["keyword"] == "辉夜"
+        assert captured["json_body"]["limit"] == 20
+
+    def test_search_post_includes_type_filter(self, monkeypatch):
+        captured = {}
+
+        def fake_request(method, path, **kwargs):
+            captured["json_body"] = kwargs.get("json_body")
+            return {"data": []}
+
+        conn = BangumiConnector()
+        monkeypatch.setattr(conn, "_request", fake_request)
+        monkeypatch.setattr(conn._cache, "get", lambda k, ttl=600: None)
+        monkeypatch.setattr(conn._cache, "set", lambda k, v: None)
+        conn.search("辉夜", type=2)
+        assert captured["json_body"]["filter"] == {"type": [2]}
+
+
+class TestBangumiDetailCharacters:
+    """get_detail 应拉取 /characters 并把角色规范化进 metadata（角色图鉴数据来源）。"""
+
+    SUBJECT = {
+        "id": 301, "name": "かぐや様は告らせたい", "name_cn": "辉夜大小姐想让我告白",
+        "summary": "学生会长与副会长互相算计的恋爱喜剧。",
+        "images": {"large": "https://lain.bgm.tv/pic/cover/l.jpg"},
+        "rating": {"score": 8.9},
+        "tags": [{"name": "恋爱"}, {"name": "搞笑"}],
+        "type": 2, "date": "2019-01-12",
+    }
+
+    CHARS = [
+        {
+            "id": 66899, "name": "四宫辉夜", "type": 1, "relation": "主角",
+            "images": {"small": "s.jpg", "grid": "g.jpg", "medium": "m.jpg", "large": "https://lain.bgm.tv/pic/crt/l/a.jpg"},
+            "summary": "本作主角。", "actors": [{"id": 1, "name": "古贺葵"}],
+        },
+        {
+            "id": 66900, "name": "白银御行", "type": 1, "relation": "主角",
+            "images": {"large": "https://lain.bgm.tv/pic/crt/l/b.jpg"},
+            "summary": "另一个主角。", "actors": [],
+        },
+        {"name": "无名角色"},  # 无 id 也保留（有名字）
+    ]
+
+    def _conn(self, monkeypatch):
+        conn = BangumiConnector()
+        monkeypatch.setattr(conn._cache, "get", lambda k, ttl=600: None)
+        monkeypatch.setattr(conn._cache, "set", lambda k, v: None)
+        return conn
+
+    def test_get_detail_includes_characters(self, monkeypatch):
+        conn = self._conn(monkeypatch)
+        calls = []
+
+        def fake_request(method, path, **kwargs):
+            calls.append(path)
+            if path.endswith("/characters"):
+                return self.CHARS
+            return self.SUBJECT
+
+        monkeypatch.setattr(conn, "_request", fake_request)
+        d = conn.get_detail("301")
+        assert any(p.endswith("/characters") for p in calls)
+        chars = d.metadata["characters"]
+        assert len(chars) == 3
+        assert chars[0]["name"] == "四宫辉夜"
+        assert chars[0]["image_url"] == "https://lain.bgm.tv/pic/crt/l/a.jpg"
+        assert chars[0]["relation"] == "主角"
+        assert chars[0]["actors"] == ["古贺葵"]
+        assert chars[2]["name"] == "无名角色"
+        assert d.metadata["rating"] == 8.9
+
+    def test_get_detail_characters_from_cache(self, monkeypatch):
+        conn = self._conn(monkeypatch)
+
+        def fake_get(k, ttl=600):
+            return [self.CHARS[0]] if k.startswith("detail_chars") else self.SUBJECT
+
+        monkeypatch.setattr(conn._cache, "get", fake_get)
+        d = conn.get_detail("301")
+        assert len(d.metadata["characters"]) == 1
+        assert d.metadata["characters"][0]["name"] == "四宫辉夜"
+
+    def test_get_detail_characters_failure_degrades(self, monkeypatch):
+        from app.connectors.base import ConnectorError
+        conn = self._conn(monkeypatch)
+
+        def fake_request(method, path, **kwargs):
+            if path.endswith("/characters"):
+                raise ConnectorError("characters 接口失败")
+            return self.SUBJECT
+
+        monkeypatch.setattr(conn, "_request", fake_request)
+        d = conn.get_detail("301")
+        assert d.metadata["characters"] == []
+        assert d.title == "辉夜大小姐想让我告白"  # 详情本身不因角色失败而坏
+
 
 class TestSaveExternal:
     def test_save_external_idempotent(self, db, fake_collection, patch_embeddings):
@@ -163,6 +277,15 @@ class TestDeclarativeConnector:
             "tags": "tags",
         },
     }
+
+    @pytest.fixture(autouse=True)
+    def _mock_dns_public(self, monkeypatch):
+        """SSRF 防护下，把测试域名的 DNS 解析 mock 为公网 IP（避免真解析）。"""
+        import socket
+        monkeypatch.setattr(
+            "app.connectors.ssrf.socket.getaddrinfo",
+            lambda host, port=None: [(2, 1, 6, "", ("8.8.8.8", 0))],
+        )
     SAMPLE_RESP = {
         "data": {
             "items": [

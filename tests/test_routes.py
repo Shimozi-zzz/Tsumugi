@@ -40,6 +40,20 @@ class TestItemRoutes:
         assert data["tags"] == ["RAG", "测试"]
         assert data["item_id"] > 0
 
+    def test_upload_txt_md(self, client):
+        # .txt.md（双扩展名文本文件，常见于部分笔记导出）应作为 markdown/note 导入，
+        # 且标题剥掉 .txt.md 整段扩展名
+        resp = client.post(
+            "/api/items/upload",
+            files={"file": ("notes.txt.md", io.BytesIO("# 标题\n\n正文内容。".encode("utf-8")), "text/markdown")},
+            data={"title": ""},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["type"] == "note"
+        assert data["chunks_count"] >= 1
+        assert data["title"] == "notes"
+
     def test_upload_unsupported_type(self, client):
         resp = client.post(
             "/api/items/upload",
@@ -481,3 +495,160 @@ def registry_register_myapi():
     from app.connectors.base import DeclarativeConnector
     config = dict(TestDeclarativeConnectorRoutes.CONFIG)
     r.register(DeclarativeConnector(config), enabled=True)
+
+
+class TestReviewRoutes:
+    def test_create_and_list(self, client):
+        item_id = _upload_md(client).json()["item_id"]
+        resp = client.post(f"/api/items/{item_id}/reviews", json={
+            "content": "这是一段很长的读后感内容。" * 30,
+            "title": "看完感想",
+            "rating": 8,
+            "status": "看完",
+            "spoiler": True,
+        })
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["rating"] == 8
+        assert data["status"] == "看完"
+        assert data["spoiler"] is True
+        assert data["item_title"] == "测试文档"
+
+        listing = client.get(f"/api/items/{item_id}/reviews").json()
+        assert len(listing) == 1
+        assert listing[0]["id"] == data["id"]
+
+    def test_review_font_size_persists(self, client):
+        item_id = _upload_md(client).json()["item_id"]
+        rid = client.post(f"/api/items/{item_id}/reviews", json={
+            "content": "书评内容", "font_size": 18,
+        }).json()["id"]
+        assert client.get(f"/api/items/{item_id}/reviews").json()[0]["font_size"] == 18
+        client.patch(f"/api/reviews/{rid}", json={"font_size": 20})
+        assert client.get(f"/api/items/{item_id}/reviews").json()[0]["font_size"] == 20
+
+    def test_create_invalid_status(self, client):
+        item_id = _upload_md(client).json()["item_id"]
+        resp = client.post(f"/api/items/{item_id}/reviews", json={
+            "content": "内容", "status": "未知",
+        })
+        assert resp.status_code == 400
+
+    def test_create_missing_item(self, client):
+        resp = client.post("/api/items/99999/reviews", json={"content": "内容"})
+        assert resp.status_code == 400
+
+    def test_update_review(self, client):
+        item_id = _upload_md(client).json()["item_id"]
+        rid = client.post(f"/api/items/{item_id}/reviews", json={"content": "旧内容" * 20}).json()["id"]
+        resp = client.patch(f"/api/reviews/{rid}", json={"content": "新内容完全不同" * 30, "rating": 9, "spoiler": True})
+        assert resp.status_code == 200
+        assert resp.json()["content"] != "旧内容" * 20
+        assert resp.json()["rating"] == 9
+        assert resp.json()["spoiler"] is True
+
+    def test_delete_review(self, client):
+        item_id = _upload_md(client).json()["item_id"]
+        rid = client.post(f"/api/items/{item_id}/reviews", json={"content": "内容" * 20}).json()["id"]
+        assert client.delete(f"/api/reviews/{rid}").status_code == 200
+        assert client.get(f"/api/items/{item_id}/reviews").json() == []
+        assert client.delete(f"/api/reviews/{rid}").status_code == 404
+
+    def test_review_visible_in_search(self, client):
+        item_id = _upload_md(client).json()["item_id"]
+        client.post(f"/api/items/{item_id}/reviews", json={
+            "content": "关于量子纠缠结局的深度伏笔分析" * 20, "title": "结局分析",
+        })
+        resp = client.post("/api/search", json={"query": "量子纠缠伏笔", "top_k": 5})
+        assert resp.status_code == 200
+        review_hits = [r for r in resp.json()["results"] if r.get("source_type") == "review"]
+        assert review_hits
+        assert review_hits[0]["review_id"] is not None
+
+    def test_global_reviews_list(self, client):
+        i1 = _upload_md(client, title="文档A").json()["item_id"]
+        i2 = _upload_md(client, title="文档B").json()["item_id"]
+        client.post(f"/api/items/{i1}/reviews", json={"content": "内容一" * 10})
+        client.post(f"/api/items/{i2}/reviews", json={"content": "内容二" * 10})
+        allr = client.get("/api/reviews").json()
+        assert len(allr) == 2
+
+    def test_public_rating_for_external_item(self, client):
+        resp = client.post("/api/items/save-external", json={
+            "source": "bangumi", "external_id": "301", "title": "辉夜",
+            "description": "简介", "image_url": "https://x/img.jpg",
+        })
+        item_id = resp.json()["item_id"]
+        # raw_metadata 需要带 rating
+        from app.database import SessionLocal
+        from app.models import Item
+        db = SessionLocal()
+        it = db.get(Item, item_id)
+        it.raw_metadata = {"rating": {"score": 8.9}}
+        db.commit()
+        db.close()
+
+        rid = client.post(f"/api/items/{item_id}/reviews", json={"content": "我的评分" * 10, "rating": 7}).json()["id"]
+        detail = client.patch(f"/api/reviews/{rid}", json={}).json()
+        assert detail["public_rating"] == 8.9
+        assert detail["rating"] == 7
+
+    def test_item_detail_includes_my_rating_aggregate(self, client):
+        resp = client.post("/api/items/save-external", json={
+            "source": "bangumi", "external_id": "302", "title": "另一部",
+            "description": "简介",
+        })
+        item_id = resp.json()["item_id"]
+        client.post(f"/api/items/{item_id}/reviews", json={"content": "r1" * 10, "rating": 6})
+        client.post(f"/api/items/{item_id}/reviews", json={"content": "r2" * 10, "rating": 8})
+        client.post(f"/api/items/{item_id}/reviews", json={"content": "r3" * 10})  # 未打分
+        d = client.get(f"/api/items/{item_id}/detail").json()
+        assert d["my_rating"] == 7.0  # (6+8)/2，忽略未打分
+        assert "file_path" in d  # 本地缓存封面字段（安利卡导出用）
+
+
+class TestBatchOps:
+    """批量打标签 / 批量删除 / 单条标签（交互打磨）"""
+
+    def _mk(self, client, title, tags=None):
+        return client.post("/api/items", json={
+            "title": title, "type": "note", "content": f"{title} 的内容", "tag_names": tags or [],
+        }).json()["item_id"]
+
+    def test_batch_add_tags(self, client):
+        i1 = self._mk(client, "甲")
+        i2 = self._mk(client, "乙")
+        r = client.post("/api/items/batch/tags", json={
+            "item_ids": [i1, i2], "tag_names": ["批量", "收藏"], "mode": "add",
+        })
+        assert r.status_code == 200
+        assert r.json()["updated"] == 2
+        d1 = client.get(f"/api/items/{i1}").json()
+        assert set(d1["tags"]) == {"批量", "收藏"}
+
+    def test_batch_set_and_remove_tags(self, client):
+        i1 = self._mk(client, "丙", tags=["旧A", "旧B"])
+        client.post("/api/items/batch/tags", json={"item_ids": [i1], "tag_names": ["新"], "mode": "set"})
+        d = client.get(f"/api/items/{i1}").json()
+        assert d["tags"] == ["新"]
+        client.post("/api/items/batch/tags", json={"item_ids": [i1], "tag_names": ["新"], "mode": "remove"})
+        assert client.get(f"/api/items/{i1}").json()["tags"] == []
+
+    def test_batch_delete(self, client):
+        i1 = self._mk(client, "丁")
+        i2 = self._mk(client, "戊")
+        r = client.post("/api/items/batch/delete", json={"item_ids": [i1, i2]})
+        assert r.json()["deleted"] == 2
+        assert client.get(f"/api/items/{i1}").status_code == 404
+        assert client.get(f"/api/items/{i2}").status_code == 404
+
+    def test_batch_delete_empty_ok(self, client):
+        assert client.post("/api/items/batch/delete", json={"item_ids": []}).json()["deleted"] == 0
+
+    def test_single_item_tags(self, client):
+        i1 = self._mk(client, "己")
+        r = client.post(f"/api/items/{i1}/tags", json={"tag_names": ["单个"], "mode": "add"})
+        assert r.status_code == 200
+        assert "单个" in r.json()["tags"]
+        # 不存在的条目
+        assert client.post("/api/items/99999/tags", json={"tag_names": ["x"]}).status_code == 404

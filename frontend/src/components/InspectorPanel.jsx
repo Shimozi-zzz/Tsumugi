@@ -123,7 +123,7 @@ export default function InspectorPanel() {
 
   return (
     <div className="desk-askbar rounded-2xl p-5"
-      style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", backdropFilter: "blur(16px)" }}>
+      style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-medium tracking-wide">Text &amp; Vector Storage Inspector</h3>

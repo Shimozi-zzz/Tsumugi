@@ -1,6 +1,6 @@
 """Pydantic schemas - API 请求/响应的数据验证"""
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -93,9 +93,152 @@ class ItemFilter(BaseModel):
     source: Optional[str] = None
 
 
+# ---------------------------------------------------------------- 批量操作 / 单条标签（交互打磨）
+
+class ItemTagsRequest(BaseModel):
+    """给单个条目增/删/设置标签。"""
+    tag_names: List[str] = []
+    mode: str = "add"  # add | remove | set
+
+
+class BatchTagsRequest(BaseModel):
+    """批量打标签（对选中的多个条目）。"""
+    item_ids: List[int]
+    tag_names: List[str] = []
+    mode: str = "add"  # add | remove | set
+
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除条目（需前端二次确认）。"""
+    item_ids: List[int]
+
+
+# ---------------------------------------------------------------- Bangumi OAuth / 批量导入
+
+class BangumiOAuthConfig(BaseModel):
+    """Bangumi 应用凭证（client_id/client_secret，写入 .env 不落库）。"""
+    client_id: str
+    client_secret: str
+
+
+class BangumiOAuthStatusOut(BaseModel):
+    connected: bool
+    config_configured: bool
+    user_id: Optional[str] = None
+    expires_at: Optional[float] = None
+    redirect_uri: Optional[str] = None
+
+
+class BangumiAuthorizeOut(BaseModel):
+    authorize_url: str
+    redirect_uri: str
+
+
+class BangumiImportStartOut(BaseModel):
+    job_id: str
+
+
+class BangumiImportStatusOut(BaseModel):
+    job_id: str
+    state: str  # pending | running | done | error
+    total: int = 0
+    current: int = 0
+    imported: int = 0
+    skipped: int = 0
+    failed: int = 0
+    failures: List[str] = []
+    message: str = ""
+
+
 class ItemListResponse(BaseModel):
     total: int
     items: List["ItemOut"]
+
+
+# ---------------------------------------------------------------- 外部详情 / 角色墙（角色图鉴）
+
+class ExternalDetailOut(BaseModel):
+    """connector.get_detail 的 live 返回（联合搜索结果点开详情用）。"""
+    source: str
+    title: str
+    external_id: str
+    description: str = ""
+    image_url: Optional[str] = None
+    rating: Optional[float] = None
+    tags: List[str] = []
+    characters: List[dict] = []  # {id,name,image_url,relation,summary,actors}
+    metadata: Dict[str, Any] = {}
+
+
+class ItemDetailOut(BaseModel):
+    """已收藏条目详情（含 raw_metadata 提炼出的 detail，供前端详情弹层）。"""
+    id: int
+    title: str
+    source: str
+    external_id: Optional[str] = None
+    image_url: Optional[str] = None
+    file_path: Optional[str] = None  # 本地缓存封面（/static 同源，安利卡导出用）
+    description: Optional[str] = None
+    rating: Optional[float] = None  # 外部数据源公众评分（如 Bangumi）
+    my_rating: Optional[float] = None  # 该 item 全部 Review 评分的均值（无打分=null）
+    tags: List[str] = []
+    characters: List[dict] = []
+    raw_metadata: Optional[dict] = None
+    created_at: Optional[datetime] = None
+
+
+class CharacterOut(BaseModel):
+    """角色墙条目：跨作品聚合后的角色。"""
+    id: Optional[int] = None
+    name: str
+    image_url: Optional[str] = None
+    relation: Optional[str] = None
+    summary: str = ""
+    actors: List[str] = []
+    source: str
+    works: List[dict] = []  # [{item_id, title, image_url, source}]
+
+
+class CharactersResponse(BaseModel):
+    characters: List[CharacterOut]
+
+
+# ---------------------------------------------------------------- Review（读后感）
+
+class ReviewCreate(BaseModel):
+    """创建 review。"""
+    content: str
+    title: Optional[str] = None
+    rating: Optional[int] = None  # 0-10
+    status: Optional[str] = None  # 想看/在看/看完/搁置/弃坑
+    spoiler: bool = False
+    font_size: Optional[int] = None  # 编辑器字号（px）
+
+
+class ReviewUpdate(BaseModel):
+    """编辑 review（全字段可选，缺省不变）。"""
+    content: Optional[str] = None
+    title: Optional[str] = None
+    rating: Optional[int] = None
+    status: Optional[str] = None
+    spoiler: Optional[bool] = None
+    font_size: Optional[int] = None
+
+
+class ReviewOut(BaseModel):
+    """review 响应（含关联 item 摘要与大众评分对比）。"""
+    id: int
+    item_id: int
+    item_title: str = ""
+    title: Optional[str] = None
+    content: str
+    rating: Optional[int] = None
+    status: Optional[str] = None
+    spoiler: bool = False
+    font_size: Optional[int] = None
+    public_rating: Optional[float] = None  # 外部数据源大众评分（如 Bangumi）
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class RetrievedChunk(BaseModel):
@@ -104,6 +247,10 @@ class RetrievedChunk(BaseModel):
     item_id: int
     score: float
     tags: List[str] = []
+    # Review 接入 RAG 后区分来源：source_type="item"|"review"，review_id 对应 review
+    source_type: str = "item"
+    review_id: Optional[int] = None
+    review_title: Optional[str] = None
 
 
 class SearchResponse(BaseModel):
@@ -163,8 +310,55 @@ class DeclarativeConnectorConfig(BaseModel):
     version: Optional[str] = "0.1.0"
 
 
+class ConnectorProxyRequest(BaseModel):
+    """设置 Connector 出站代理。proxy_url 留空/空串 = 清除（直连）。"""
+    proxy_url: Optional[str] = None
+
+
 # ---------------------------------------------------------------- RAG
 
 class RAGResponse(BaseModel):
     answer: str
     retrieved_chunks: List[RetrievedChunk]
+
+
+# ---------------------------------------------------------------- LLM Provider（可插拔化）
+
+class LLMProviderCreate(BaseModel):
+    """保存 provider 配置。api_key 用环境变量占位符（如 {MY_KEY}）。"""
+    name: str
+    provider_type: str = "openai_compatible"  # "openai_compatible" | "ollama"
+    base_url: str
+    model_id: str
+    api_key_ref: Optional[str] = None
+    enabled: bool = False
+
+
+class LLMProviderOut(BaseModel):
+    """provider 响应（不下发明文 key，仅占位符）。"""
+    id: int
+    name: str
+    provider_type: str
+    base_url: str
+    model_id: str
+    api_key_ref: Optional[str] = None
+    enabled: bool = False
+
+
+class LLMProviderList(BaseModel):
+    providers: List[LLMProviderOut] = []
+    enabled_name: Optional[str] = None
+
+
+class LLMTestRequest(BaseModel):
+    """测试连接：可针对已保存配置或临时配置。"""
+    name: Optional[str] = None  # 已保存的 provider 名
+    provider_type: Optional[str] = None
+    base_url: Optional[str] = None
+    model_id: Optional[str] = None
+    api_key_ref: Optional[str] = None
+
+
+class LLMTestResponse(BaseModel):
+    ok: bool
+    message: str

@@ -1,0 +1,175 @@
+"""角色图鉴：收藏入库存 detail raw_metadata、角色墙聚合、详情端点"""
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.api.routes import router
+from app.connectors import registry
+from app.connectors.base import ConnectorError, ConnectorManifest, ItemDetail
+from app.database import get_db
+from app import ingest
+
+
+CHAR_HUIYE = {"id": 66899, "name": "四宫辉夜", "image_url": "https://img/huiye.jpg",
+              "relation": "主角", "summary": "学生会副会长。", "actors": ["古贺葵"]}
+CHAR_SHIRAGAMI = {"id": 66900, "name": "白银御行", "image_url": "https://img/shiragami.jpg",
+                  "relation": "主角", "summary": "学生会长。", "actors": []}
+CHAR_FUJIWARA = {"id": 67408, "name": "藤原千花", "image_url": "https://img/fuji.jpg",
+                 "relation": "主角", "summary": "学生会书记。", "actors": []}
+
+
+class FakeDetailConnector:
+    """注册进 registry 的假 Connector：get_detail 返回固定详情（角色数据）。"""
+    name = "fakebg"
+    manifest = ConnectorManifest(name="fakebg", display_name="Fake", version="0.1.0",
+                                 base_url="https://api.bgm.tv",
+                                 capabilities=["search", "get_detail"])
+    proxy_url = None
+    get_detail_calls = 0
+
+    def search(self, query, **filters):
+        return []
+
+    def get_detail(self, external_id):
+        type(self).get_detail_calls += 1
+        if external_id == "A":
+            return ItemDetail(
+                source="fakebg", title="辉夜大小姐A", external_id="A",
+                description="详细简介A。", image_url="https://img/a.jpg",
+                metadata={"rating": 8.9, "tags": ["恋爱"], "characters": [CHAR_HUIYE, CHAR_SHIRAGAMI]},
+            )
+        return ItemDetail(
+            source="fakebg", title="辉夜大小姐B", external_id="B",
+            description="详细简介B。", image_url="https://img/b.jpg",
+            metadata={"rating": 9.0, "tags": ["搞笑"], "characters": [CHAR_HUIYE, CHAR_FUJIWARA]},
+        )
+
+
+class SearchOnlyConnector:
+    name = "searchonly"
+    manifest = ConnectorManifest(name="searchonly", display_name="Search", version="0.1.0",
+                                 base_url="https://api.example.com", capabilities=["search"])
+    proxy_url = None
+
+    def search(self, query, **filters):
+        return []
+
+
+@pytest.fixture(scope="function")
+def client(db, fake_collection, patch_embeddings):
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    FakeDetailConnector.get_detail_calls = 0
+    registry.register(FakeDetailConnector())
+    registry.register(SearchOnlyConnector())
+    try:
+        yield TestClient(app)
+    finally:
+        registry.unregister("fakebg")
+        registry.unregister("searchonly")
+
+
+def _save(client, external_id):
+    return client.post("/api/items/save-external", json={
+        "source": "fakebg", "external_id": external_id,
+        "title": "搜索级标题", "description": "搜索级简介",
+        "image_url": "https://img/search.jpg", "tags": ["搜索标签"],
+    })
+
+
+class TestSaveExternalDetail:
+    def test_save_stores_detail_raw_metadata(self, client):
+        r = _save(client, "A")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["title"] == "辉夜大小姐A"  # detail 标题覆盖搜索级
+        assert data["tags"] == ["恋爱"]  # detail 标签覆盖搜索标签
+
+        # 从库里读回 raw_metadata
+        item = client.get(f"/api/items/{data['item_id']}/detail").json()
+        assert item["rating"] == 8.9
+        assert [c["name"] for c in item["characters"]] == ["四宫辉夜", "白银御行"]
+        raw = item["raw_metadata"]
+        assert raw["detail"]["metadata"]["characters"][0]["actors"] == ["古贺葵"]
+
+    def test_save_detail_failure_degrades(self, client, monkeypatch):
+        def boom(self, external_id):
+            raise ConnectorError("详情拉取失败")
+
+        monkeypatch.setattr(FakeDetailConnector, "get_detail", boom)
+        r = _save(client, "A")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["title"] == "搜索级标题"  # 降级到搜索级
+        item = client.get(f"/api/items/{data['item_id']}/detail").json()
+        assert item["characters"] == []
+        assert item["raw_metadata"] is None
+
+    def test_save_idempotent_backfills_legacy_item(self, client, db, fake_collection, patch_embeddings):
+        # 旧条目（无 raw_metadata）：重新收藏后回填详情
+        legacy = ingest.ingest_external(
+            source="fakebg", external_id="LEGACY", title="旧条目",
+            content="旧简介", db=db,
+        )
+        assert legacy.raw_metadata is None
+        r = client.post("/api/items/save-external", json={
+            "source": "fakebg", "external_id": "LEGACY", "title": "搜索级标题",
+        })
+        assert r.status_code == 200
+        db.expire_all()  # 共享 session 的 identity map 可能缓存旧对象
+        item = client.get(f"/api/items/{legacy.id}/detail").json()
+        assert item["raw_metadata"] is not None
+        assert len(item["characters"]) == 2
+
+
+class TestCharactersWall:
+    def test_aggregates_characters_across_works(self, client):
+        _save(client, "A")
+        _save(client, "B")
+        r = client.get("/api/characters")
+        assert r.status_code == 200
+        chars = r.json()["characters"]
+        by_name = {c["name"]: c for c in chars}
+        # 四宫辉夜跨两部作品 → 合并
+        assert by_name["四宫辉夜"]["works"] == [
+            {"item_id": w["item_id"], "title": w["title"], "image_url": w["image_url"], "source": w["source"]}
+            for w in by_name["四宫辉夜"]["works"]
+        ]
+        assert len(by_name["四宫辉夜"]["works"]) == 2
+        assert by_name["四宫辉夜"]["actors"] == ["古贺葵"]
+        assert len(by_name["白银御行"]["works"]) == 1
+        assert len(by_name["藤原千花"]["works"]) == 1
+        assert by_name["四宫辉夜"]["relation"] == "主角"
+
+    def test_empty_when_no_saved_external(self, client):
+        r = client.get("/api/characters")
+        assert r.json()["characters"] == []
+
+
+class TestDetailEndpoints:
+    def test_external_detail_live(self, client):
+        before = FakeDetailConnector.get_detail_calls
+        r = client.get("/api/external/detail", params={"source": "fakebg", "external_id": "B"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["title"] == "辉夜大小姐B"
+        assert body["rating"] == 9.0
+        assert len(body["characters"]) == 2
+        assert FakeDetailConnector.get_detail_calls == before + 1
+
+    def test_external_detail_unsupported_source(self, client):
+        r = client.get("/api/external/detail", params={"source": "searchonly", "external_id": "1"})
+        assert r.status_code == 404
+
+    def test_external_detail_unknown_source(self, client):
+        r = client.get("/api/external/detail", params={"source": "nope", "external_id": "1"})
+        assert r.status_code == 404
+
+    def test_item_detail_404(self, client):
+        r = client.get("/api/items/99999/detail")
+        assert r.status_code == 404

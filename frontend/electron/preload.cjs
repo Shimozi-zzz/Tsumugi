@@ -4,6 +4,6 @@
 const { contextBridge } = require("electron");
 
 contextBridge.exposeInMainWorld("tsumugiBridge", {
-  apiBase: "http://127.0.0.1:8001",
+  apiBase: "http://127.0.0.1:8001/api",
   isClient: true,
 });
