@@ -75,7 +75,7 @@ html[data-theme="mint"] {
   --panel: #ffffff;
   --panel-border: #e0ece6;
   --text: #12463f;
-  --text-secondary: #5f7b94;
+  --text-secondary: #54707f;  /* WCAG AA：在 #f4faf7 上对比度 ≥4.5:1 */
   --accent: #10b981;
   --accent-hover: #059669;
   --accent-soft: #ecfdf5;
@@ -99,7 +99,7 @@ html[data-theme="sakura"] {
   --panel: #ffffff;
   --panel-border: #f2dfe3;
   --text: #451f2f;
-  --text-secondary: #9a6a7d;
+  --text-secondary: #8a5a6e;  /* WCAG AA：在 #fdf6f7 上对比度 ≥4.5:1 */
   --accent: #ec4899;
   --accent-hover: #db2777;
   --accent-soft: #fdf2f6;
@@ -260,8 +260,7 @@ body {
    沉浸式书评工作室（Review Studio）
    Violet Obsidian 玻璃拟态：深紫透玻璃 + 1px 发光紫边框 + 模糊封面背景。
    作用域独立（--rs-*），不影响全局主题收敛（ADR 0020）。
-   ============================================================ */
-.review-studio {
+   ============================================================ */.review-studio {
   --rs-bg: rgba(10, 8, 20, 0.84);
   --rs-panel: rgba(26, 20, 44, 0.52);
   --rs-panel-strong: rgba(18, 14, 32, 0.72);
@@ -353,4 +352,21 @@ body {
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+}
+
+/* 低端设备/不支持 backdrop-filter 时：回退为高不透明紫黑面板（避免黑块/拖慢） */
+@supports not (backdrop-filter: blur(1px)) {
+  .review-studio .rs-panel { background: rgba(24, 18, 40, 0.92); }
+  .review-studio .rs-quote { background: rgba(18, 14, 32, 0.96); }
+  .review-studio .rs-overlay { backdrop-filter: none; }
+}
+
+/* 图片加载淡入：封面/角色图避免加载完成瞬间"啪"地出现 */
+@keyframes rs-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.desk-card img,
+.review-studio img {
+  animation: rs-fade-in 0.4s ease;
 }

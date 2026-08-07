@@ -9,6 +9,7 @@ import {
   saveConnectorProxy, testConnectorProxy,
   fetchCharacters, fetchItemDetail, fetchExternalDetail,
   batchTagItems, batchDeleteItems, setItemTags,
+  fetchLLMProviders,
 } from "../api.js";
 import InspectorPanel from "./InspectorPanel.jsx";
 import ReviewStudio from "./ReviewStudio.jsx";
@@ -101,6 +102,15 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   }, [libView]);
   // 角色墙刷新计数（收藏新作品后 +1）
   const [charRefreshKey, setCharRefreshKey] = useState(0);
+  // AI 问答状态灯：当前启用的 Provider（null=加载中）
+  const [aiStatus, setAiStatus] = useState(null);
+  const loadAiStatus = () => fetchLLMProviders()
+    .then((d) => setAiStatus({ enabled: !!d.enabled_name, name: d.enabled_name }))
+    .catch(() => setAiStatus({ enabled: false, name: null }));
+  useEffect(() => { loadAiStatus(); }, []);
+  useEffect(() => {
+    if (section === "ask") loadAiStatus(); // 进问答区时刷新
+  }, [section]);
   // 批量选择模式
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -1233,7 +1243,18 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   <button onClick={handleAsk} disabled={asking || !query.trim()}
                     className="text-sm px-4 py-1.5 rounded-full shrink-0 disabled:opacity-40 font-medium"
                     style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
-                    {asking ? "…" : "提问"}
+                    {asking ? "思考中…" : "提问"}
+                  </button>
+                  {/* AI 状态灯 */}
+                  <button onClick={loadAiStatus} title="AI 问答状态（点击刷新）"
+                    className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px]"
+                    style={{
+                      backgroundColor: aiStatus?.enabled ? "var(--tag-bg)" : "rgba(245,158,11,0.14)",
+                      color: aiStatus?.enabled ? "var(--tag-text)" : "#b45309",
+                    }}>
+                    <span className="w-1.5 h-1.5 rounded-full"
+                      style={{ backgroundColor: aiStatus?.enabled ? "var(--ok)" : "#f59e0b" }} />
+                    {aiStatus === null ? "AI…" : aiStatus.enabled ? `AI: ${aiStatus.name}` : "AI 未启用"}
                   </button>
                 </div>
 
