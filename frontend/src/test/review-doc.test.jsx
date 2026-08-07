@@ -40,7 +40,7 @@ describe("renderMarkdown", () => {
 
 describe("ReviewStudio 沉浸式书写", () => {
   beforeEach(() => { localStorage.clear(); });
-  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+  afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); document.documentElement.removeAttribute("data-theme"); });
 
   const DETAIL = {
     id: 7, title: "某作品", source: "bangumi", image_url: null, file_path: null,
@@ -121,5 +121,48 @@ describe("ReviewStudio 沉浸式书写", () => {
     await waitFor(() => screen.getByText("Archive"));
     fireEvent.click(screen.getByText("Archive"));
     await waitFor(() => expect(screen.getByText("库丽丝")).toBeTruthy());
+  });
+
+  it("三套主题下渲染且接入主题 token（无紫罗兰硬编码）", async () => {
+    for (const theme of ["default", "mint", "sakura"]) {
+      cleanup();
+      document.documentElement.setAttribute("data-theme", theme);
+      mockFetch();
+      render(<ReviewStudio item={{ id: 7, title: "某作品" }} onClose={() => {}} />);
+      const root = document.querySelector(".review-studio");
+      expect(root).toBeTruthy();
+      const html = root.outerHTML;
+      // 上一轮的独立紫罗兰视觉已移除：不再有 --rs-* 变量与硬编码紫色
+      expect(html).not.toContain("--rs-");
+      expect(html).not.toContain("c084fc");
+      // 接入全局主题 token
+      expect(html).toContain("var(--text)");
+      expect(html).toContain("var(--accent)");
+      expect(html).toContain("var(--panel-border)");
+    }
+  });
+
+  it("进入过渡与关闭过渡：先加 closing 类，再调用 onClose", async () => {
+    const onClose = vi.fn();
+    mockFetch();
+    render(<ReviewStudio item={{ id: 7, title: "某作品" }} onClose={onClose} />);
+    await waitFor(() => document.querySelector("textarea[placeholder*='支持 Markdown']"));
+    // 进入：根元素带 rs-enter 动画类
+    expect(document.querySelector(".review-studio").className).toContain("review-studio");
+    fireEvent.click(screen.getByText("← 返回"));
+    expect(document.querySelector(".review-studio").className).toContain("closing");
+    expect(onClose).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 250));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("字数进度条随内容增长", async () => {
+    mockFetch();
+    await openStudio();
+    const fill = document.querySelector(".rs-progress-fill");
+    expect(fill.style.width).toBe("0%");
+    fireEvent.change(document.querySelector("textarea[placeholder*='支持 Markdown']"),
+      { target: { value: "x".repeat(250) } });
+    expect(document.querySelector(".rs-progress-fill").style.width).toBe("50%");
   });
 });

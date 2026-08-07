@@ -257,108 +257,102 @@ body {
 .doc del { color: var(--text-secondary); }
 
 /* ============================================================
-   沉浸式书评工作室（Review Studio）
-   Violet Obsidian 玻璃拟态：深紫透玻璃 + 1px 发光紫边框 + 模糊封面背景。
-   作用域独立（--rs-*），不影响全局主题收敛（ADR 0020）。
-   ============================================================ */.review-studio {
-  --rs-bg: rgba(10, 8, 20, 0.84);
-  --rs-panel: rgba(26, 20, 44, 0.52);
-  --rs-panel-strong: rgba(18, 14, 32, 0.72);
-  --rs-border: rgba(168, 85, 247, 0.3);
-  --rs-accent: #c084fc;
-  --rs-accent-soft: rgba(168, 85, 247, 0.18);
-  --rs-text: #f3e8ff;
-  --rs-text-secondary: #a78bfa;
-  color: var(--rs-text);
+   书评工作室（Review Studio）——排版驱动的沉浸感
+   上一轮"Violet Obsidian 玻璃拟态"是脱离主题收敛的第四套风格（ADR 0020
+   明确反对各自为政），本轮改为**接入全局主题 token**：主题底色 + 细边框 +
+   克制阴影 + 主题圆角，切换主题工作室自然跟着变。信息架构（左参考区四标签
+   + 右编辑器）不变，只换视觉语言；正文用衬线字体 + 舒适阅读宽度 + 1.78
+   行高制造"写作空间"的质感（区别于界面其余无衬线）。
+   ============================================================ */
+.review-studio {
+  color: var(--text);
+  background: var(--bg);
+  animation: rs-enter 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
+.review-studio.closing {
+  animation: rs-leave 0.18s ease forwards;
+}
+@keyframes rs-enter {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes rs-leave {
+  to { opacity: 0; transform: translateY(6px); }
+}
+/* 极淡封面底色染（非玻璃/非模糊）：隐约保留作品氛围，跟随主题底色 */
 .review-studio .rs-bg {
   position: absolute;
   inset: 0;
   background-size: cover;
   background-position: center;
-  filter: blur(34px) saturate(1.2) brightness(0.6);
-  transform: scale(1.15);
+  opacity: 0.05;
 }
-.review-studio .rs-overlay {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(120% 90% at 15% 10%, rgba(88, 28, 135, 0.32), transparent 60%),
-    radial-gradient(120% 90% at 90% 85%, rgba(79, 70, 229, 0.20), transparent 55%),
-    linear-gradient(160deg, rgba(10, 8, 20, 0.55), rgba(12, 10, 24, 0.78));
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
+/* 面板：与全局一致（细边框 + 克制阴影 + 主题圆角） */
 .review-studio .rs-panel {
-  background: var(--rs-panel);
-  border: 1px solid var(--rs-border);
-  border-radius: 18px;
-  box-shadow:
-    0 0 0 1px rgba(168, 85, 247, 0.08),
-    0 24px 70px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(216, 180, 254, 0.08);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 .review-studio .rs-tab {
   padding: 6px 14px;
   border-radius: 999px;
   font-size: 12px;
   border: 1px solid transparent;
-  color: var(--rs-text-secondary);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: background-color 0.18s ease, color 0.18s ease;
 }
 .review-studio .rs-tab.on {
-  background: var(--rs-accent-soft);
-  border-color: var(--rs-border);
-  color: var(--rs-text);
+  background: var(--accent-soft);
+  border-color: var(--panel-border);
+  color: var(--accent);
 }
 .review-studio .rs-field {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--rs-border);
-  border-radius: 10px;
-  color: var(--rs-text);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-md);
+  color: var(--text);
 }
 .review-studio .rs-field:focus {
   outline: none;
-  border-color: var(--rs-accent);
-  box-shadow: 0 0 0 3px var(--rs-accent-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
-/* 作用域内文档渲染：紫罗兰高对比 */
-.review-studio .doc { color: var(--rs-text); }
-.review-studio .doc h1,
-.review-studio .doc h2,
-.review-studio .doc h3 { color: var(--rs-text); }
-.review-studio .doc a { color: var(--rs-accent); }
-.review-studio .doc blockquote { color: var(--rs-text-secondary); border-left-color: var(--rs-accent); }
-.review-studio .doc code { background: var(--rs-accent-soft); color: var(--rs-accent); }
-.review-studio .doc pre { background: rgba(0, 0, 0, 0.35); border-color: var(--rs-border); }
-.review-studio .doc del { color: var(--rs-text-secondary); }
-/* 浮动引用卡 */
+/* 排版驱动的正文：衬线 + 舒适行高（写作空间质感） */
+.review-studio .rs-prose {
+  font-family: Georgia, "Songti SC", "Noto Serif SC", "STSong", serif;
+  line-height: 1.78;
+  color: var(--text);
+}
+/* 浮动引用卡：细边框 + 克制阴影（同 token，无玻璃） */
 .review-studio .rs-quote {
   position: absolute;
   left: 20px;
   bottom: 86px;
   max-width: 250px;
-  background: var(--rs-panel-strong);
-  border: 1px solid var(--rs-border);
-  border-left: 3px solid var(--rs-accent);
-  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
   padding: 12px 14px;
-  color: var(--rs-text-secondary);
+  color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.6;
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-md);
 }
-
-/* 低端设备/不支持 backdrop-filter 时：回退为高不透明紫黑面板（避免黑块/拖慢） */
-@supports not (backdrop-filter: blur(1px)) {
-  .review-studio .rs-panel { background: rgba(24, 18, 40, 0.92); }
-  .review-studio .rs-quote { background: rgba(18, 14, 32, 0.96); }
-  .review-studio .rs-overlay { backdrop-filter: none; }
+/* 字数进度：一条纤细的强调色渐变进度条（本轮唯一克制点缀） */
+.review-studio .rs-progress-track {
+  height: 2px;
+  background: var(--panel-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.review-studio .rs-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, transparent));
+  transition: width 0.3s ease;
 }
 
 /* 图片加载淡入：封面/角色图避免加载完成瞬间"啪"地出现 */
