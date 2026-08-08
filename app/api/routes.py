@@ -1385,6 +1385,68 @@ async def list_characters(db: Session = Depends(get_db)):
     return {"characters": chars}
 
 
+@router.get("/voice-relations")
+async def voice_relations(db: Session = Depends(get_db)):
+    """声优关系聚合（ADR 0032）：声优 → 配过的角色 → 所属作品 三层关系。
+
+    实时从 raw_metadata.detail.metadata.characters 扫描聚合（同角色墙"内嵌 + 实时
+    聚合"决策，不建独立表）。actors 为归一化后的声优名列表（字符串）。
+    返回：works（作品）/ actors（含各自 works→roles）/ stats（含缺失声优的角色数）。
+    图谱阈值（配音作品数≥N）由前端过滤，接口返回全量。
+    """
+    items = db.query(Item).filter(Item.source != "local").all()
+    works: dict = {}
+    actor_map: dict = {}
+    missing_actor_chars = 0
+    for it in items:
+        chars = _extract_characters(it)
+        if not chars:
+            continue
+        works[it.id] = {
+            "item_id": it.id, "title": it.title,
+            "image_url": it.image_url, "source": it.source,
+        }
+        for ch in chars:
+            name = ch.get("name")
+            if not name:
+                continue
+            actors = ch.get("actors") or []
+            if not actors:
+                missing_actor_chars += 1
+            for a in actors:
+                a_name = str(a).strip()
+                if not a_name:
+                    continue
+                entry = actor_map.setdefault(a_name, {"name": a_name, "works": {}})
+                w = entry["works"].setdefault(it.id, {
+                    "item_id": it.id, "title": it.title, "roles": [],
+                })
+                if name not in w["roles"]:
+                    w["roles"].append(name)
+
+    actors = [
+        {
+            "name": a["name"],
+            "work_count": len(a["works"]),
+            "role_count": sum(len(x["roles"]) for x in a["works"].values()),
+            "works": [
+                {"item_id": wid, "title": w["title"], "roles": w["roles"]}
+                for wid, w in a["works"].items()
+            ],
+        }
+        for a in actor_map.values()
+    ]
+    return {
+        "works": list(works.values()),
+        "actors": actors,
+        "stats": {
+            "actor_count": len(actors),
+            "work_count": len(works),
+            "missing_actor_chars": missing_actor_chars,
+        },
+    }
+
+
 # ========== RAG 问答 ==========
 
 @router.post("/rag/query", response_model=RAGResponse)

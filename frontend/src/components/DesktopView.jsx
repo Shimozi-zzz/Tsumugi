@@ -17,6 +17,7 @@ import ReviewStudio from "./ReviewStudio.jsx";
 import ProviderSettings from "./ProviderSettings.jsx";
 import ItemDetailModal from "./ItemDetailModal.jsx";
 import CharacterWall from "./CharacterWall.jsx";
+import VoiceGraphView from "./VoiceGraphView.jsx";
 import ShareCardModal from "./ShareCardModal.jsx";
 import Bookshelf from "./Bookshelf.jsx";
 import StatusGroupedList from "./StatusGroupedList.jsx";
@@ -62,6 +63,12 @@ const NAV = {
       <circle cx="9" cy="8" r="3.2" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><circle cx="17.5" cy="9" r="2.5" /><path d="M16 20a4.5 4.5 0 0 1 5.5-4.4" />
     </svg>
   ) },
+  voice: { key: "voice", label: "声优图谱", icon: (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="12" cy="18" r="2.4" />
+      <path d="M6.6 7.4 11 16M17.4 7.4 13 16M7 6h10M11.6 16.6l-.5-4.1M12.4 16.6l.5-4.1" />
+    </svg>
+  ) },
   settings: { key: "settings", label: "设置", icon: (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
@@ -71,7 +78,7 @@ const NAV = {
 };
 
 // 可自由排序的键（settings 除外）
-const SORTABLE_KEYS = ["ask", "library", "inspector", "characters"];
+const SORTABLE_KEYS = ["ask", "library", "inspector", "characters", "voice"];
 
 const NAV_ORDER_KEY = "tsumugi-nav-order";
 
@@ -153,6 +160,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [showShortcuts, setShowShortcuts] = useState(false);
   // 命令面板（ADR 0031：Ctrl/Cmd+K）
   const [commandOpen, setCommandOpen] = useState(false);
+  // 声优图谱聚焦（ADR 0032：角色墙/命令入口传入声优名，图谱自动选中）
+  const [voiceFocus, setVoiceFocus] = useState(null);
 
   // 侧栏可拖拽宽度（最大页面 1/3）
   const [sidebarWidth, setSidebarWidth] = useState(224);
@@ -843,6 +852,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       if (it) setReviewItem(it);
       else toast.info("先在资料库分组列表中选中一条资料");
     },
+    openVoiceGraph: () => { setVoiceFocus(null); setSection("voice"); },
   }), [paletteItems, allTags, setTheme, detailBrowseId]);
 
   return (
@@ -1489,11 +1499,34 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   已收藏作品里登场的角色（点击角色看关联作品，点作品回详情）
                 </div>
               </div>
-              <button onClick={() => setCharRefreshKey((k) => k + 1)}
-                className="px-3 py-1.5 rounded-xl text-xs"
-                style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>刷新</button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setVoiceFocus(null); setSection("voice"); }}
+                  className="px-3 py-1.5 rounded-xl text-xs"
+                  style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                  声优关系
+                </button>
+                <button onClick={() => setCharRefreshKey((k) => k + 1)}
+                  className="px-3 py-1.5 rounded-xl text-xs"
+                  style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>刷新</button>
+              </div>
             </div>
-            <CharacterWall refreshKey={charRefreshKey} onOpenWork={openWorkDetail} />
+            <CharacterWall refreshKey={charRefreshKey} onOpenWork={openWorkDetail}
+              onOpenVoice={(a) => { setVoiceFocus(a); setSection("voice"); }} />
+          </div>
+        )}
+
+        {section === "voice" && (
+          <div className="max-w-5xl mx-auto mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-[15px] font-medium" style={{ color: "var(--text)" }}>声优关系图谱</h2>
+                <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
+                  作品 · 角色 · 声优 关系网络（点声优看完整配音列表，点作品/角色回详情）
+                </div>
+              </div>
+            </div>
+            <VoiceGraphView focusActor={voiceFocus}
+              onOpenWork={(itemId) => { setSection("library"); setLibView("list"); setDetailBrowseId(itemId); }} />
           </div>
         )}
 

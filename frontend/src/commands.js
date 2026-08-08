@@ -49,6 +49,8 @@ export function buildCommands(ctx) {
       run: () => ctx.ask() },
     { id: "open-characters", group: "动作", title: "打开角色墙", icon: "◉", keywords: ["角色墙", "角色", "characters", "图鉴"],
       run: () => ctx.section("characters") },
+    { id: "open-voice-graph", group: "动作", title: "打开声优图谱", icon: "◉", keywords: ["声优", "图谱", "声优图谱", "voice", "配音", "关系图"],
+      run: () => ctx.openVoiceGraph ? ctx.openVoiceGraph() : ctx.section("voice") },
     { id: "open-inspector", group: "动作", title: "打开分析", icon: "▤", keywords: ["分析", "统计", "inspector", "检查器"],
       run: () => ctx.section("inspector") },
     { id: "open-settings", group: "动作", title: "打开设置", icon: "⚙", keywords: ["设置", "settings", "配置"],

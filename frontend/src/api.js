@@ -377,6 +377,14 @@ export async function fetchCharacters() {
   return body.characters;
 }
 
+// 声优关系聚合（ADR 0032：声优 → 角色 → 作品 三层关系，供声优图谱）
+export async function fetchVoiceRelations() {
+  const resp = await fetch(`${API_BASE}/voice-relations`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取声优关系失败");
+  return body;
+}
+
 export async function fetchItemDetail(itemId) {
   const resp = await fetch(`${API_BASE}/items/${itemId}/detail`);
   const body = await resp.json().catch(() => ({}));

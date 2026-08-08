@@ -1,8 +1,9 @@
 // 角色墙：跨已收藏作品聚合角色，点击角色看关联作品，作品可点回详情
+// ADR 0032：选中角色时给出其声优的"查看声优图谱"入口
 import React, { useEffect, useState } from "react";
 import { fetchCharacters } from "../api.js";
 
-export default function CharacterWall({ refreshKey, onOpenWork }) {
+export default function CharacterWall({ refreshKey, onOpenWork, onOpenVoice }) {
   const [chars, setChars] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null); // 选中的角色（显示其作品）
@@ -53,6 +54,21 @@ export default function CharacterWall({ refreshKey, onOpenWork }) {
               className="text-xs px-2 py-1 rounded-lg shrink-0"
               style={{ color: "var(--text-secondary)" }}>收起</button>
           </div>
+          {/* ADR 0032：声优 → 一键跳转声优关系图谱 */}
+          {selected.actors && selected.actors.length > 0 && (
+            <>
+              <div className="text-[11px] mt-3 mb-1.5 tracking-wider" style={{ color: "var(--accent)" }}>声优（点名字看关系图谱）</div>
+              <div className="flex flex-wrap gap-1.5">
+                {(selected.actors || []).map((a) => (
+                  <button key={a} onClick={() => onOpenVoice?.(a)}
+                    className="px-2 py-1 rounded-full text-[11px]"
+                    style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           <div className="text-[11px] mt-3 mb-1.5 tracking-wider" style={{ color: "var(--accent)" }}>出自作品</div>
           <div className="flex flex-wrap gap-2">
             {(selected.works || []).map((w) => (
