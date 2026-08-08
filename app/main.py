@@ -21,6 +21,7 @@ load_dotenv()
 os.makedirs(settings.upload_dir, exist_ok=True)
 os.makedirs(settings.chroma_persist_directory, exist_ok=True)
 os.makedirs(settings.thumbnails_dir, exist_ok=True)
+os.makedirs(settings.plugins_dir, exist_ok=True)
 
 Base.metadata.create_all(bind=engine)
 ensure_schema()  # 旧库补列（如 content_hash）
@@ -38,6 +39,10 @@ for config in connector_persistence.load_declarative_configs():
 
 # 应用各 Connector 的通用设置（出站代理）
 connector_registry.apply_settings(connector_persistence.get_connector_settings())
+
+# 加载本地代码级插件（ADR 0027：用户手动放入 plugins/ 目录；单插件失败不阻塞）
+from app import plugins as plugin_loader
+plugin_loader.load_plugins()
 
 app = FastAPI(
     title="Tsumugi RAG System",

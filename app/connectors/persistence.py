@@ -115,3 +115,44 @@ def save_connector_proxy(name: str, proxy_url: str) -> None:
         db.commit()
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------- 插件风险确认（ADR 0027）
+# 首次检测到 plugins/ 目录有插件时，设置页给一次性确认提示；确认后不再打扰。
+
+_PLUGIN_NOTICE_ROW = "plugin_notice"
+
+
+def get_plugin_notice_acknowledged() -> bool:
+    """是否已确认过"第三方插件风险提示"（一次性）。"""
+    db = _session()
+    try:
+        row = db.query(Source).filter(
+            Source.name == _PLUGIN_NOTICE_ROW, Source.type == _SETTINGS_TYPE
+        ).first()
+        if row is None or not row.config_ref:
+            return False
+        try:
+            data = json.loads(row.config_ref)
+        except json.JSONDecodeError:
+            return False
+        return bool(data.get("acknowledged"))
+    finally:
+        db.close()
+
+
+def set_plugin_notice_acknowledged() -> None:
+    """持久化"已确认插件风险提示"标记。"""
+    db = _session()
+    try:
+        row = db.query(Source).filter(
+            Source.name == _PLUGIN_NOTICE_ROW, Source.type == _SETTINGS_TYPE
+        ).first()
+        if row is None:
+            row = Source(name=_PLUGIN_NOTICE_ROW, type=_SETTINGS_TYPE)
+            db.add(row)
+        row.config_ref = json.dumps({"acknowledged": True}, ensure_ascii=False)
+        row.enabled = 1
+        db.commit()
+    finally:
+        db.close()

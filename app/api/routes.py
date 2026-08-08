@@ -50,6 +50,7 @@ from app.schemas import (
     RAGResponse,
     RelatedSourceOut,
     RetrievedChunk,
+    PluginsResponse,
     ReviewCreate,
     ReviewOut,
     ReviewUpdate,
@@ -928,7 +929,7 @@ async def federated_search(q: QueryRequest):
 
 @router.get("/connectors")
 async def list_connectors():
-    """列出已注册/启用的数据源（含出站代理配置）。"""
+    """列出已注册/启用的数据源（含出站代理配置与来源 origin，供风险提示）。"""
     manifests = connector_registry.list_manifests()
     return [
         {
@@ -938,9 +939,32 @@ async def list_connectors():
             "capabilities": m.capabilities,
             "enabled": connector_registry.is_enabled(m.name),
             "proxy_url": connector_registry.get_proxy(m.name),
+            # "builtin" | "declarative" | "plugin"（ADR 0027 前端风险标识用）
+            "origin": connector_registry.get_origin(m.name) or "builtin",
         }
         for m in manifests
     ]
+
+
+@router.get("/plugins", response_model=PluginsResponse)
+async def list_plugins():
+    """插件管理面板数据（ADR 0027）：已加载插件 / 加载失败 / 一次性风险确认状态。"""
+    from app import plugins as plugin_loader
+    status = plugin_loader.get_plugin_status()
+    return PluginsResponse(
+        plugin_dir=status["plugin_dir"],
+        plugins=status["plugins"],
+        failures=status["failures"],
+        notice_needed=plugin_loader.plugin_notice_needed(),
+    )
+
+
+@router.post("/plugins/acknowledge")
+async def acknowledge_plugins_risk():
+    """用户确认"第三方插件风险提示"（一次性，之后不再弹）。"""
+    from app import plugins as plugin_loader
+    plugin_loader.acknowledge_plugins()
+    return {"ok": True}
 
 
 @router.post("/connectors/{name}/proxy")

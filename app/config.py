@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     # 外部封面图本地缓存目录（收藏入库时缓存一份，避免外链失效/带宽）
     thumbnails_dir: str = "./data/thumbnails"
 
+    # ---- 第三方插件（ADR 0027：本地文件信任模型） ----
+    # 用户把插件子目录（manifest.json + connector.py）放进此目录，重启后加载。
+    # 注意：插件代码拥有与后端相同的系统权限，不做沙盒隔离。
+    plugins_dir: str = "./plugins"
+
 
 settings = Settings()
 

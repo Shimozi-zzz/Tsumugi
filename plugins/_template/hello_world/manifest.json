@@ -1,0 +1,11 @@
+{
+  "name": "hello_world",
+  "display_name": "Hello World 示例数据源（Open Library）",
+  "version": "0.1.0",
+  "auth_type": "none",
+  "base_url": "https://openlibrary.org",
+  "rate_limit": {
+    "requests_per_minute": 10
+  },
+  "capabilities": ["search", "get_detail"]
+}

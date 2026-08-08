@@ -411,6 +411,22 @@ export async function backfillReference(limit = 5) {
   return body;
 }
 
+// ---- 第三方插件（ADR 0027：本地文件信任模型）----
+
+export async function fetchPlugins() {
+  const resp = await fetch(`${API_BASE}/plugins`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取插件状态失败");
+  return body;
+}
+
+export async function acknowledgePlugins() {
+  const resp = await fetch(`${API_BASE}/plugins/acknowledge`, { method: "POST" });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "确认插件风险提示失败");
+  return body;
+}
+
 // ---- 流式问答：解析 SSE 事件 ----
 export async function streamRag(query, { onSources, onChunk, onDone, onError }) {
   const resp = await fetch(`${API_BASE}/rag/query/stream`, {

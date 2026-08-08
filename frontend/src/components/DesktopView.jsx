@@ -8,7 +8,7 @@ import {
   fetchConnectors, createDeclarativeConnector, deleteConnector,
   saveConnectorProxy, testConnectorProxy,
   fetchCharacters, fetchItemDetail, fetchExternalDetail,
-  refreshExternalItem,
+  refreshExternalItem, fetchPlugins, acknowledgePlugins,
   batchTagItems, batchDeleteItems, setItemTags,
   fetchLLMProviders,
 } from "../api.js";
@@ -221,6 +221,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     result_path: "", field_map_title: "", field_map_external_id: "",
     field_map_description: "",
   });
+  // 第三方插件（ADR 0027：本地文件信任模型，设置页「插件」面板）
+  const [pluginsData, setPluginsData] = useState({ plugins: [], failures: [], notice_needed: false, plugin_dir: "" });
   // 出站代理编辑
   const [proxyEditName, setProxyEditName] = useState(null); // 正在编辑代理的数据源名
   const [proxyDraft, setProxyDraft] = useState("");
@@ -643,6 +645,18 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const loadConnectors = () => fetchConnectors().then(setConnectors).catch(() => {});
   useEffect(() => { loadConnectors(); }, []);
 
+  // 插件状态（设置页「插件」面板）：进入设置页时刷新
+  const loadPlugins = () => fetchPlugins().then(setPluginsData).catch(() => {});
+  useEffect(() => { if (section === "settings") loadPlugins(); }, [section]);
+
+  async function handleAcknowledgePlugins() {
+    try {
+      await acknowledgePlugins();
+      setPluginsData((p) => ({ ...p, notice_needed: false }));
+      toast.success("已确认，不再提示");
+    } catch (err) { toast.error(err.message); }
+  }
+
   // Esc 关闭导入浮层
   useEffect(() => {
     if (!showImport) return;
@@ -769,6 +783,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     { key: "bangumi", label: "Bangumi" },
     { key: "nav", label: "导航栏" },
     { key: "sources", label: "数据源" },
+    { key: "plugins", label: "插件" },
   ];
   // 是否已有问答内容（决定搜索框居中/置顶）
   const hasContent = !!(answer || sources.length > 0 || fedResults.length > 0);
@@ -1658,6 +1673,94 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                       </li>
                     ))}
                   </ul>
+                )}
+              </div>
+            )}
+
+            {/* 插件（ADR 0027：本地文件信任模型 + 风险提示） */}
+            {settingsTab === "plugins" && (
+              <div className="space-y-4">
+                {/* 一次性风险确认（首次检测到插件时显示） */}
+                {pluginsData.notice_needed && (
+                  <div className="rounded-2xl p-4"
+                    style={{ backgroundColor: "rgba(248,113,113,0.14)", border: "1px solid var(--danger)" }}>
+                    <div className="text-sm font-medium mb-1" style={{ color: "var(--danger)" }}>
+                      ⚠️ 检测到第三方插件
+                    </div>
+                    <p className="text-xs leading-relaxed mb-3" style={{ color: "var(--text)" }}>
+                      插件是放在 <code>{pluginsData.plugin_dir}</code> 目录下的第三方 Python
+                      代码，运行时拥有与 Tsumugi 后端<b>完全相同的系统权限</b>（可读写你的
+                      资料库、访问网络）。Tsumugi 不做沙盒隔离，也不会联网下载运行插件——
+                      请仅安装你信任来源的插件，安装前建议审查其代码。
+                    </p>
+                    <button onClick={handleAcknowledgePlugins}
+                      className="px-3 py-1.5 rounded-xl text-xs font-medium"
+                      style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                      我已了解，不再提示
+                    </button>
+                  </div>
+                )}
+
+                {/* 插件列表 */}
+                <div className="desk-askbar rounded-2xl p-5"
+                  style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-sm font-medium">插件管理</h3>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}>
+                      {pluginsData.plugins.length} 已加载
+                    </span>
+                  </div>
+                  <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
+                    把插件子目录放进 <code>{pluginsData.plugin_dir || "plugins/"}</code> 并重启应用生效
+                    （详见项目 plugins/README.md）。
+                  </p>
+                  {pluginsData.plugins.length === 0 ? (
+                    <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                      暂无已加载插件。
+                    </p>
+                  ) : (
+                    <ul className="divide-y">
+                      {pluginsData.plugins.map((p) => (
+                        <li key={p.name} className="py-2.5 text-sm">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{p.display_name}</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded-full"
+                              style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}>
+                              {p.name}
+                            </span>
+                            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                              v{p.version} · {p.capabilities.join(", ")}
+                            </span>
+                          </div>
+                          <div className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>
+                            ⚠️ 第三方插件拥有与本应用相同的系统权限，请仅安装你信任的来源。
+                          </div>
+                          <div className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>
+                            来源：{p.path}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* 加载失败（不阻塞应用，可在此排查） */}
+                {pluginsData.failures.length > 0 && (
+                  <div className="desk-askbar rounded-2xl p-5"
+                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
+                    <h3 className="text-sm font-medium mb-2">加载失败的插件</h3>
+                    <ul className="space-y-1.5 text-xs">
+                      {pluginsData.failures.map((f, i) => (
+                        <li key={i} style={{ color: "var(--danger)" }}>
+                          <b>{f.dir}</b>：{f.error}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-[11px] mt-2" style={{ color: "var(--text-secondary)" }}>
+                      单个插件失败会被跳过，不影响应用启动；错误详情也会写入启动日志（[plugin] 前缀）。
+                    </p>
+                  </div>
                 )}
               </div>
             )}

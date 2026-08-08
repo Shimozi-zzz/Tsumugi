@@ -204,6 +204,31 @@ class RelatedSourceOut(BaseModel):
     rating: Optional[float] = None
 
 
+# ---------------------------------------------------------------- 第三方插件（ADR 0027）
+
+class PluginOut(BaseModel):
+    """已加载的代码级插件（本地文件信任模型）。"""
+    name: str
+    display_name: str
+    version: str
+    capabilities: List[str] = []
+    path: str = ""
+    enabled: bool = True
+
+
+class PluginFailureOut(BaseModel):
+    """加载失败的插件记录（优雅跳过，不阻塞应用）。"""
+    dir: str
+    error: str
+
+
+class PluginsResponse(BaseModel):
+    plugin_dir: str
+    plugins: List[PluginOut] = []
+    failures: List[PluginFailureOut] = []
+    notice_needed: bool = False  # 首次检测到插件且未确认风险提示
+
+
 class CharacterOut(BaseModel):
     """角色墙条目：跨作品聚合后的角色。"""
     id: Optional[int] = None

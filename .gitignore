@@ -72,3 +72,10 @@ frontend/dist/
 
 # Docker
 .connector_cache.db
+
+# 第三方插件（ADR 0027）：用户放入的插件不提交；README 与 _template 参考示例保留
+plugins/*
+!plugins/README.md
+!plugins/_template/
+!plugins/_template/**
+

@@ -1,9 +1,13 @@
-"""Connector 注册/发现机制（Phase 3 + Phase 4）
+"""Connector 注册/发现机制（Phase 3 + Phase 4 + ADR 0027 插件）
 
 注册方式：
 - 内置：实现 Connector 的实例 register() 注册，或 discover() 自动扫描；
 - 声明式（Phase 4）：用户通过 HTTP 端点+字段映射配置接入，无需写代码，
-  由 register_declarative(config) 创建 DeclarativeConnector 注册。
+  由 register_declarative(config) 创建 DeclarativeConnector 注册；
+- 代码级插件（ADR 0027）：用户手动放入 plugins/ 目录的第三方 Python 模块，
+  由 app.plugins.load_plugins() 加载注册（origin="plugin"）。
+
+origin 追踪：区分内置/声明式/插件，供设置页"插件管理"做风险提示。
 """
 from typing import Dict, List, Optional
 
@@ -11,28 +15,45 @@ from app.connectors.base import Connector, ConnectorManifest, DeclarativeConnect
 
 _registry: Dict[str, Connector] = {}
 _enabled: Dict[str, bool] = {}
+_origin: Dict[str, str] = {}  # name -> "builtin" | "declarative" | "plugin"
 
 
-def register(connector: Connector, enabled: bool = True) -> None:
-    """注册一个 Connector 实例。同名重复注册会覆盖。"""
+def register(connector: Connector, enabled: bool = True, origin: str = "builtin") -> None:
+    """注册一个 Connector 实例。同名重复注册会覆盖。origin 记录注册来源。"""
     _registry[connector.name] = connector
     _enabled[connector.name] = enabled
+    _origin[connector.name] = origin
 
 
 def register_declarative(config: dict, enabled: bool = True) -> DeclarativeConnector:
     """按声明式配置注册自定义数据源（Phase 4）。配置非法时抛 ValueError。"""
     connector = DeclarativeConnector(config)
-    register(connector, enabled=enabled)
+    register(connector, enabled=enabled, origin="declarative")
     return connector
+
+
+def register_plugin(connector: Connector, enabled: bool = True) -> None:
+    """注册代码级插件（ADR 0027），origin 标记为 plugin 供风险提示。"""
+    register(connector, enabled=enabled, origin="plugin")
 
 
 def unregister(name: str) -> None:
     _registry.pop(name, None)
     _enabled.pop(name, None)
+    _origin.pop(name, None)
 
 
 def get_connector(name: str) -> Optional[Connector]:
     return _registry.get(name)
+
+
+def get_origin(name: str) -> Optional[str]:
+    return _origin.get(name)
+
+
+def list_plugin_connectors() -> List[Connector]:
+    """返回全部已注册的代码级插件 Connector。"""
+    return [c for n, c in _registry.items() if _origin.get(n) == "plugin"]
 
 
 def get_enabled_connectors() -> List[Connector]:
