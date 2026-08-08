@@ -839,6 +839,23 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=f"统计失败：{e}")
 
 
+@router.get("/activity")
+async def get_activity(year: Optional[int] = Query(None, ge=2000, le=2100),
+                       db: Session = Depends(get_db)):
+    """年度活跃度（ADR 0033）：按天聚合 书评数 + 收藏数（加权得分）。
+
+    数据来源：Review.created_at（书评）+ 外部条目 Item.synced_at（新收藏）。
+    返回当年有活跃记录的日期列表与统计摘要（总数/最活跃月份/最长连续活跃）。
+    """
+    from datetime import datetime as _dt
+    y = year or _dt.now().year
+    try:
+        data = await run_in_threadpool(stats.get_activity_summary, db, y)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"年度统计失败：{e}")
+
+
 # ========== 检索 ==========
 
 @router.post("/search", response_model=SearchResponse)

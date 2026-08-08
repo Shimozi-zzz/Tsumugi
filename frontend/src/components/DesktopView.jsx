@@ -18,6 +18,7 @@ import ProviderSettings from "./ProviderSettings.jsx";
 import ItemDetailModal from "./ItemDetailModal.jsx";
 import CharacterWall from "./CharacterWall.jsx";
 import VoiceGraphView from "./VoiceGraphView.jsx";
+import YearlySummary from "./YearlySummary.jsx";
 import ShareCardModal from "./ShareCardModal.jsx";
 import Bookshelf from "./Bookshelf.jsx";
 import StatusGroupedList from "./StatusGroupedList.jsx";
@@ -69,6 +70,12 @@ const NAV = {
       <path d="M6.6 7.4 11 16M17.4 7.4 13 16M7 6h10M11.6 16.6l-.5-4.1M12.4 16.6l.5-4.1" />
     </svg>
   ) },
+  summary: { key: "summary", label: "年度总结", icon: (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  ) },
   settings: { key: "settings", label: "设置", icon: (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
@@ -78,7 +85,7 @@ const NAV = {
 };
 
 // 可自由排序的键（settings 除外）
-const SORTABLE_KEYS = ["ask", "library", "inspector", "characters", "voice"];
+const SORTABLE_KEYS = ["ask", "library", "inspector", "characters", "voice", "summary"];
 
 const NAV_ORDER_KEY = "tsumugi-nav-order";
 
@@ -853,6 +860,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       else toast.info("先在资料库分组列表中选中一条资料");
     },
     openVoiceGraph: () => { setVoiceFocus(null); setSection("voice"); },
+    openSummary: () => setSection("summary"),
   }), [paletteItems, allTags, setTheme, detailBrowseId]);
 
   return (
@@ -1527,6 +1535,20 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
             </div>
             <VoiceGraphView focusActor={voiceFocus}
               onOpenWork={(itemId) => { setSection("library"); setLibView("list"); setDetailBrowseId(itemId); }} />
+          </div>
+        )}
+
+        {section === "summary" && (
+          <div className="max-w-4xl mx-auto mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-[15px] font-medium" style={{ color: "var(--text)" }}>年度总结</h2>
+                <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
+                  书评 × 收藏 的活跃度热力图（GitHub 贡献图风格）
+                </div>
+              </div>
+            </div>
+            <YearlySummary />
           </div>
         )}
 

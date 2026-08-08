@@ -10,7 +10,7 @@
 - Top Files：按字符数排序的前 N 大文本条目
 """
 import os
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, List, Optional
 
 from sqlalchemy import func
@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Chunk, Item
+from app.models import Chunk, Item, Review
 
 # 来源类型推导：根据 source / type / 文件扩展名
 SOURCE_LABELS = {
@@ -122,3 +122,93 @@ def get_stats(db: Optional[Session] = None) -> dict:
         }
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------- 年度活跃度（ADR 0033）
+
+# 活跃度权重：写一条书评 = 2 分，新增一个收藏 = 1 分。
+# 理由：书评是用户主动创作的内容（更高投入/信号），收藏是一次轻量保存动作；
+# 权重拉开让"深度投入"在热力图上更突出（详见 ADR 0033）。
+REVIEW_WEIGHT = 2
+COLLECTION_WEIGHT = 1
+
+
+def _day_key(ts) -> str:
+    """把 created_at / synced_at 归一为 'YYYY-MM-DD'。SQLite 可能返回 str 或 datetime。"""
+    if isinstance(ts, datetime):
+        return ts.date().isoformat()
+    return str(ts)[:10]
+
+
+def get_activity_summary(db: Session, year: int) -> dict:
+    """年度活跃度聚合：按天统计 书评数 + 收藏数（加权得分）。
+
+    数据来源（ADR 0033）：
+    - 书评：Review.created_at；
+    - 新收藏：外部条目（source != 'local'）的 Item.synced_at（收藏入库时间）。
+    返回当年有活跃记录的日期列表（只含非零天）与统计摘要。
+    """
+    prefix = f"{year}-"
+    day_map: Dict[str, dict] = {}
+
+    for (ts,) in db.query(Review.created_at).all():
+        d = _day_key(ts)
+        if d.startswith(prefix):
+            day_map.setdefault(d, {"reviews": 0, "collections": 0})["reviews"] += 1
+    for (ts,) in db.query(Item.synced_at).filter(Item.source != "local").all():
+        d = _day_key(ts)
+        if d.startswith(prefix):
+            day_map.setdefault(d, {"reviews": 0, "collections": 0})["collections"] += 1
+
+    days = [
+        {
+            "date": d,
+            "reviews": e["reviews"],
+            "collections": e["collections"],
+            "score": e["reviews"] * REVIEW_WEIGHT + e["collections"] * COLLECTION_WEIGHT,
+        }
+        for d, e in sorted(day_map.items())
+    ]
+    return {
+        "year": year,
+        "days": days,
+        "stats": _activity_stats(days),
+        "weights": {"review": REVIEW_WEIGHT, "collection": COLLECTION_WEIGHT},
+    }
+
+
+def _activity_stats(days: List[dict]) -> dict:
+    """从每日列表计算统计摘要：总数 / 活跃天数 / 最活跃月份 / 最长连续活跃。"""
+    total_reviews = sum(d["reviews"] for d in days)
+    total_collections = sum(d["collections"] for d in days)
+    total_score = sum(d["score"] for d in days)
+
+    month_score: Dict[str, int] = {}
+    for d in days:
+        month = d["date"][:7]  # YYYY-MM
+        month_score[month] = month_score.get(month, 0) + d["score"]
+    busiest_month = max(month_score, key=month_score.get) if month_score else None
+
+    # 最长连续活跃天数（score>0 的连续日期）
+    longest_streak = 0
+    current = 0
+    prev: Optional[date] = None
+    for d in days:
+        dt = date.fromisoformat(d["date"])
+        if d["score"] > 0 and prev is not None and (dt - prev).days == 1:
+            current += 1
+        elif d["score"] > 0:
+            current = 1
+        else:
+            current = 0
+        longest_streak = max(longest_streak, current)
+        prev = dt
+
+    return {
+        "total_reviews": total_reviews,
+        "total_collections": total_collections,
+        "total_score": total_score,
+        "active_days": len(days),
+        "busiest_month": busiest_month,
+        "longest_streak": longest_streak,
+    }

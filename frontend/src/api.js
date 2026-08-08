@@ -315,6 +315,14 @@ export async function fetchStats() {
   return body;
 }
 
+// 年度活跃度（ADR 0033：书评+收藏加权，按天聚合，GitHub 热力图数据源）
+export async function fetchActivity(year) {
+  const resp = await fetch(`${API_BASE}/activity${year ? `?year=${year}` : ""}`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取年度统计失败");
+  return body;
+}
+
 export async function createDeclarativeConnector(config) {
   const resp = await fetch(`${API_BASE}/connectors`, {
     method: "POST",

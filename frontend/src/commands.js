@@ -51,6 +51,8 @@ export function buildCommands(ctx) {
       run: () => ctx.section("characters") },
     { id: "open-voice-graph", group: "动作", title: "打开声优图谱", icon: "◉", keywords: ["声优", "图谱", "声优图谱", "voice", "配音", "关系图"],
       run: () => ctx.openVoiceGraph ? ctx.openVoiceGraph() : ctx.section("voice") },
+    { id: "open-summary", group: "动作", title: "打开年度总结", icon: "▦", keywords: ["年度", "总结", "热力图", "summary", "统计", "活跃"],
+      run: () => ctx.openSummary ? ctx.openSummary() : ctx.section("summary") },
     { id: "open-inspector", group: "动作", title: "打开分析", icon: "▤", keywords: ["分析", "统计", "inspector", "检查器"],
       run: () => ctx.section("inspector") },
     { id: "open-settings", group: "动作", title: "打开设置", icon: "⚙", keywords: ["设置", "settings", "配置"],
