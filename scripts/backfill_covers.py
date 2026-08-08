@@ -27,8 +27,11 @@ def out(msg: str):
 
 
 def main():
-    conn = registry.get_connector("bangumi")
-    proxy = getattr(conn, "proxy_url", None) if conn else None
+    # 与 main.py 启动一致：先发现并注册内置 Connector，再应用持久化的设置（出站代理），
+    # 否则 registry 为空，get_connector 返回 None、代理读不到（此前 59 条全连超时的根因）
+    from app.connectors import persistence
+    registry.discover()
+    registry.apply_settings(persistence.get_connector_settings())
 
     db = SessionLocal()
     items = db.query(Item).filter(Item.source != "local").all()
@@ -42,12 +45,14 @@ def main():
 
     n_missing = sum(1 for _, m, w in pending if m)
     n_wrong = sum(1 for _, m, w in pending if w)
-    out(f"待回填 {len(pending)} 条：缺本地封面 {n_missing}，扩展名错误 {n_wrong}"
-        f"（代理：{proxy or '无'}）")
+    out(f"待回填 {len(pending)} 条：缺本地封面 {n_missing}，扩展名错误 {n_wrong}")
 
     ok = fail = 0
     failures = []
     for it, missing, wrong_ext in pending:
+        # 按条目的数据源取代理（bangumi 用 bangumi 的代理，moegirl/vndb 用各自的）
+        conn = registry.get_connector(it.source)
+        proxy = getattr(conn, "proxy_url", None) if conn else None
         if not it.image_url:
             fail += 1
             failures.append((it.title, "无 image_url"))
