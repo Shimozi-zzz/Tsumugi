@@ -58,10 +58,14 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
         ) : null}
         <div className="min-w-0">
           <h2 className="text-base font-semibold leading-snug" style={{ color: "var(--text)" }}>{detail.title}</h2>
-          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
             <TagCapsule text={detail.source || "本地"} />
-            {detail.rating != null && <span className="text-xs" style={{ color: "var(--amber, #ffc24b)" }}>大众 ★{detail.rating}</span>}
-            {detail.my_rating != null && <span className="text-xs" style={{ color: "var(--text-secondary)" }}>我的平均 ★{detail.my_rating}</span>}
+            {detail.rating != null && (
+              <TagCapsule text={`大众 ★${detail.rating}`} title="外部数据源公众评分" />
+            )}
+            {detail.my_rating != null && (
+              <TagCapsule text={`我的平均 ★${detail.my_rating}`} muted />
+            )}
           </div>
         </div>
       </div>

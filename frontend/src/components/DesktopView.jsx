@@ -1183,15 +1183,23 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 {gridItems.length === 0 ? "暂无资料，在左侧「导入」添加吧。" : "没有匹配的存储内容。"}
               </div>
             ) : libView === "list" ? (
-              /* 主从视图（ADR 0029）：左=状态分组列表（独立滚动），右=详情（点击立即更新，独立滚动） */
+              /* 主从视图（ADR 0029/0030）：左=状态分组列表，右=详情；
+                 左右各套 --surface-1 面板背景（深色下与最外层 --surface-0 拉开层次），
+                 各自独立滚动 */
               <div className="flex-1 min-h-0 flex gap-4">
-                <StatusGroupedList
-                  className="w-[300px] shrink-0 min-h-0 overflow-y-auto pr-1"
-                  items={libFiltered} statusOf={statusMap}
-                  selectedId={detailBrowseId} onSelect={setDetailBrowseId}
-                />
-                <div className="flex-1 min-h-0 overflow-y-auto pl-4 border-l" style={{ borderColor: "var(--panel-border)" }}>
-                  <ItemDetailPanel itemId={detailBrowseId} />
+                <div className="w-[300px] shrink-0 min-h-0 flex flex-col rounded-2xl border overflow-hidden"
+                  style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)" }}>
+                  <StatusGroupedList
+                    className="flex-1 min-h-0 overflow-y-auto p-2"
+                    items={libFiltered} statusOf={statusMap}
+                    selectedId={detailBrowseId} onSelect={setDetailBrowseId}
+                  />
+                </div>
+                <div className="flex-1 min-h-0 rounded-2xl border overflow-hidden"
+                  style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)" }}>
+                  <div className="h-full overflow-y-auto p-5">
+                    <ItemDetailPanel itemId={detailBrowseId} />
+                  </div>
                 </div>
               </div>
             ) : libView === "shelf" ? (

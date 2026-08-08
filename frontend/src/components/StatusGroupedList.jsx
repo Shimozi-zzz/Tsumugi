@@ -6,8 +6,14 @@ import { TagCapsule } from "./ui.jsx";
 
 export const STATUS_GROUPS = ["想看", "在看", "看完", "搁置", "弃坑", "未收藏"];
 
+const SOURCE_DISPLAY = { bangumi: "Bangumi", moegirl: "萌娘百科", vndb: "VNDB" };
+
 function groupKey(status) {
   return status || "未收藏";
+}
+
+function sourceDisplay(source) {
+  return SOURCE_DISPLAY[source] || source;
 }
 
 export default function StatusGroupedList({ items, statusOf, selectedId, onSelect, className = "" }) {
@@ -63,20 +69,23 @@ export default function StatusGroupedList({ items, statusOf, selectedId, onSelec
                       <button
                         type="button"
                         onClick={() => onSelect?.(it.id)}
-                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors"
-                        style={{
-                          color: "var(--text)",
-                          backgroundColor: active ? "var(--accent-soft)" : "transparent",
-                          border: "1px solid " + (active ? "var(--accent)" : "transparent"),
-                        }}
+                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left ${active ? "rs-list-row-active" : "rs-list-row"}`}
+                        style={{ color: "var(--text)" }}
                       >
-                        <span className="text-[11px] w-8 shrink-0"
-                          style={{ color: it.type === "image" ? "var(--text-secondary)" : "var(--accent)" }}>
-                          {it.type === "note" ? "✎" : it.type === "image" ? "🖼" : it.source === "local" ? "▣" : it.source}
-                        </span>
+                        {it.source !== "local" ? (
+                          // 来源徽标：完整显示、不截断；与标题之间 gap-2（8px）分隔（ADR 0030）
+                          <span className="shrink-0 whitespace-nowrap">
+                            <TagCapsule text={sourceDisplay(it.source)} />
+                          </span>
+                        ) : (
+                          <span className="text-[12px] w-5 shrink-0 text-center"
+                            style={{ color: it.type === "image" ? "var(--text-secondary)" : "var(--accent)" }}>
+                            {it.type === "image" ? "🖼" : "✎"}
+                          </span>
+                        )}
                         <span className="flex-1 min-w-0 truncate text-[13px]">{it.title}</span>
                         {it.type === "note" && it.chunks_count != null && (
-                          <TagCapsule text={`${it.chunks_count} 块`} muted />
+                          <span className="shrink-0"><TagCapsule text={`${it.chunks_count} 块`} muted /></span>
                         )}
                       </button>
                     </li>

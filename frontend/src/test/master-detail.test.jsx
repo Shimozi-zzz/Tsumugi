@@ -1,5 +1,8 @@
 // 主从视图 + 状态分组列表 + Playnite 式信息设计 + 深色主题（ADR 0029）
+// + ADR 0030 视觉缺陷修复（来源标签完整显示 / 选中背景 / 表面层级 token）
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import React from "react";
 import DesktopView from "../components/DesktopView.jsx";
@@ -179,6 +182,59 @@ describe("深色主题（第4套，token 兼容）", () => {
     const lightSoft = parseHslLightness(el.style.getPropertyValue("--accent-soft"));
     expect(lightSoft).toBeGreaterThan(90);
     expect(darkSoft).toBeLessThan(lightSoft);
+  });
+});
+
+describe("ADR 0030 视觉缺陷修复", () => {
+  it("来源标签完整渲染：不截断、与标题有间距（徽标 nowrap + 行 gap + 标题 truncate 隔离）", () => {
+    const items = [{ id: 1, title: "钢之炼金术师", type: "external_ref", source: "bangumi", tags: [], chunks_count: null }];
+    const { container } = render(<StatusGroupedList items={items} statusOf={{}} selectedId={null} onSelect={() => {}} />);
+    const row = container.querySelector("section li button");
+    expect(row).toBeTruthy();
+    // 徽标文字完整 = "Bangumi"（不是截断的 "bangum"）
+    const badge = row.querySelector("span.rounded-full");
+    expect(badge).toBeTruthy();
+    expect(badge.textContent).toBe("Bangumi");
+    expect(badge.className).toContain("whitespace-nowrap"); // 胶囊本身不换行
+    // 胶囊外层包一层 shrink-0 + nowrap，确保不被父容器裁切
+    expect(badge.parentElement.className).toContain("shrink-0");
+    expect(badge.parentElement.className).toContain("whitespace-nowrap");
+    // 行内徽标与标题之间 gap（Tailwind gap-2 = 8px）
+    expect(row.className).toContain("gap-2");
+    // 截断只发生在标题（flex-1 min-w-0 truncate），徽标不在固定宽度容器里
+    const title = row.querySelector(".truncate");
+    expect(title.textContent).toBe("钢之炼金术师");
+    expect(title.className).toContain("min-w-0");
+  });
+
+  it("选中行带 rs-list-row-active（accent 低透明度背景 + 强调边框，非仅描边）", () => {
+    const items = [
+      { id: 1, title: "作品甲", type: "external_ref", source: "bangumi", tags: [], chunks_count: null },
+      { id: 2, title: "作品乙", type: "note", source: "local", tags: [], chunks_count: 1 },
+    ];
+    const { container } = render(<StatusGroupedList items={items} statusOf={{}} selectedId={1} onSelect={() => {}} />);
+    const rows = [...container.querySelectorAll("section li button")];
+    const activeRow = rows.find((b) => b.textContent.includes("作品甲"));
+    const normalRow = rows.find((b) => b.textContent.includes("作品乙"));
+    expect(activeRow.className).toContain("rs-list-row-active");
+    expect(normalRow.className).toContain("rs-list-row");
+    expect(normalRow.className).not.toContain("rs-list-row-active");
+  });
+
+  it("表面层级 token 存在（--surface-0/1/2，含深色主题；行 hover/选中 CSS 已定义）", () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
+    expect(css).toContain("--surface-0:");
+    expect(css).toContain("--surface-1:");
+    expect(css).toContain("--surface-2:");
+    // 深色主题块内定义了三档表面色（层级分明）
+    const darkBlock = css.slice(css.indexOf('data-theme="dark"'));
+    expect(darkBlock).toContain("--surface-0:");
+    expect(darkBlock).toContain("--surface-1:");
+    expect(darkBlock).toContain("--surface-2:");
+    // 列表行 hover（surface-2）与选中（accent 低透明度填充）规则存在
+    expect(css).toContain(".rs-list-row:hover");
+    expect(css).toContain(".rs-list-row-active");
+    expect(css).toContain("color-mix(in srgb, var(--accent) 18%, transparent)");
   });
 });
 

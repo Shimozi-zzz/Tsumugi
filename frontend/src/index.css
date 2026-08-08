@@ -37,6 +37,12 @@
   --d-grid-min: 160px;
   --d-font: 14px;
 
+  /* ---- 表面层级（ADR 0030）：--surface-0 最暗最外层 / --surface-1 面板卡片 /
+        --surface-2 悬浮与选中态更亮一档。浅色主题默认在下方各主题块微调，深色尤其拉开。 ---- */
+  --surface-0: #fafafa;
+  --surface-1: #ffffff;
+  --surface-2: #f2f2f4;
+
   /* ---- 经典白（默认主题，最克制） ---- */
   --bg: #fafafa;
   --panel: #ffffff;
@@ -89,6 +95,9 @@ html[data-theme="mint"] {
   --card-bg: #ffffff;
   --card-thumb: linear-gradient(150deg, #d1fae5, #e0f2fe);
   --card-text: #12463f;
+  --surface-0: #f2f9f6;
+  --surface-1: #ffffff;
+  --surface-2: #e9f4ef;
 }
 
 /* ============================================================
@@ -113,6 +122,9 @@ html[data-theme="sakura"] {
   --card-bg: #ffffff;
   --card-thumb: linear-gradient(150deg, #fde7ef, #f5e6f5);
   --card-text: #451f2f;
+  --surface-0: #fdf3f5;
+  --surface-1: #ffffff;
+  --surface-2: #f9edf1;
 }
 
 /* ============================================================
@@ -122,24 +134,28 @@ html[data-theme="sakura"] {
    强调色/强调色柔和/强调色悬浮由 themes.js 在深色下用更低明度派生（非近白）。
    ============================================================ */
 html[data-theme="dark"] {
-  --bg: #0e1116;
-  --panel: #151a22;
-  --panel-border: #252d39;
+  --bg: #0b0f14;
+  --panel: #161d26;
+  --panel-border: #26303e;
   --text: #e3eaf2;
-  --text-secondary: #93a1b5;  /* 在 #0e1116 上对比度 ~7:1 */
+  --text-secondary: #93a1b5;  /* 在 #0b0f14 上对比度 ~7:1 */
   --accent: #4a9eff;
   --accent-hover: #6bb1ff;
   --accent-soft: #16283f;
   --danger: #f87070;
   --ok: #3ddc97;
-  --tag-bg: #1c2a3d;
+  --tag-bg: #1e2a3c;
   --tag-text: #8fc3ff;
-  --input-bg: #0f141b;
+  --input-bg: #10151d;
   --input-border: #2b3648;
-  --rail-bg: #0e1116;
-  --card-bg: #151a22;
-  --card-thumb: linear-gradient(150deg, #1b2330, #12161e);
+  --rail-bg: #0b0f14;
+  --card-bg: #161d26;
+  --card-thumb: linear-gradient(150deg, #1b2432, #121722);
   --card-text: #e3eaf2;
+  /* 表面层级（ADR 0030）：深色下明确拉开三档，避免扁平 */
+  --surface-0: #0b0f14;
+  --surface-1: #161d26;
+  --surface-2: #202a37;
 }
 
 /* ============================================================
@@ -217,6 +233,23 @@ body {
 .tsm-tag {
   background-color: var(--tag-bg);
   color: var(--tag-text);
+}
+
+/* ============================================================
+   分组列表行（ADR 0030 视觉修复）：hover 用 surface-2，选中用
+   accent 低透明度填充 + 强调边框（比单纯描边明显得多）
+   ============================================================ */
+.rs-list-row {
+  border: 1px solid transparent;
+  background-color: transparent;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.rs-list-row:hover {
+  background-color: var(--surface-2);
+}
+.rs-list-row-active {
+  border-color: var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 /* 历史记录下拉：丝滑展开动画 */
