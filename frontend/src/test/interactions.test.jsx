@@ -171,12 +171,11 @@ describe("键盘快捷键", () => {
     await waitFor(() => expect(screen.queryByText("键盘快捷键")).toBeNull());
   });
 
-  it("Ctrl+K 聚焦问答搜索框", async () => {
+  it("Ctrl+K 呼出命令面板（ADR 0031，替代原先的聚焦搜索框）", async () => {
     mockFetch();
     render(<DesktopView {...PROPS} />);
-    const input = screen.getByPlaceholderText(/搜索知识库并提问/);
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    await waitFor(() => expect(document.activeElement).toBe(input));
+    await waitFor(() => expect(document.querySelector("input[placeholder*='搜索资料']")).toBeTruthy());
   });
 
   it("点击导航栏帮助按钮也能打开快捷键说明", async () => {

@@ -1,7 +1,7 @@
 // Tsumugi 桌面图书馆（三栏布局）
 // 布局：图标导航栏(ask固定顶 + 可排序区 + settings固定底) + 侧栏(搜索/分组标签) + 中央工作区
 // 设置页分类：外观 / 导航栏 / 数据源（分类筛选在最上方）
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchItems, fetchTags, fetchAllReviews, streamRag, federatedSearch, deleteItem, saveExternal,
   filePathToUrl, createItem, uploadItem, uploadItemCover,
@@ -23,6 +23,7 @@ import StatusGroupedList from "./StatusGroupedList.jsx";
 import ItemDetailPanel from "./ItemDetailPanel.jsx";
 import ToastHost from "./ToastHost.jsx";
 import ContextMenu from "./ContextMenu.jsx";
+import CommandPalette from "./CommandPalette.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
 import BangumiPanel from "./BangumiPanel.jsx";
@@ -150,6 +151,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [tagEdit, setTagEdit] = useState(null);
   // 快捷键说明
   const [showShortcuts, setShowShortcuts] = useState(false);
+  // 命令面板（ADR 0031：Ctrl/Cmd+K）
+  const [commandOpen, setCommandOpen] = useState(false);
 
   // 侧栏可拖拽宽度（最大页面 1/3）
   const [sidebarWidth, setSidebarWidth] = useState(224);
@@ -558,15 +561,15 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     ];
   }
 
-  // ---- 键盘快捷键（/ Ctrl+K 聚焦、Esc 关闭、? 快捷键说明；方向键跳过见 ADR 0021）----
+  // ---- 键盘快捷键（ADR 0031：Ctrl/Cmd+K=命令面板；/ 聚焦问答；? 快捷键说明；Esc 关闭）----
   useEffect(() => {
     const onKey = (e) => {
       const tag = (e.target && e.target.tagName) || "";
       const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setSection("ask");
-        setTimeout(() => askInputRef.current?.focus?.(), 30);
+        // Ctrl+K 呼出命令面板（行业惯例；/ 仍保留为聚焦问答搜索，能力未丢失）
+        setCommandOpen((v) => !v);
         return;
       }
       if (e.key === "/" && !typing) {
@@ -581,6 +584,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         return;
       }
       if (e.key === "Escape") {
+        if (commandOpen) { setCommandOpen(false); return; }
         if (ctxMenu) { setCtxMenu(null); return; }
         if (tagEdit) { setTagEdit(null); return; }
         if (showShortcuts) { setShowShortcuts(false); return; }
@@ -812,6 +816,34 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     const q = libQuery.trim().toLowerCase();
     return (it.title || "").toLowerCase().includes(q) || (it.content || "").toLowerCase().includes(q);
   });
+
+  // 命令面板上下文（ADR 0031）：命令注册表只依赖这一组可执行回调
+  const paletteItems = useMemo(() => {
+    const seen = new Map();
+    for (const it of [...(items || []), ...(gridItems || [])]) {
+      if (it && it.id != null && !seen.has(it.id)) seen.set(it.id, it);
+    }
+    return [...seen.values()];
+  }, [items, gridItems]);
+  const cmdCtx = useMemo(() => ({
+    items: paletteItems,
+    tags: allTags,
+    openItem: (it) => { setSection("library"); setLibView("list"); setDetailBrowseId(it.id); },
+    openImport: () => setShowImport(true),
+    section: (k) => setSection(k),
+    ask: () => { setSection("ask"); setTimeout(() => askInputRef.current?.focus?.(), 30); },
+    setTheme,
+    openTag: (name) => { setSection("library"); setActiveGroup("all"); setCustomActive(null); setActiveTag(name); },
+    shareCard: () => {
+      if (detailBrowseId != null) setShareItem(detailBrowseId);
+      else toast.info("先在资料库分组列表中选中一条资料");
+    },
+    reviewStudio: () => {
+      const it = paletteItems.find((x) => x.id === detailBrowseId);
+      if (it) setReviewItem(it);
+      else toast.info("先在资料库分组列表中选中一条资料");
+    },
+  }), [paletteItems, allTags, setTheme, detailBrowseId]);
 
   return (
     <div className="desktop-view flex relative flex-1 min-h-0 overflow-hidden"
@@ -1876,6 +1908,9 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
 
       {/* 快捷键说明 */}
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
+
+      {/* 命令面板（ADR 0031：Ctrl/Cmd+K） */}
+      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} ctx={cmdCtx} />
 
       {/* 全局 toast */}
       <ToastHost />
