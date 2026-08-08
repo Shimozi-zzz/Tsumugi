@@ -9,6 +9,7 @@ import {
 } from "../api.js";
 import { renderMarkdown } from "../markdown.js";
 import { toast } from "../toast.js";
+import { InfoTable, TagCapsule, itemInfoRows } from "./ui.jsx";
 
 const STATUSES = ["想看", "在看", "看完", "搁置", "弃坑"];
 const DEFAULT_FONT = 15;
@@ -368,12 +369,16 @@ export default function ReviewStudio({ item, onClose, refreshItems }) {
                           {introText(activeDetail)}
                         </div>
                       </div>
+                      {/* 基本信息：属性表格（Playnite 式，ADR 0029） */}
+                      {itemInfoRows(activeDetail).length > 0 && (
+                        <div>
+                          <div className="text-[11px] mb-1.5" style={{ color: "var(--text-secondary)" }}>基本信息</div>
+                          <InfoTable rows={itemInfoRows(activeDetail)} />
+                        </div>
+                      )}
                       {(activeDetail.tags || []).length > 0 && (
                         <div className="flex flex-wrap gap-1.5">
-                          {(activeDetail.tags || []).map((t) => (
-                            <span key={t} className="text-[11px] px-2 py-0.5 rounded-full"
-                              style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{t}</span>
-                          ))}
+                          {(activeDetail.tags || []).map((t) => <TagCapsule key={t} text={t} />)}
                         </div>
                       )}
                       {/* 热度/评分分布替代数据（ADR 0026） */}

@@ -12,8 +12,16 @@ describe("theme system", () => {
     document.documentElement.removeAttribute("data-density");
   });
 
-  it("THEMES 收敛为三套（经典白/薄荷/樱花）", () => {
-    expect(THEMES.map((t) => t.key)).toEqual(["default", "mint", "sakura"]);
+  it("THEMES 四套（经典白/薄荷/樱花/深夜深蓝，ADR 0029 深色第4套）", () => {
+    expect(THEMES.map((t) => t.key)).toEqual(["default", "mint", "sakura", "dark"]);
+  });
+
+  it("applyTheme('dark') 正常切换并持久化", () => {
+    applyTheme("dark");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(localStorage.getItem("tsumugi-theme")).toBe("dark");
+    applyTheme("mint");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("mint");
   });
 
   it("applyTheme 切换 data-theme 并持久化", () => {

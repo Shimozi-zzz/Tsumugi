@@ -1,5 +1,7 @@
 // 作品详情弹层：展示 get_detail 的完整信息（封面大图/简介/评分/标签/角色墙）
+// 信息排版走 Playnite 式（ADR 0029）：InfoTable 属性表格 + TagCapsule 统一标签胶囊。
 import React from "react";
+import { InfoTable, TagCapsule, itemInfoRows } from "./ui.jsx";
 
 function coverOk(url) {
   return url && typeof url === "string";
@@ -11,6 +13,7 @@ export default function ItemDetailModal({ detail, saved, onClose, onSave, onShar
   const tags = Array.isArray(detail.tags) ? detail.tags : [];
   const title = detail.title || "未命名";
   const desc = detail.description || "";
+  const infoRows = itemInfoRows(detail);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -21,20 +24,14 @@ export default function ItemDetailModal({ detail, saved, onClose, onSave, onShar
         {/* 头部：来源 / 评分 / 收藏态 */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] px-2 py-0.5 rounded-full"
-              style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
-              {detail.source || "外部"}
-            </span>
+            <TagCapsule text={detail.source || "外部"} />
             {typeof detail.rating === "number" && (
               <span className="text-xs" style={{ color: "var(--amber, #ffc24b)" }}>大众 ★{detail.rating}</span>
             )}
             {typeof detail.my_rating === "number" && (
               <span className="text-xs" style={{ color: "var(--text-secondary)" }}>我的平均 ★{detail.my_rating}</span>
             )}
-            {saved && (
-              <span className="text-[11px] px-2 py-0.5 rounded-full"
-                style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}>已收藏</span>
-            )}
+            {saved && <TagCapsule text="已收藏" />}
           </div>
           <button onClick={onClose} className="text-sm px-2 py-0.5 rounded-lg"
             style={{ color: "var(--text-secondary)" }}>✕</button>
@@ -58,14 +55,19 @@ export default function ItemDetailModal({ detail, saved, onClose, onSave, onShar
             </p>
             {tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-3">
-                {tags.map((t) => (
-                  <span key={t} className="text-[11px] px-2 py-0.5 rounded-full"
-                    style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}>{t}</span>
-                ))}
+                {tags.map((t) => <TagCapsule key={t} text={t} />)}
               </div>
             )}
           </div>
         </div>
+
+        {/* 基本信息：属性表格（Playnite 式 label-value，ADR 0029） */}
+        {infoRows.length > 0 && (
+          <div className="mt-5">
+            <div className="text-[11px] mb-2 tracking-wider" style={{ color: "var(--text-secondary)" }}>基本信息</div>
+            <InfoTable rows={infoRows} />
+          </div>
+        )}
 
         {/* 角色墙 */}
         {chars.length > 0 && (

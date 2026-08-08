@@ -187,6 +187,14 @@ export async function fetchItemReviews(itemId) {
   return body;
 }
 
+// 全局书评（时间倒序，用于构建"条目 → 追番状态"映射，ADR 0029 分组列表）
+export async function fetchAllReviews(limit = 1000) {
+  const resp = await fetch(`${API_BASE}/reviews?limit=${limit}`);
+  const body = await resp.json().catch(() => []);
+  if (!resp.ok) throw new Error(body.detail || "获取书评列表失败");
+  return Array.isArray(body) ? body : [];
+}
+
 export async function createReview(itemId, payload) {
   const resp = await fetch(`${API_BASE}/items/${itemId}/reviews`, {
     method: "POST",

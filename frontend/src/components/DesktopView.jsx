@@ -3,7 +3,7 @@
 // 设置页分类：外观 / 导航栏 / 数据源（分类筛选在最上方）
 import React, { useEffect, useRef, useState } from "react";
 import {
-  fetchItems, fetchTags, streamRag, federatedSearch, deleteItem, saveExternal,
+  fetchItems, fetchTags, fetchAllReviews, streamRag, federatedSearch, deleteItem, saveExternal,
   filePathToUrl, createItem, uploadItem, uploadItemCover,
   fetchConnectors, createDeclarativeConnector, deleteConnector,
   saveConnectorProxy, testConnectorProxy,
@@ -19,6 +19,8 @@ import ItemDetailModal from "./ItemDetailModal.jsx";
 import CharacterWall from "./CharacterWall.jsx";
 import ShareCardModal from "./ShareCardModal.jsx";
 import Bookshelf from "./Bookshelf.jsx";
+import StatusGroupedList from "./StatusGroupedList.jsx";
+import ItemDetailPanel from "./ItemDetailPanel.jsx";
 import ToastHost from "./ToastHost.jsx";
 import ContextMenu from "./ContextMenu.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
@@ -104,13 +106,30 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [detailView, setDetailView] = useState(null);
   // 安利卡弹层：当前生成安利卡的 item id（null=关闭）
   const [shareItem, setShareItem] = useState(null);
-  // 图书馆视图模式：网格 / 书架（localStorage 记忆，复用主题持久化模式）
+  // 图书馆视图模式：网格 / 书架 / 分组列表（localStorage 记忆，复用主题持久化模式）
   const [libView, setLibView] = useState(() => {
     try { return localStorage.getItem("tsumugi-lib-view") || "grid"; } catch { return "grid"; }
   });
   useEffect(() => {
     try { localStorage.setItem("tsumugi-lib-view", libView); } catch { /* ignore */ }
   }, [libView]);
+  // 主从视图（ADR 0029 分组列表模式）：当前选中浏览的条目 id
+  const [detailBrowseId, setDetailBrowseId] = useState(null);
+  // 条目 → 追番状态 映射（取该条目最新书评的状态；用于状态分组列表）
+  const [statusMap, setStatusMap] = useState({});
+  useEffect(() => {
+    fetchAllReviews()
+      .then((reviews) => {
+        const map = {};
+        for (const r of reviews) {
+          if (r.item_id != null && map[r.item_id] === undefined && r.status) {
+            map[r.item_id] = r.status; // /reviews 按 created_at 倒序，首见即最新
+          }
+        }
+        setStatusMap(map);
+      })
+      .catch(() => {});
+  }, []);
   // 角色墙刷新计数（收藏新作品后 +1）
   const [charRefreshKey, setCharRefreshKey] = useState(0);
   // AI 问答状态灯：当前启用的 Provider（null=加载中）
@@ -1105,8 +1124,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       <div className="flex-1 min-h-0 relative overflow-y-auto p-6 z-10" data-testid="main-content">
 
         {section === "library" && (
-          <>
-            <div className="flex items-center justify-between gap-3 mb-5">
+          <div className="h-full flex flex-col min-h-0">
+            <div className="flex items-center justify-between gap-3 mb-5 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="text-[15px] font-medium tracking-wide" style={{ color: "var(--text)" }}>
                   {activeTag ? `# ${activeTag}` : "全部资料"}
@@ -1123,7 +1142,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   color: selectMode ? "#fff" : "var(--accent)" }}>
                 选择
               </button>
-              {/* 视图切换：网格 / 书架 */}
+              {/* 视图切换：网格 / 书架 / 分组列表（列表=主从视图） */}
               <div className="flex items-center gap-0.5 rounded-full px-1 py-0.5"
                 style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
                 <button onClick={() => setLibView("grid")} title="网格视图"
@@ -1134,6 +1153,10 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   className="px-2 py-1 rounded-full text-[11px]"
                   style={{ backgroundColor: libView === "shelf" ? "var(--accent)" : "transparent",
                     color: libView === "shelf" ? "#fff" : "var(--text-secondary)" }}>▤</button>
+                <button onClick={() => setLibView("list")} title="分组列表（主从视图）"
+                  className="px-2 py-1 rounded-full text-[11px]"
+                  style={{ backgroundColor: libView === "list" ? "var(--accent)" : "transparent",
+                    color: libView === "list" ? "#fff" : "var(--text-secondary)" }}>☰</button>
               </div>
               {/* 图书馆本地查找（按标题/内容过滤当前视图） */}
               <div className="flex items-center gap-2 rounded-full px-3.5 py-2 w-64"
@@ -1152,18 +1175,33 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           </div>
 
             {gridLoading ? (
-              <div className="flex items-center justify-center h-64 text-sm"
+              <div className="flex-1 min-h-0 flex items-center justify-center text-sm"
                 style={{ color: "var(--text-secondary)" }}>加载中…</div>
             ) : libFiltered.length === 0 ? (
-              <div className="flex items-center justify-center h-64 text-sm"
+              <div className="flex-1 min-h-0 flex items-center justify-center text-sm"
                 style={{ color: "var(--text-secondary)" }}>
                 {gridItems.length === 0 ? "暂无资料，在左侧「导入」添加吧。" : "没有匹配的存储内容。"}
               </div>
+            ) : libView === "list" ? (
+              /* 主从视图（ADR 0029）：左=状态分组列表（独立滚动），右=详情（点击立即更新，独立滚动） */
+              <div className="flex-1 min-h-0 flex gap-4">
+                <StatusGroupedList
+                  className="w-[300px] shrink-0 min-h-0 overflow-y-auto pr-1"
+                  items={libFiltered} statusOf={statusMap}
+                  selectedId={detailBrowseId} onSelect={setDetailBrowseId}
+                />
+                <div className="flex-1 min-h-0 overflow-y-auto pl-4 border-l" style={{ borderColor: "var(--panel-border)" }}>
+                  <ItemDetailPanel itemId={detailBrowseId} />
+                </div>
+              </div>
             ) : libView === "shelf" ? (
-              <Bookshelf items={libFiltered} coverOf={cardCover} onOpenItem={(it) => openItemDetail(it)}
-                selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={toggleSelect}
-                onContextMenu={openCtxMenu} />
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <Bookshelf items={libFiltered} coverOf={cardCover} onOpenItem={(it) => openItemDetail(it)}
+                  selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={toggleSelect}
+                  onContextMenu={openCtxMenu} />
+              </div>
             ) : (
+              <div className="flex-1 min-h-0 overflow-y-auto">
               <div className="grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(var(--d-grid-min), 1fr))`, gap: "var(--d-card-gap)" }}>
                 {libFiltered.map((it) => {
                   const selected = selectedIds.has(it.id);
@@ -1222,8 +1260,9 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   );
                 })}
               </div>
+              </div>
             )}
-          </>
+          </div>
         )}
 
         {/* 批量操作栏：选择模式下固定底部居中 */}
