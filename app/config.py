@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     top_k: int = 5
     # 每个 Item 最多保留多少个 chunk 进入最终结果（去重，保证结果多样性）
     max_chunks_per_item: int = 1
+    # external_reference（外部下载的百科资料）检索权重系数（ADR 0025）：
+    # 默认低于用户自己写的 note/review（1.0），保证"我对XX怎么看"这类主观问题
+    # 优先命中用户自己的内容，外部百科只作事实性补充（相似度明显更高时仍能胜出）。
+    external_reference_weight: float = 0.4
 
     # ---- RAG / prompt ----
     # 上下文总长度上限（字符数，中文按字符计）

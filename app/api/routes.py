@@ -849,6 +849,7 @@ async def search_chunks(q: QueryRequest):
             tags=q.tag_filter,
             max_chunks_per_item=q.max_chunks_per_item,
             tag_match=q.tag_match,
+            source_types=q.source_types,
         )
     except EmbeddingError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -873,7 +874,8 @@ def _search_result_to_external(sr) -> ExternalResult:
     )
 
 
-def _federated_search_sync(query: str, local_top_k: int, tag_filter, tag_match):
+def _federated_search_sync(query: str, local_top_k: int, tag_filter, tag_match,
+                           source_types):
     """在子线程中执行：本地检索 + 各已启用 Connector 的实时检索。
 
     单个数据源失败只记录该源错误，不阻塞其它源与本地检索结果返回
@@ -884,7 +886,7 @@ def _federated_search_sync(query: str, local_top_k: int, tag_filter, tag_match):
     try:
         local_results = retrieval.retrieve_chunks(
             query=query, top_k=local_top_k,
-            tags=tag_filter, tag_match=tag_match,
+            tags=tag_filter, tag_match=tag_match, source_types=source_types,
         )
     except EmbeddingError:
         local_results = []  # 本地检索失败不阻塞外部检索
@@ -912,6 +914,7 @@ async def federated_search(q: QueryRequest):
         local_results, external, errors = await run_in_threadpool(
             _federated_search_sync,
             q.query, q.top_k or settings.top_k, q.tag_filter, q.tag_match,
+            q.source_types,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"联合检索失败：{e}")
@@ -1027,10 +1030,18 @@ async def delete_declarative_connector(name: str):
 def _save_external_sync(req: SaveExternalRequest) -> IngestResponse:
     """在子线程中执行收藏入库。外部封面图缓存到本地（失败不阻塞）。
 
-    若 Connector 支持 get_detail，收藏时**顺带拉一次详情**存入
-    raw_metadata（含角色列表，供角色墙聚合），详情失败则降级为搜索级信息。
+    Connector 支持 get_detail 时，**顺带下载完整资料**（简介+角色小传）：
+    - 文本写入 external_reference chunk（参与 RAG 检索，加权更低，见 ADR 0025）；
+    - 详情存 raw_metadata（ADR 0016 结构，含 reference_text，供角色墙聚合与
+      后续重下判重）；
+    详情失败则降级为搜索级信息（只存简介摘要）。
     """
     from app.database import SessionLocal
+    from app.external_refs import (
+        ensure_external_reference_chunks,
+        get_stored_reference,
+        with_reference_text,
+    )
     from app.images import cache_external_image
     from app.connectors.base import ConnectorError
 
@@ -1048,18 +1059,11 @@ def _save_external_sync(req: SaveExternalRequest) -> IngestResponse:
     image_url = detail.image_url if detail and detail.image_url else req.image_url
     tags = (detail.metadata.get("tags") or req.tags) if detail else req.tags
     raw_metadata = None
+    reference_text = ""
     if detail is not None:
-        # 统一 raw_metadata 结构（见 ADR 0016）：{"source","detail":{title,
-        # description,image_url,metadata(含 characters/rating/tags)}}
-        raw_metadata = {
-            "source": req.source,
-            "detail": {
-                "title": detail.title,
-                "description": detail.description,
-                "image_url": detail.image_url,
-                "metadata": detail.metadata,
-            },
-        }
+        # 统一 raw_metadata 结构（见 ADR 0016）：detail 内含完整资料 reference_text
+        raw_metadata = {"source": req.source, "detail": with_reference_text(detail)}
+        reference_text = raw_metadata["detail"]["metadata"].get("reference_text") or ""
 
     local_thumb = cache_external_image(image_url)
     db = SessionLocal()
@@ -1072,9 +1076,13 @@ def _save_external_sync(req: SaveExternalRequest) -> IngestResponse:
             image_url=image_url,
             tags=tags,
             raw_metadata=raw_metadata,
+            reference_text=reference_text,
             db=db,
         )
-        # 幂等命中/详情回填：raw_metadata 有内容则覆盖（保证角色墙数据落库）
+        # 幂等命中/旧条目：完整资料与已存不一致时重建 external_reference chunk
+        if detail is not None and get_stored_reference(obj) != reference_text:
+            ensure_external_reference_chunks(obj, reference_text, db=db)
+        # 详情回填：raw_metadata 有内容则覆盖（保证角色墙数据落库）
         if raw_metadata is not None:
             obj.raw_metadata = raw_metadata
             db.commit()
@@ -1162,6 +1170,77 @@ async def item_detail(item_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/items/{item_id}/refresh-external", response_model=ItemDetailOut)
+async def refresh_external_item(item_id: int, db: Session = Depends(get_db)):
+    """手动刷新某外部条目的完整资料（重新拉取最新版本，不锁死为一次性快照）。
+
+    - 走 Connector 令牌桶限流（get_detail 内部 acquire），不会不受控打 API；
+    - 重建 raw_metadata 与 external_reference chunk（简介+角色小传参与 RAG）；
+    - 数据源不支持 get_detail / 拉取失败时返回 502，本地数据保持不变。
+    """
+    item = db.get(Item, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="条目不存在")
+    if item.source == "local" or not item.external_id:
+        raise HTTPException(status_code=400, detail="仅外部收藏条目支持刷新")
+
+    conn = connector_registry.get_connector(item.source)
+    if conn is None or "get_detail" not in (conn.manifest.capabilities or []):
+        raise HTTPException(status_code=400, detail=f"数据源 {item.source} 不支持详情刷新")
+
+    from app.external_refs import with_reference_text, replace_external_reference_chunks
+
+    def _sync():
+        from app.database import SessionLocal
+        db2 = SessionLocal()
+        try:
+            fresh = db2.get(Item, item_id)
+            if fresh is None:
+                raise HTTPException(status_code=404, detail="条目不存在")
+            detail = conn.get_detail(fresh.external_id)
+            text = with_reference_text(detail)
+            reference = (text.get("metadata") or {}).get("reference_text") or ""
+            fresh.raw_metadata = {"source": fresh.source, "detail": text}
+            if detail.image_url and not fresh.file_path:
+                fresh.image_url = detail.image_url
+            replace_external_reference_chunks(fresh, reference, db=db2)
+            db2.commit()
+            db2.refresh(fresh)
+            return fresh
+        finally:
+            db2.close()
+
+    from app.connectors.base import ConnectorError
+    try:
+        refreshed = await run_in_threadpool(_sync)
+    except ConnectorError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"刷新失败：{e}")
+
+    db.expire_all()  # 丢弃请求会话内的旧缓存，让 item_detail 读到线程会话的写入
+    return await item_detail(refreshed.id, db=db)
+
+
+@router.post("/external/backfill-reference")
+async def backfill_external_reference_route(
+    limit: int = Query(5, ge=1, le=50),
+    source: Optional[str] = Query(None),
+):
+    """批量补齐历史收藏的完整外部资料（非阻塞后台单飞，复用令牌桶限流）。
+
+    与角色墙懒加载补详情同模式：每次最多补 limit 条，可多次调用推进；
+    已补齐条目自动跳过。返回是否本次实际启动了后台任务。
+    """
+    from app import external_refs
+    started = external_refs.backfill_async(limit=limit, source=source)
+    return {
+        "started": started,
+        "message": "已启动补齐任务" if started else "已有补齐任务在运行，请稍后再试",
+        "limit": limit,
+    }
+
+
 def _extract_characters(item: Item) -> list:
     """从条目的 raw_metadata 提取角色列表（统一结构，见 ADR 0016）。"""
     raw = item.raw_metadata
@@ -1233,7 +1312,7 @@ async def rag_query(q: QueryRequest):
         chunks = await run_in_threadpool(
             retrieval.retrieve_chunks,
             query=q.query, top_k=q.top_k or settings.top_k, tags=q.tag_filter,
-            tag_match=q.tag_match,
+            tag_match=q.tag_match, source_types=q.source_types,
         )
         if not chunks:
             return RAGResponse(
@@ -1264,20 +1343,14 @@ async def rag_query_stream(q: QueryRequest):
         chunks = await run_in_threadpool(
             retrieval.retrieve_chunks,
             query=q.query, top_k=q.top_k or settings.top_k, tags=q.tag_filter,
-            tag_match=q.tag_match,
+            tag_match=q.tag_match, source_types=q.source_types,
         )
     except EmbeddingError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"检索失败：{e}")
 
-    sources = [
-        RetrievedChunk(
-            content=c.content, item_title=c.item_title,
-            item_id=c.item_id, score=c.score, tags=c.tags,
-        )
-        for c in chunks
-    ]
+    sources = list(chunks)
 
     async def event_stream():
         yield _sse({"type": "sources", "sources": [s.model_dump() for s in sources]})

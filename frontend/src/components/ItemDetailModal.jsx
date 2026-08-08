@@ -5,7 +5,7 @@ function coverOk(url) {
   return url && typeof url === "string";
 }
 
-export default function ItemDetailModal({ detail, saved, onClose, onSave, onShare }) {
+export default function ItemDetailModal({ detail, saved, onClose, onSave, onShare, onRefresh }) {
   if (!detail) return null;
   const chars = Array.isArray(detail.characters) ? detail.characters : [];
   const tags = Array.isArray(detail.tags) ? detail.tags : [];
@@ -110,6 +110,14 @@ export default function ItemDetailModal({ detail, saved, onClose, onSave, onShar
             className="mt-4 ml-2 px-3 py-1.5 rounded-xl text-sm font-medium"
             style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
             生成安利卡
+          </button>
+        )}
+        {saved && onRefresh && (
+          <button onClick={onRefresh}
+            className="mt-4 ml-2 px-3 py-1.5 rounded-xl text-sm"
+            style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}
+            title="重新从数据源下载最新简介与角色小传（受限流约束）">
+            刷新资料
           </button>
         )}
       </div>

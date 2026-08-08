@@ -1,4 +1,4 @@
-"""retrieval 模块测试：排序、去重、tag 过滤、top_k"""
+"""retrieval 模块测试：排序、去重、tag 过滤、top_k、来源区分（ADR 0025）"""
 import math
 
 import pytest
@@ -128,3 +128,57 @@ class TestRetrieveChunks:
         add_item(db, fake_collection, "单标签文档", ["RAG"], [("内容。", 0.9)])
         results = retrieve_chunks("查询", top_k=5, tags=["RAG", "不存在"], tag_match="all", db=db)
         assert results == []
+
+
+def _add_external_item(db, col, title, source, content, sim):
+    """创建外部条目（external_ref）与 external_reference chunk（带 connector）。"""
+    item = Item(title=title, type="external_ref", source=source, external_id="1")
+    db.add(item)
+    db.flush()
+    ref = f"item{item.id}_chunk0"
+    db.add(Chunk(item_id=item.id, content=content, chunk_index=0, embedding_ref=ref,
+                 source_type="external_reference", connector=source))
+    col.add(ids=[ref], embeddings=[vec_with_similarity(sim)], documents=[content],
+            metadatas=[{"item_id": item.id, "chunk_index": 0,
+                        "source_type": "external_reference", "connector": source}])
+    db.commit()
+    return item
+
+
+class TestSourceTypeRanking:
+    def test_external_reference_penalized_behind_user_content(self, db, fake_collection, fixed_query_embedding):
+        """用户笔记与外部百科相似度相同 → 用户内容排前面（1.0 vs 0.4 加权）。"""
+        add_item(db, fake_collection, "我的笔记", [], [("这是我自己写的感想。", 0.8)])
+        _add_external_item(db, fake_collection, "百科条目", "bangumi", "这是外部简介。", 0.8)
+        results = retrieve_chunks("查询", top_k=5, max_chunks_per_item=5, db=db)
+        assert results[0].source_type == "note"
+        assert results[0].item_title == "我的笔记"
+        assert results[0].score == 0.8
+        ext_hits = [h for h in results if h.source_type == "external_reference"]
+        assert ext_hits
+        assert ext_hits[0].connector == "bangumi"
+        assert results.index(ext_hits[0]) > results.index(results[0])
+        assert ext_hits[0].score == round(0.8 * 0.4, 4)
+
+    def test_external_reference_still_surfaces_for_factual_high_similarity(
+        self, db, fake_collection, fixed_query_embedding, monkeypatch
+    ):
+        """外部百科相似度明显更高（事实性问题）时，即使加权仍能进入结果前列。"""
+        add_item(db, fake_collection, "我的笔记", [], [("泛泛而谈的感想。", 0.3)])
+        _add_external_item(db, fake_collection, "百科条目", "bangumi", "角色的完整设定与背景资料。", 0.9)
+        results = retrieve_chunks("查询", top_k=5, max_chunks_per_item=5, db=db)
+        ext = [h for h in results if h.source_type == "external_reference"]
+        assert ext, "高相似度外部资料应仍被召回"
+        assert ext[0].score == round(0.9 * 0.4, 4) > 0.3  # 0.36 > 0.3，仍排用户内容前
+
+    def test_source_types_filter_only_user(self, db, fake_collection, fixed_query_embedding):
+        add_item(db, fake_collection, "我的笔记", [], [("笔记内容。", 0.8)])
+        _add_external_item(db, fake_collection, "百科", "bangumi", "外部内容。", 0.9)
+        only_user = retrieve_chunks("查询", top_k=5, source_types=["note"], db=db)
+        assert only_user
+        assert all(h.source_type == "note" for h in only_user)
+        assert {h.item_title for h in only_user} == {"我的笔记"}
+        only_ext = retrieve_chunks("查询", top_k=5, source_types=["external_reference"], db=db)
+        assert only_ext
+        assert all(h.source_type == "external_reference" for h in only_ext)
+        assert {h.item_title for h in only_ext} == {"百科"}

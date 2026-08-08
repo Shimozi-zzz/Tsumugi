@@ -1,6 +1,15 @@
-"""检索模块 - 向量检索 + tag 过滤 + 排序去重
+"""检索模块 - 向量检索 + tag 过滤 + 排序去重 + 来源区分（ADR 0025）
 
-设计取舍详见 docs/decisions/0002-retrieval-ranking-dedup.md。
+设计取舍详见 docs/decisions/0002-retrieval-ranking-dedup.md 与
+docs/decisions/0025-external-reference-rag.md。
+
+来源区分策略：
+- 每个 chunk 的 source_type 由 SQLite 权威解析（Chunk.source_type/connector），
+  Chroma metadata 里的 source_type 仅作快速路径（新写向量都带）；
+- 默认问答：note/review（用户自己写的内容）权重 1.0，external_reference
+  （外部百科资料）权重 = settings.external_reference_weight（默认 0.4），
+  保证主观问题优先命中用户自己的内容，外部百科只作事实性补充；
+- 支持按 source_types 硬过滤（如只看用户自己的内容）。
 """
 from typing import Dict, List, Optional
 
@@ -10,7 +19,7 @@ from sqlalchemy.orm import Session
 from app import embeddings, vectorstore
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Item, Tag, item_tag_association
+from app.models import Chunk, Item, Tag, item_tag_association
 from app.schemas import RetrievedChunk
 
 
@@ -70,12 +79,34 @@ def _get_spoiler_review_ids(db: Session, review_ids: List[Optional[int]]) -> set
     return {r[0] for r in rows}
 
 
+def _resolve_chunk_sources(db: Session, refs: List[Optional[str]]) -> Dict[str, tuple]:
+    """embedding_ref -> (source_type, connector)，批量查询（DB 为权威）。
+
+    返回缺失项不在 map 中；调用方按需回退（review_id 推导 / 默认 note）。
+    """
+    refs = [r for r in refs if r]
+    if not refs:
+        return {}
+    rows = db.query(Chunk.embedding_ref, Chunk.source_type, Chunk.connector).filter(
+        Chunk.embedding_ref.in_(refs)
+    ).all()
+    return {r[0]: (r[1], r[2]) for r in rows if r[0]}
+
+
+def _source_weight(source_type: Optional[str]) -> float:
+    """按来源类型给相似度加权（ADR 0025）。用户内容=1.0，外部百科=系数。"""
+    if source_type == "external_reference":
+        return getattr(settings, "external_reference_weight", 0.4)
+    return 1.0
+
+
 def retrieve_chunks(
     query: str,
     top_k: int = 5,
     tags: Optional[List[str]] = None,
     max_chunks_per_item: Optional[int] = None,
     tag_match: str = "any",
+    source_types: Optional[List[str]] = None,
     db: Optional[Session] = None,
 ) -> List[RetrievedChunk]:
     """语义检索相关 chunk。
@@ -83,14 +114,17 @@ def retrieve_chunks(
     - tags=None：全库向量检索；
     - tags 非空：先用 SQL 筛 item_ids，再作为 Chroma where 过滤条件；
       tag_match="any" 为任意命中，"all" 为全部命中（交集）；
-    - 排序：按余弦相似度降序；
+    - source_types 非空：只返回来源类型在给定集合内的 chunk（硬过滤）；
+    - 排序：按"相似度 × 来源权重"降序（external_reference 默认压低）；
     - 去重：先去掉内容完全相同的 chunk，再按 item 去重（默认每 item 留 1 条，
       max_chunks_per_item 可调），最终截取 top_k 条。
     """
     own_session = db is None
     db = db or SessionLocal()
     try:
-        return _retrieve(db, query, top_k, tags, max_chunks_per_item, tag_match)
+        return _retrieve(
+            db, query, top_k, tags, max_chunks_per_item, tag_match, source_types
+        )
     finally:
         if own_session:
             db.close()
@@ -103,6 +137,7 @@ def _retrieve(
     tags: Optional[List[str]],
     max_chunks_per_item: Optional[int],
     tag_match: str = "any",
+    source_types: Optional[List[str]] = None,
 ) -> List[RetrievedChunk]:
     if not query or not query.strip():
         return []
@@ -117,8 +152,8 @@ def _retrieve(
     q_vector = embeddings.embed_query(query)  # 可能抛 EmbeddingError
     collection = vectorstore.get_collection()
 
-    # 多取一些候选，给去重留足余地
-    n_results = max(top_k * 4, 20)
+    # 多取一些候选：既给去重留余地，也补偿"外部百科被加权压低后"的用户内容召回
+    n_results = max(top_k * 6, 40)
     result = collection.query(
         query_embeddings=[q_vector],
         n_results=n_results,
@@ -126,18 +161,28 @@ def _retrieve(
         include=["documents", "metadatas", "distances"],
     )
 
+    ids = (result.get("ids") or [[]])[0]
     docs = (result.get("documents") or [[]])[0]
     metas = (result.get("metadatas") or [[]])[0]
     dists = (result.get("distances") or [[]])[0]
 
+    # DB 权威解析来源（对没有 source_type metadata 的历史向量走兜底）
+    source_map = _resolve_chunk_sources(db, list(ids))
+
     hits: List[RetrievedChunk] = []
-    for doc, meta, dist in zip(docs, metas, dists):
+    for ref, doc, meta, dist in zip(ids, docs, metas, dists):
         if not doc or not meta:
             continue
         item_id = meta.get("item_id")
         if item_id is None:
             continue
         review_id = meta.get("review_id")
+        source_type = meta.get("source_type")
+        connector = meta.get("connector")
+        if source_type is None:
+            db_st, db_conn = source_map.get(ref, (None, None))
+            source_type = db_st or ("review" if review_id is not None else "note")
+            connector = connector or db_conn
         hits.append(
             RetrievedChunk(
                 content=doc,
@@ -145,8 +190,9 @@ def _retrieve(
                 item_title="",  # 稍后批量填充
                 score=round(1.0 - float(dist), 4),  # cosine distance -> similarity
                 tags=[],
-                source_type="review" if review_id is not None else "item",
+                source_type=source_type or "note",
                 review_id=int(review_id) if review_id is not None else None,
+                connector=connector,
             )
         )
 
@@ -154,6 +200,11 @@ def _retrieve(
     spoilered = _get_spoiler_review_ids(db, [h.review_id for h in hits])
     if spoilered:
         hits = [h for h in hits if h.review_id not in spoilered]
+
+    # 按来源类型硬过滤（ADR 0025：如只读用户自己的内容）
+    if source_types:
+        allowed = set(source_types)
+        hits = [h for h in hits if h.source_type in allowed]
 
     # 1) 内容去重
     seen_content = set()
@@ -163,7 +214,9 @@ def _retrieve(
             seen_content.add(h.content)
             unique_hits.append(h)
 
-    # 2) 排序（余弦相似度降序）——Chroma 已按距离升序，这里显式保证
+    # 2) 来源加权 + 排序（相似度 × 权重 降序）
+    for h in unique_hits:
+        h.score = round(h.score * _source_weight(h.source_type), 4)
     unique_hits.sort(key=lambda h: h.score, reverse=True)
 
     # 3) 按 item 去重

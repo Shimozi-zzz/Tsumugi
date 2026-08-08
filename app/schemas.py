@@ -81,6 +81,9 @@ class QueryRequest(BaseModel):
     tag_filter: Optional[List[str]] = None
     max_chunks_per_item: Optional[int] = None
     tag_match: str = "any"  # "any"=任意标签命中, "all"=全部命中（交集）
+    # 按来源类型过滤检索（ADR 0025）：note / review / external_reference；
+    # None=不过滤。只读用户自己的内容可传 ["note","review"]。
+    source_types: Optional[List[str]] = None
 
 
 # ---------------------------------------------------------------- 列表筛选
@@ -247,10 +250,14 @@ class RetrievedChunk(BaseModel):
     item_id: int
     score: float
     tags: List[str] = []
-    # Review 接入 RAG 后区分来源：source_type="item"|"review"，review_id 对应 review
-    source_type: str = "item"
+    # 来源类型（ADR 0025）：note=用户笔记 / review=用户书评 /
+    # external_reference=外部下载的百科资料。review_id 对应 review 内容。
+    source_type: str = "note"
     review_id: Optional[int] = None
     review_title: Optional[str] = None
+    # external_reference 的来源 Connector（bangumi/moegirl/vndb...），用于
+    # "这段内容来自XX"展示与按数据源区分
+    connector: Optional[str] = None
 
 
 class SearchResponse(BaseModel):

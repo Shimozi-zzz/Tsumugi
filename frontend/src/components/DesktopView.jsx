@@ -8,6 +8,7 @@ import {
   fetchConnectors, createDeclarativeConnector, deleteConnector,
   saveConnectorProxy, testConnectorProxy,
   fetchCharacters, fetchItemDetail, fetchExternalDetail,
+  refreshExternalItem,
   batchTagItems, batchDeleteItems, setItemTags,
   fetchLLMProviders,
 } from "../api.js";
@@ -25,6 +26,16 @@ import TagEditModal from "./TagEditModal.jsx";
 import BangumiPanel from "./BangumiPanel.jsx";
 import { toast } from "../toast.js";
 import { THEMES, ACCENT_HUE_RANGE, RADIUS_RANGE } from "../themes.js";
+
+// 检索来源角标（ADR 0025）：区分用户自己写的内容与外部下载的百科资料
+function sourceTypeLabel(s) {
+  if (s.source_type === "external_reference") {
+    return s.connector ? `百科·${s.connector}` : "百科";
+  }
+  if (s.source_type === "review") return "我的书评";
+  if (s.source_type === "note") return "我的笔记";
+  return "知识库";
+}
 
 // 可排序的功能按钮（settings 固定底部、ask 固定顶部，不可移）
 const NAV = {
@@ -408,6 +419,22 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       setDetailView({ detail: d, saved: true });
     } catch (err) {
       setAskError(err.message);
+    }
+  }
+
+  // 手动刷新外部条目资料：重新拉取最新简介/角色小传（受限流约束，非阻塞 UI）
+  async function handleRefreshExternal() {
+    if (!detailView || !detailView.saved) return;
+    const d = detailView.detail;
+    try {
+      await refreshExternalItem(d.id);
+      const fresh = await fetchItemDetail(d.id);
+      setDetailView({ detail: fresh, saved: true });
+      refresh();
+      setCharRefreshKey((k) => k + 1);
+      toast.success(`已刷新「${fresh.title}」的完整资料`);
+    } catch (err) {
+      toast.error(err.message);
     }
   }
 
@@ -1327,6 +1354,13 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                     {sources.map((s, i) => (
                       <span key={i} className="text-[11px] px-2.5 py-1 rounded-full"
                         style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}>
+                        <span className="mr-1.5"
+                          style={{
+                            color: s.source_type === "external_reference"
+                              ? "var(--accent)" : "var(--text-secondary)",
+                          }}>
+                          {sourceTypeLabel(s)}
+                        </span>
                         {s.item_title} · {s.score.toFixed(2)}
                       </span>
                     ))}
@@ -1669,6 +1703,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           onClose={() => setDetailView(null)}
           onSave={detailView.saved ? null : detailSave}
           onShare={(id) => setShareItem(id)}
+          onRefresh={detailView.saved ? handleRefreshExternal : null}
         />
       )}
 

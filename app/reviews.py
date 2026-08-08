@@ -38,7 +38,10 @@ def _write_review_vectors(db: Session, review: Review) -> None:
     vectors = embeddings.embed_texts(chunks)  # 可能抛 EmbeddingError
     ids = _chunk_ids(review, len(chunks))
     metadatas = [
-        {"item_id": review.item_id, "review_id": review.id, "chunk_index": i}
+        {
+            "item_id": review.item_id, "review_id": review.id, "chunk_index": i,
+            "source_type": "review",
+        }
         for i in range(len(chunks))
     ]
     vectorstore.get_collection().add(
@@ -48,6 +51,7 @@ def _write_review_vectors(db: Session, review: Review) -> None:
         db.add(Chunk(
             item_id=review.item_id, review_id=review.id,
             content=content, chunk_index=i, embedding_ref=ref,
+            source_type="review",
         ))
 
 

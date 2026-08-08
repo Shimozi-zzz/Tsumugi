@@ -119,8 +119,8 @@ class TestRagIntegration:
         assert review_hits, "检索应能命中 review 内容"
         assert review_hits[0].review_id is not None
         assert review_hits[0].review_title == "结局分析"
-        # item 自身的 chunk source_type 为 item
-        item_hits = [h for h in results if h.source_type == "item"]
+        # item 自身的 chunk source_type 为 note（ADR 0025 来源类型）
+        item_hits = [h for h in results if h.source_type == "note"]
         assert item_hits
 
     def test_retrieval_review_has_correct_item(self, db, fake_collection, patch_embeddings):
@@ -205,7 +205,7 @@ class TestSpoilerRetrieval:
         item = _mk_item(db, fake_collection, patch_embeddings, title="Z", content="原作正文" * 20)
         reviews.create_review(item.id, "剧透内容不该出现" * 20, spoiler=True, db=db)
         results = retrieve_chunks("原作正文", top_k=10, max_chunks_per_item=10, db=db)
-        assert any(h.source_type == "item" for h in results)  # item 自身内容仍在
+        assert any(h.source_type == "note" for h in results)  # item 自身内容仍在
         assert all(h.source_type != "review" for h in results)  # spoiler review 被过滤
 
 

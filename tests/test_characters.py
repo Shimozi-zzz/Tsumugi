@@ -8,6 +8,7 @@ from app.connectors import registry
 from app.connectors.base import ConnectorError, ConnectorManifest, ItemDetail
 from app.database import get_db
 from app import ingest
+from app.models import Chunk, Item
 
 
 CHAR_HUIYE = {"id": 66899, "name": "四宫辉夜", "image_url": "https://img/huiye.jpg",
@@ -173,3 +174,63 @@ class TestDetailEndpoints:
     def test_item_detail_404(self, client):
         r = client.get("/api/items/99999/detail")
         assert r.status_code == 404
+
+
+class TestSaveExternalReferenceChunks:
+    """ADR 0025：收藏入库时下载完整资料（简介+角色小传）切分为 external_reference chunk。"""
+
+    def test_save_builds_reference_chunks(self, client, db):
+        _save(client, "A")
+        item = db.query(Item).filter(Item.external_id == "A").first()
+        assert item is not None
+        chunks = db.query(Chunk).filter(Chunk.item_id == item.id).all()
+        assert chunks, "收藏时应生成完整资料 chunk"
+        assert all(c.source_type == "external_reference" for c in chunks)
+        assert all(c.connector == "fakebg" for c in chunks)
+        # 角色小传已进入参考文本
+        assert any("四宫辉夜" in c.content for c in chunks)
+        # raw_metadata 存了 reference_text（供后续重下判重）
+        raw = item.raw_metadata
+        assert raw["detail"]["metadata"]["reference_text"]
+
+    def test_resave_keeps_chunks_unchanged(self, client, db):
+        _save(client, "A")
+        item = db.query(Item).filter(Item.external_id == "A").first()
+        before = {c.embedding_ref for c in db.query(Chunk).filter(Chunk.item_id == item.id).all()}
+        n_chunks = db.query(Chunk).count()
+        _save(client, "A")  # 幂等重收藏（详情未变）
+        after = {c.embedding_ref for c in db.query(Chunk).filter(Chunk.item_id == item.id).all()}
+        assert after == before  # 未重建、未重复写向量
+        assert db.query(Chunk).count() == n_chunks
+
+
+class TestRefreshExternal:
+    def test_refresh_rebuilds_missing_reference_chunks(self, client, db, fake_collection):
+        _save(client, "A")
+        item = db.query(Item).filter(Item.external_id == "A").first()
+        db.query(Chunk).filter(Chunk.item_id == item.id).delete(synchronize_session=False)
+        db.commit()
+        r = client.post(f"/api/items/{item.id}/refresh-external")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["characters"], "刷新后角色数据应回来"
+        chunks = db.query(Chunk).filter(Chunk.item_id == item.id).all()
+        assert chunks
+        assert all(c.source_type == "external_reference" for c in chunks)
+        assert all(c.connector == "fakebg" for c in chunks)
+
+    def test_refresh_uses_connector_limit(self, client, db):
+        _save(client, "B")
+        item = db.query(Item).filter(Item.external_id == "B").first()
+        before = FakeDetailConnector.get_detail_calls
+        client.post(f"/api/items/{item.id}/refresh-external")
+        assert FakeDetailConnector.get_detail_calls == before + 1  # 走 get_detail（内部令牌桶限流）
+
+    def test_refresh_rejects_local(self, client, db):
+        from app import ingest
+        it = ingest.ingest_text_document("本地笔记", "内容" * 20, db=db)
+        r = client.post(f"/api/items/{it.id}/refresh-external")
+        assert r.status_code == 400
+
+    def test_refresh_404(self, client):
+        assert client.post("/api/items/99999/refresh-external").status_code == 404

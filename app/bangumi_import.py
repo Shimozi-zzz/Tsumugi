@@ -210,9 +210,12 @@ def backfill_bangumi_details(limit: int = 20) -> int:
 
     每次最多补 limit 条（受令牌桶限流约束，分批推进）；失败跳过不阻塞。
     避免"批量导入时就逐条拉角色"导致几百个请求一次打爆限流。
+    补详情的同一份响应顺带重建 external_reference chunk（完整资料入库，
+    见 ADR 0025），角色墙刷新的同时把百科资料也补进 RAG。
     """
     from app.connectors import registry
     from app.database import SessionLocal
+    from app.external_refs import replace_external_reference_chunks, with_reference_text
 
     conn = registry.get_connector("bangumi")
     if conn is None:
@@ -227,15 +230,12 @@ def backfill_bangumi_details(limit: int = 20) -> int:
                 detail = conn.get_detail(it.external_id)
                 it.raw_metadata = {
                     "source": "bangumi",
-                    "detail": {
-                        "title": detail.title,
-                        "description": detail.description,
-                        "image_url": detail.image_url,
-                        "metadata": detail.metadata,
-                    },
+                    "detail": with_reference_text(detail),
                 }
                 if not it.image_url:
                     it.image_url = detail.image_url
+                reference = (it.raw_metadata["detail"]["metadata"] or {}).get("reference_text") or ""
+                replace_external_reference_chunks(it, reference, db=db)
                 db.commit()
                 filled += 1
             except Exception:  # noqa: BLE001 - 单条失败跳过

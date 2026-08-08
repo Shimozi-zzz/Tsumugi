@@ -383,6 +383,26 @@ export async function fetchExternalDetail(source, externalId) {
   return body;
 }
 
+// ---- 外部资料刷新 / 批量补齐（ADR 0025）----
+
+export async function refreshExternalItem(itemId) {
+  const resp = await fetch(`${API_BASE}/items/${itemId}/refresh-external`, {
+    method: "POST",
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "刷新外部资料失败");
+  return body;
+}
+
+export async function backfillReference(limit = 5) {
+  const resp = await fetch(`${API_BASE}/external/backfill-reference?limit=${limit}`, {
+    method: "POST",
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "批量补齐失败");
+  return body;
+}
+
 // ---- 流式问答：解析 SSE 事件 ----
 export async function streamRag(query, { onSources, onChunk, onDone, onError }) {
   const resp = await fetch(`${API_BASE}/rag/query/stream`, {

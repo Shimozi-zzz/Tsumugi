@@ -22,10 +22,16 @@ class AIAnswerDisabled(LLMError):
 
 SYSTEM_PROMPT_TEMPLATE = """你是一个严谨的个人知识库助手。请严格基于下面提供的"参考资料"回答用户问题。
 
+参考资料包含两类来源，请始终区分、不要混为一谈：
+- 用户自己的内容：笔记、书评/读后感（标注为"我的笔记"/"我的书评"）；
+- 外部百科资料：下载的作品简介、角色小传等（标注为"百科资料"）。
+
 要求：
 1. 只依据参考资料作答；参考资料不足以回答时，明确说明"资料中没有相关信息"，不要编造。
-2. 引用具体内容时标注来源标题，如（来源：《标题》）。
-3. 回答使用中文，简洁、有条理。"""
+2. 引用具体内容时标注来源标题与类型，如（来源：《标题》，我的书评）/（来源：《标题》，百科资料）。
+3. 主观类问题（如"我对某角色怎么看""评价一下"）应优先依据用户自己写的书评/笔记作答；
+   外部百科资料只作事实补充，不能取代用户自己的评价。
+4. 回答使用中文，简洁、有条理。"""
 
 
 # ---------------------------------------------------------------- Provider 解析
@@ -75,10 +81,15 @@ def build_context_prompt(
     for i, chunk in enumerate(chunks, start=1):
         if budget <= 0:
             break
-        # review 来源标注，与条目自身内容区分
+        # 来源标注：区分"用户自己写的"（note/review）与"外部下载的百科资料"
         source_label = chunk.item_title or "未知来源"
         if chunk.source_type == "review":
-            source_label = f"{source_label}（读后感：{chunk.review_title or '无题'}）"
+            source_label = f"{source_label}（我的书评：{chunk.review_title or '无题'}）"
+        elif chunk.source_type == "external_reference":
+            conn = chunk.connector or ""
+            source_label = f"{source_label}（百科资料{f'：{conn}' if conn else ''}）"
+        elif chunk.source_type == "note":
+            source_label = f"{source_label}（我的笔记）"
         block = f"[{i}] 来源：{source_label}\n{chunk.content}"
         if len(block) > budget:
             parts.append(block[:budget] + "\n…（此条已截断）")

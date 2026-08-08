@@ -53,6 +53,12 @@ class Chunk(Base):
     content = Column(Text, nullable=False)  # 切分后的文本
     chunk_index = Column(Integer, nullable=False)  # 在原文中的顺序
     embedding_ref = Column(String(255), nullable=True)  # Chroma中的向量ID
+    # 来源类型标记（ADR 0025）：note=用户笔记 / review=用户书评 /
+    # external_reference=外部下载的百科资料（简介+角色小传，参与 RAG 检索但加权更低）
+    source_type = Column(String(20), nullable=True)
+    # external_reference 类型的 chunk 记录来源 Connector（bangumi/moegirl/vndb...），
+    # 供"这段内容来自XX"展示与按数据源筛选
+    connector = Column(String(50), nullable=True)
 
     # 关系
     item = relationship("Item", back_populates="chunks")

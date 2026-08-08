@@ -182,6 +182,46 @@ def find_existing_by_hash(db: Session, content_hash: str) -> Optional[Item]:
     return db.query(Item).filter(Item.content_hash == content_hash).first()
 
 
+# ---------------------------------------------------------------- 外部参考资料 chunk
+
+def _write_external_reference_chunks(
+    item: Item, reference_text: str, db: Session
+) -> int:
+    """把外部完整资料（简介+角色小传等）切分 -> embedding -> 写入向量库。
+
+    与 review/note 的写入一致（复用 ingest 的反向清理模式：失败按已写 ids 清理）。
+    chunk 标记 source_type='external_reference' + connector=item.source，
+    供检索层加权与"这段内容来自XX"展示。
+    返回写入的 Chroma id 列表（文本为空返回空列表，不写任何向量）。
+    """
+    chunks = split_text(reference_text) if reference_text else []
+    if not chunks:
+        return []
+    vectors = embeddings.embed_texts(chunks)  # 可能抛 EmbeddingError
+    ids = [f"item{item.id}_chunk{i}" for i in range(len(chunks))]
+    metadatas = [
+        {
+            "item_id": item.id,
+            "chunk_index": i,
+            "source_type": "external_reference",
+            "connector": item.source,
+        }
+        for i in range(len(chunks))
+    ]
+    vectorstore.get_collection().add(
+        ids=ids, embeddings=vectors, documents=chunks, metadatas=metadatas,
+    )
+    for i, (chunk_text, ref) in enumerate(zip(chunks, ids)):
+        db.add(
+            Chunk(
+                item_id=item.id, content=chunk_text,
+                chunk_index=i, embedding_ref=ref,
+                source_type="external_reference", connector=item.source,
+            )
+        )
+    return ids
+
+
 # ---------------------------------------------------------------- 入库
 
 def ingest_text_document(
@@ -225,7 +265,8 @@ def ingest_text_document(
             vectors = embeddings.embed_texts(chunks)  # 可能抛 EmbeddingError
             ids = [f"item{item.id}_chunk{i}" for i in range(len(chunks))]
             metadatas = [
-                {"item_id": item.id, "chunk_index": i} for i in range(len(chunks))
+                {"item_id": item.id, "chunk_index": i, "source_type": "note"}
+                for i in range(len(chunks))
             ]
             vectorstore.get_collection().add(
                 ids=ids,
@@ -241,6 +282,7 @@ def ingest_text_document(
                         content=content,
                         chunk_index=i,
                         embedding_ref=ref,
+                        source_type="note",
                     )
                 )
 
@@ -307,11 +349,17 @@ def ingest_external(
     image_url: Optional[str] = None,
     tags: Optional[List[str]] = None,
     raw_metadata: Optional[dict] = None,
+    reference_text: Optional[str] = None,
     db: Optional[Session] = None,
 ) -> Item:
     """外部数据收藏入库（Phase 3 / Save to Library）。
 
-    仅存摘要/简介文本进入向量库参与 RAG 检索，不做全文抓取存储。
+    - `content`：简介摘要文本，存 Item.content 字段（详情页展示用）；
+    - `reference_text`：外部完整资料文本（简介+角色小传，见
+      external_refs.build_reference_text）。**新条目**时若提供则切分 reference_text
+      入库（source_type='external_reference'），否则退回切分 content；
+    - 已收藏条目的完整资料重下/刷新由 external_refs.replace_external_reference_chunks
+      负责（本函数幂等命中时直接返回，不重复写 chunk）。
     同一 source+external_id 重复收藏时返回已有条目（幂等）。
     """
     own_session = db is None
@@ -347,24 +395,9 @@ def ingest_external(
         try:
             db.add(item)
             db.flush()
-            chunks = split_text(content) if content else []
-            if chunks:
-                vectors = embeddings.embed_texts(chunks)
-                ids = [f"item{item.id}_chunk{i}" for i in range(len(chunks))]
-                metadatas = [
-                    {"item_id": item.id, "chunk_index": i} for i in range(len(chunks))
-                ]
-                vectorstore.get_collection().add(
-                    ids=ids, embeddings=vectors, documents=chunks, metadatas=metadatas,
-                )
-                chroma_ids = ids
-                for i, (chunk_text, ref) in enumerate(zip(chunks, ids)):
-                    db.add(
-                        Chunk(
-                            item_id=item.id, content=chunk_text,
-                            chunk_index=i, embedding_ref=ref,
-                        )
-                    )
+            # 完整资料优先切分 reference_text，否则退回 content（保持旧行为）
+            chunk_text = reference_text if reference_text else content
+            chroma_ids = _write_external_reference_chunks(item, chunk_text, db)
             db.commit()
             db.refresh(item)
             return item
