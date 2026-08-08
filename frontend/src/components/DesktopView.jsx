@@ -795,8 +795,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   });
 
   return (
-    <div className="desktop-view flex relative"
-      style={{ minHeight: "calc(100vh - 60px)" }}>
+    <div className="desktop-view flex relative flex-1 min-h-0 overflow-hidden"
+      data-testid="app-shell">
 
       {/* 文字涂鸦层（可拖动，编辑模式显示蒙版）——z 高于蒙版才能拖动 */}
       {textOverlays.map((o) => (
@@ -863,8 +863,9 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       )}
 
       {/* 1. 图标导航栏：ask固定顶 + 可排序区 + settings固定底 */}
-      <nav className="desk-nav flex flex-col items-center py-4 gap-1.5 z-10"
-        style={{ width: 52, backgroundColor: "var(--rail-bg)", borderRight: "1px solid var(--panel-border)" }}>
+      <nav className="desk-nav flex flex-col items-center py-4 gap-1.5 z-10 shrink-0"
+        style={{ width: 52, backgroundColor: "var(--rail-bg)", borderRight: "1px solid var(--panel-border)" }}
+        data-testid="left-nav">
         <div className="mb-3 text-base font-semibold" style={{ color: "var(--accent)" }}>紬</div>
         {/* ask 固定一号位 */}
         <button onClick={() => handleSection("ask")} title="问答"
@@ -874,7 +875,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           {NAV.ask.icon}
         </button>
         {/* 可排序区（不含 ask，长按进入调整模式，调整模式下可拖动） */}
-        <div className="flex-1 flex flex-col items-center gap-1.5 overflow-y-auto py-2">
+        <div className="flex-1 min-h-0 flex flex-col items-center gap-1.5 overflow-y-auto py-2">
           {sortedNavKeys.map((k) => (
             <button key={k}
               onClick={() => { if (!navRearrangeMode) handleSection(k); }}
@@ -922,14 +923,15 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         </button>
       </nav>
 
-      {/* 2. 半透明侧栏（可拖拽调宽 + 中心收缩按钮） */}
-      <aside ref={sidebarRef} className="relative flex flex-col z-10"
+      {/* 2. 半透明侧栏（可拖拽调宽 + 中心收缩按钮）；独立于主内容，不随其滚动 */}
+      <aside ref={sidebarRef} className="relative flex flex-col z-10 shrink-0"
         style={{
           width: sidebarOpen ? sidebarWidth : 36,
           backgroundColor: "var(--rail-bg)",
           borderRight: "1px solid var(--panel-border)",
           transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-        }}>
+        }}
+        data-testid="left-sidebar">
         {/* 拖拽手柄（收缩时隐藏并禁用交互） */}
         <div ref={dragRef}
           className="absolute right-0 top-0 bottom-0 z-20"
@@ -943,8 +945,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
             pointerEvents: sidebarOpen ? "auto" : "none",
           }}>
           <div className="h-full flex flex-col min-h-0">
-            {/* 图书馆侧栏内容（分组 + 标签）或 问答提示 */}
-            <div className="flex-1 overflow-y-auto px-2.5 pb-2 pt-3">
+            {/* 图书馆侧栏内容（分组 + 标签）或 问答提示；独立内部滚动 */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-2.5 pb-2 pt-3">
               {section === "library" && (
                 <>
                   {/* 系统分组 */}
@@ -1099,8 +1101,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         </button>
       </aside>
 
-      {/* 3. 中央工作区 */}
-      <div className="flex-1 relative overflow-y-auto p-6 z-10">
+      {/* 3. 中央工作区：唯一的主内容滚动容器（ADR 0028），其余固定 */}
+      <div className="flex-1 min-h-0 relative overflow-y-auto p-6 z-10" data-testid="main-content">
 
         {section === "library" && (
           <>

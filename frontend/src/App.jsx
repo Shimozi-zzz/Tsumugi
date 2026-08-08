@@ -53,15 +53,13 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen app-root"
+    <div className="app-root h-screen flex flex-col overflow-hidden"
       style={{ backgroundColor: "var(--bg)", color: "var(--text)" }}>
-      {/* 顶栏：品牌 */}
-      <header className="border-b px-5 py-3 flex items-center justify-between"
+      {/* 顶栏：品牌（应用外壳一部分，固定不随内容滚动；ADR 0028） */}
+      <header className="border-b px-5 py-3 flex items-center justify-between shrink-0"
         style={{
           backgroundColor: "var(--panel)",
           borderColor: "var(--panel-border)",
-          position: "sticky",
-          top: 0,
           zIndex: 30,
         }}>
         <div className="flex items-center gap-2">
