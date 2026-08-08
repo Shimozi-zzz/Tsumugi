@@ -43,6 +43,9 @@
   --surface-1: #ffffff;
   --surface-2: #f2f2f4;
 
+  /* ---- 封面氛围色强度（ADR 0034）：浅色主题克制（~0.16-0.18），深色稍明显（0.30） ---- */
+  --ambient-alpha: 0.16;
+
   /* ---- 经典白（默认主题，最克制） ---- */
   --bg: #fafafa;
   --panel: #ffffff;
@@ -98,6 +101,7 @@ html[data-theme="mint"] {
   --surface-0: #f2f9f6;
   --surface-1: #ffffff;
   --surface-2: #e9f4ef;
+  --ambient-alpha: 0.18;
 }
 
 /* ============================================================
@@ -125,6 +129,7 @@ html[data-theme="sakura"] {
   --surface-0: #fdf3f5;
   --surface-1: #ffffff;
   --surface-2: #f9edf1;
+  --ambient-alpha: 0.18;
 }
 
 /* ============================================================
@@ -156,6 +161,7 @@ html[data-theme="dark"] {
   --surface-0: #0b0f14;
   --surface-1: #161d26;
   --surface-2: #202a37;
+  --ambient-alpha: 0.30;
 }
 
 /* ============================================================
