@@ -1,77 +1,24 @@
-// 声优图谱（ADR 0032）：作品-角色-声优 关系网络（轻量 SVG，自绘确定性布局）
-// - 布局：作品环绕外圈，声优放在其配音作品的质心 + 重叠松弛（力导向的确定性近似，
-//   一次算完，无实时 O(n²) 帧循环；角色节点置于声优→作品连线的中点偏移）；
-// - 节点：声优=accent 圆（越大配音作品越多）、作品=surface-2 圆、角色=小圆点；
-// - 交互：点声优 → 下方展示完整配音列表并高亮子图；点作品/角色 → 复用主从视图跳详情；
-// - 视觉走 token，不引入独立配色；默认阈值"配音作品数≥2"（剔除 663 个只配一作的孤立
-//   声优，见 ADR 0032 实测数据），提供 2/3/5/8 调节。
+// 声优图谱（ADR 0032 + 0035 可读性修复）：
+// - 布局：voiceLayout.layoutGraph（作品绕圈 + 声优质心 + 强重叠松弛，160 轮 +
+//   最小间距 74，避免中心挤压成实心团块）；
+// - 标签分级（ADR 0035）：只有高连接声优（配音作品数≥LABEL_ACTOR_MIN）与作品才
+//   显示文字标签，且做**碰撞避让**（重叠时隐藏优先级低的）；其余节点只显示圆点，
+//   hover 显示名称（<title>）。高密度下仍可读。
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchVoiceRelations } from "../api.js";
 import { TagCapsule } from "./ui.jsx";
+import {
+  LABEL_ACTOR_MIN, VIEW_H, VIEW_W, layoutGraph, pickLabels, shortText,
+} from "../voiceLayout.js";
 
 const THRESHOLDS = [2, 3, 5, 8];
-const VIEW_W = 960;
-const VIEW_H = 700;
-
-// 确定性布局：works 圆形环绕；actors 放置到其作品质心 + 重叠松弛；
-// characters 在 声优→作品 线段中点垂直偏移（避免多角色重叠）。
-function layoutGraph(works, actors, chars) {
-  const cx = VIEW_W / 2, cy = VIEW_H / 2;
-  const R = Math.min(VIEW_W, VIEW_H) / 2 - 70;
-  const workById = new Map(works.map((w) => [w.item_id, w]));
-  works.forEach((w, i) => {
-    const ang = (2 * Math.PI * i) / Math.max(works.length, 1) - Math.PI / 2;
-    w.x = cx + R * Math.cos(ang);
-    w.y = cy + R * Math.sin(ang);
-  });
-  actors.forEach((a) => {
-    const ids = a.works.map((w) => w.item_id);
-    if (!ids.length) { a.x = cx; a.y = cy; return; }
-    let sx = 0, sy = 0;
-    for (const id of ids) { const w = workById.get(id); if (w) { sx += w.x; sy += w.y; } }
-    a.x = sx / ids.length;
-    a.y = sy / ids.length;
-  });
-  for (let iter = 0; iter < 70; iter++) {
-    for (const a of actors) {
-      const ids = a.works.map((w) => w.item_id);
-      let fx = 0, fy = 0;
-      // 拉回自身作品质心
-      let cx0 = 0, cy0 = 0, n = 0;
-      for (const id of ids) { const w = workById.get(id); if (w) { cx0 += w.x; cy0 += w.y; n++; } }
-      if (n) { fx += (cx0 / n - a.x) * 0.04; fy += (cy0 / n - a.y) * 0.04; }
-      // 声优间排斥（防重叠）
-      for (const b of actors) {
-        if (b === a) continue;
-        const dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy) || 1e-6;
-        if (d < 55) { const f = (55 - d) * 0.012; fx += (dx / d) * f; fy += (dy / d) * f; }
-      }
-      // 与作品排斥（防贴边）
-      for (const w of works) {
-        const dx = a.x - w.x, dy = a.y - w.y, d = Math.hypot(dx, dy) || 1e-6;
-        if (d < 60) { const f = (60 - d) * 0.008; fx += (dx / d) * f; fy += (dy / d) * f; }
-      }
-      a.x += Math.max(-10, Math.min(10, fx));
-      a.y += Math.max(-10, Math.min(10, fy));
-    }
-  }
-  let ci = 0;
-  chars.forEach((c) => {
-    const a = actors.find((x) => x.name === c.actor);
-    const w = workById.get(c.work_id);
-    if (!a || !w) { c.x = cx; c.y = cy; return; }
-    const mx = (a.x + w.x) / 2, my = (a.y + w.y) / 2;
-    const dx = w.x - a.x, dy = w.y - a.y, len = Math.hypot(dx, dy) || 1;
-    const off = (ci % 2 ? 1 : -1) * 5 * ((ci >> 1) % 3 + 1);
-    c.x = mx + (-dy / len) * off;
-    c.y = my + (dx / len) * off;
-    ci++;
-  });
-}
+// 默认阈值：实测 ≥2 为 357 声优（挤压成实心），≥3 为 159 声优、≥5 为 41 声优。
+// 默认取 3（保留较完整的跨作品网络，配合标签分级/碰撞后仍可读），见 ADR 0035。
+const DEFAULT_THRESHOLD = 3;
 
 export default function VoiceGraphView({ focusActor, onOpenWork, className = "" }) {
   const [data, setData] = useState(null);
-  const [threshold, setThreshold] = useState(2);
+  const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD);
   const [selected, setSelected] = useState(null); // 选中的声优
   const [loading, setLoading] = useState(true);
 
@@ -101,14 +48,40 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
     for (const a of actors) for (const w of a.works) for (const role of w.roles) {
       chars.push({ actor: a.name, work_id: w.item_id, name: role });
     }
-    const node = { actors, works, chars };
-    layoutGraph(node.works, node.actors, node.chars);
+    layoutGraph(works, actors, chars);
+
+    // 作品连接数（用于作品标签优先级）
+    const workConn = new Map();
+    for (const a of actors) for (const w of a.works) {
+      workConn.set(w.item_id, (workConn.get(w.item_id) || 0) + 1);
+    }
+    // 标签候选：高连接声优 + 全部作品；碰撞避让后只保留放得下且不重叠的
+    const candidates = [];
+    for (const a of actors) {
+      if (a.work_count >= LABEL_ACTOR_MIN) {
+        candidates.push({
+          key: "a:" + a.name, x: a.x, y: a.y,
+          text: shortText(a.name, 8), priority: a.work_count,
+        });
+      }
+    }
+    for (const w of works) {
+      candidates.push({
+        key: "w:" + w.item_id, x: w.x, y: w.y,
+        text: shortText(w.title, 10), priority: workConn.get(w.item_id) || 1,
+      });
+    }
+    const forcedKeys = selected ? ["a:" + selected.name] : [];
+    const labelSet = pickLabels(candidates, forcedKeys);
+
     // 选中声优高亮：仅保留其连通的节点可见
     const selectedSet = selected ? new Set(selected.works.map((w) => w.item_id)) : null;
-    node.actorVisible = (a) => !selectedSet || a.name === selected.name;
-    node.workVisible = (w) => !selectedSet || selectedSet.has(w.item_id) || selected.works.some((x) => x.item_id === w.item_id);
-    node.charVisible = (c) => !selectedSet || (c.actor === selected.name && selectedSet.has(c.work_id));
-    return node;
+    return {
+      actors, works, chars, labelSet,
+      actorVisible: (a) => !selectedSet || a.name === selected.name,
+      workVisible: (w) => !selectedSet || selectedSet.has(w.item_id) || selected.works.some((x) => x.item_id === w.item_id),
+      charVisible: (c) => !selectedSet || (c.actor === selected.name && selectedSet.has(c.work_id)),
+    };
   }, [data, threshold, selected]);
 
   if (loading) return <div className={"text-sm " + className} style={{ color: "var(--text-secondary)" }}>加载中…</div>;
@@ -164,19 +137,24 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
             graph.workVisible(w) && (
               <g key={w.item_id} onClick={() => onOpenWork?.(w.item_id)}
                 style={{ cursor: "pointer" }}>
-                <circle cx={w.x} cy={w.y} r="12" fill="var(--surface-2)" stroke="var(--panel-border)" strokeWidth="1" />
-                <text x={w.x} y={w.y + 26} textAnchor="middle" fontSize="10" fill="var(--text-secondary)"
-                  style={{ pointerEvents: "none" }}>
-                  {w.title.length > 10 ? w.title.slice(0, 10) + "…" : w.title}
-                </text>
+                <circle cx={w.x} cy={w.y} r="12" fill="var(--surface-2)" stroke="var(--panel-border)" strokeWidth="1">
+                  <title>{w.title}</title>
+                </circle>
+                {graph.labelSet.has("w:" + w.item_id) && (
+                  <text x={w.x} y={w.y + 26} textAnchor="middle" fontSize="10" fill="var(--text-secondary)"
+                    style={{ pointerEvents: "none" }}>
+                    {shortText(w.title, 10)}
+                  </text>
+                )}
               </g>
             )
           ))}
-          {/* 角色节点 */}
+          {/* 角色节点（小圆点 + hover 名称，不占文字标签） */}
           {graph.chars.map((c, i) => (
             graph.charVisible(c) && (
-              <circle key={"c" + i} cx={c.x} cy={c.y} r="3.2" fill="var(--tag-bg)" stroke="var(--tag-text)"
-                strokeWidth="1" onClick={() => onOpenWork?.(c.work_id)} style={{ cursor: "pointer" }}>
+              <circle key={"c" + i} cx={c.x} cy={c.y} r="2.6" fill="var(--tag-bg)" stroke="var(--tag-text)"
+                strokeWidth="1" opacity="0.85" onClick={() => onOpenWork?.(c.work_id)}
+                style={{ cursor: "pointer" }}>
                 <title>{`${c.name}（${c.actor}）`}</title>
               </circle>
             )
@@ -186,14 +164,18 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
             graph.actorVisible(a) && (
               <g key={a.name} onClick={() => setSelected(selected && selected.name === a.name ? null : a)}
                 style={{ cursor: "pointer" }}>
-                <circle cx={a.x} cy={a.y} r={Math.min(6 + a.work_count * 1.1, 18)}
+                <circle cx={a.x} cy={a.y} r={Math.min(5 + a.work_count * 0.9, 16)}
                   fill={selected && selected.name === a.name ? "var(--accent)" : "var(--accent-soft)"}
-                  stroke="var(--accent)" strokeWidth="1.5" />
-                <text x={a.x} y={a.y + 24} textAnchor="middle" fontSize="10"
-                  fill={selected && selected.name === a.name ? "var(--accent)" : "var(--text)"}
-                  style={{ pointerEvents: "none" }}>
-                  {a.name.length > 8 ? a.name.slice(0, 8) + "…" : a.name}
-                </text>
+                  stroke="var(--accent)" strokeWidth="1.5">
+                  <title>{`${a.name}：配音 ${a.work_count} 部作品`}</title>
+                </circle>
+                {graph.labelSet.has("a:" + a.name) && (
+                  <text x={a.x} y={a.y + 24} textAnchor="middle" fontSize="10"
+                    fill={selected && selected.name === a.name ? "var(--accent)" : "var(--text)"}
+                    style={{ pointerEvents: "none" }}>
+                    {shortText(a.name, 8)}
+                  </text>
+                )}
               </g>
             )
           ))}
