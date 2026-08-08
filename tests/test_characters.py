@@ -234,3 +234,62 @@ class TestRefreshExternal:
 
     def test_refresh_404(self, client):
         assert client.post("/api/items/99999/refresh-external").status_code == 404
+
+
+class TestItemDetailSocial:
+    """ADR 0026：detail 暴露 reference_text + social（热度/评分分布替代数据）。"""
+
+    def test_detail_exposes_reference_text_and_social(self, client, db):
+        _save(client, "A")
+        item = db.query(Item).filter(Item.external_id == "A").first()
+        detail = client.get(f"/api/items/{item.id}/detail").json()
+        assert detail["reference_text"]  # 完整资料文本已暴露
+        assert "reference_text" in (detail["raw_metadata"]["detail"]["metadata"])
+        assert "social" in detail
+
+    def test_detail_social_bangumi(self, client, db):
+        from app import ingest as _ingest
+        item = _ingest.ingest_external(
+            source="fakebg", external_id="S1", title="X", content="x",
+            raw_metadata={"source": "fakebg", "detail": {"metadata": {
+                "rating_info": {"rank": 5, "total": 100, "count": {"10": 50}, "score": 8.5},
+                "collection": {"wish": 1, "collect": 2, "doing": 3, "on_hold": 0, "dropped": 0},
+            }}},
+            db=db,
+        )
+        d = client.get(f"/api/items/{item.id}/detail").json()
+        assert d["social"]["rating_rank"] == 5
+        assert d["social"]["rating_total"] == 100
+        assert d["social"]["collection"]["collect"] == 2
+
+
+class TestRelatedSources:
+    """ADR 0026 多来源切换：同作品跨来源各自收藏，按规范化标题匹配兄弟条目。"""
+
+    def test_related_by_normalized_title(self, client, db):
+        from app import ingest as _ingest
+        a = _ingest.ingest_external(source="fakebg", external_id="R1", title="命运石之门",
+                                    content="", db=db)
+        b = _ingest.ingest_external(source="moegirl", external_id="R2", title="命运石之门",
+                                    content="", db=db)
+        c = _ingest.ingest_external(source="vndb", external_id="R3", title="STEINS;GATE",
+                                    content="", db=db)
+        assert [s["source"] for s in client.get(f"/api/items/{a.id}/related").json()] == ["moegirl"]
+        assert [s["source"] for s in client.get(f"/api/items/{b.id}/related").json()] == ["fakebg"]
+        assert client.get(f"/api/items/{c.id}/related").json() == []  # 英文名不匹配中文名
+
+    def test_related_punctuation_normalized(self, client, db):
+        from app import ingest as _ingest
+        a = _ingest.ingest_external(source="fakebg", external_id="N1", title="空之境界·终章",
+                                    content="", db=db)
+        b = _ingest.ingest_external(source="moegirl", external_id="N2", title="空之境界 终章",
+                                    content="", db=db)
+        assert [s["source"] for s in client.get(f"/api/items/{a.id}/related").json()] == ["moegirl"]
+
+    def test_local_item_no_related(self, client, db):
+        from app import ingest as _ingest
+        it = _ingest.ingest_text_document("本地笔记", "内容", db=db)
+        assert client.get(f"/api/items/{it.id}/related").json() == []
+
+    def test_related_404(self, client):
+        assert client.get("/api/items/99999/related").status_code == 404

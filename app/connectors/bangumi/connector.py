@@ -53,6 +53,7 @@ def _subject_to_search_result(subject: Dict[str, Any]) -> SearchResult:
 
 
 def _subject_to_detail(subject: Dict[str, Any]) -> ItemDetail:
+    rating = subject.get("rating") or {}
     return ItemDetail(
         source="bangumi",
         title=subject.get("name_cn") or subject.get("name") or "",
@@ -62,7 +63,12 @@ def _subject_to_detail(subject: Dict[str, Any]) -> ItemDetail:
         metadata={
             "original_name": subject.get("name"),
             "date": subject.get("date"),
-            "rating": (subject.get("rating") or {}).get("score"),
+            "rating": rating.get("score"),  # float，兼容既有 get_public_rating
+            # 热度/评分分布替代数据（ADR 0026，实测 v0 公开 API 无评论文本）：
+            # rating_info = {rank, total, count:{1..10}, score}
+            "rating_info": rating,
+            # 收藏人数分布 {wish, collect, doing, on_hold, dropped}
+            "collection": subject.get("collection"),
             "tags": [t.get("name") for t in (subject.get("tags") or []) if t.get("name")],
             "type": subject.get("type"),
             "volumes": subject.get("volumes"),

@@ -80,6 +80,9 @@ def _vn_to_detail(vn: Dict[str, Any], characters: List[dict]) -> ItemDetail:
             "alttitle": vn.get("alttitle"),
             "released": vn.get("released"),
             "rating": _vn_rating(vn),
+            # 热度替代数据（ADR 0026，实测 kana API 无评论文本）：投票数
+            "votecount": vn.get("votecount"),
+            "length": vn.get("length"),
             "tags": tags[:12],
             "developers": [d.get("name") for d in (vn.get("developers") or []) if d.get("name")],
             "characters": characters,
@@ -165,7 +168,7 @@ class VndbConnector:
 
         data = self._request("/vn", {
             "filters": ["id", "=", external_id],
-            "fields": "id,title,alttitle,image.url,description,rating,developers.name,released,tags.name",
+            "fields": "id,title,alttitle,image.url,description,rating,votecount,length,developers.name,released,tags.name",
         })
         vns = data.get("results") or []
         if not vns:

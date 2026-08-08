@@ -80,6 +80,24 @@ class TestBangumiNormalize:
         assert d.metadata["eps"] == 12
         assert d.metadata["type"] == 2
 
+    def test_subject_to_detail_includes_social_meta(self):
+        """ADR 0026：detail 元数据附带评分分布与收藏分布（替代"热门评论"的公开数据）。"""
+        from app.connectors.bangumi.connector import _subject_to_detail
+        subject = dict(SAMPLE_SUBJECT)
+        subject["rating"] = {
+            "rank": 3, "total": 1200,
+            "count": {"1": 5, "2": 0, "3": 0, "4": 0, "5": 0, "6": 0,
+                      "7": 100, "8": 300, "9": 500, "10": 295},
+            "score": 8.9,
+        }
+        subject["collection"] = {"wish": 200, "collect": 900, "doing": 50,
+                                 "on_hold": 30, "dropped": 10}
+        d = _subject_to_detail(subject)
+        assert d.metadata["rating"] == 8.9  # 兼容 float
+        assert d.metadata["rating_info"]["rank"] == 3
+        assert d.metadata["rating_info"]["count"]["10"] == 295
+        assert d.metadata["collection"]["collect"] == 900
+
     def test_normalize_to_item_fields(self):
         conn = BangumiConnector()
         fields = conn.normalize(SAMPLE_SUBJECT)

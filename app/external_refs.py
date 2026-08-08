@@ -172,6 +172,38 @@ def ensure_external_reference_chunks(
             db.close()
 
 
+# ---------------------------------------------------------------- 热度/评分分布（ADR 0026）
+
+def extract_social_meta(meta: Optional[dict]) -> dict:
+    """从 raw_metadata.detail.metadata 提炼每数据源的"热度/评分分布"替代数据。
+
+    三源均无公开"用户评论文本"API（实测结论见 ADR 0026），故展示公开可查的替代：
+    - bangumi：rating_info（rank/total/count 各分数人数分布）+ collection
+      （wish/collect/doing/on_hold/dropped 收藏分布）；
+    - vndb：rating + votecount（投票数）；
+    - moegirl：page_info（length/touched 页面元信息，无社交数据）。
+    返回结构化 dict，供 ItemDetailOut.social 展示；缺失字段自动省略。
+    """
+    meta = meta or {}
+    social: dict = {}
+    rating_info = meta.get("rating_info")
+    if isinstance(rating_info, dict):
+        social["rating_rank"] = rating_info.get("rank")
+        social["rating_total"] = rating_info.get("total")
+        social["rating_distribution"] = rating_info.get("count")
+    collection = meta.get("collection")
+    if isinstance(collection, dict):
+        social["collection"] = collection
+    if meta.get("votecount") is not None:
+        social["votecount"] = meta["votecount"]
+    if meta.get("length") is not None or meta.get("touched") is not None:
+        social["page_info"] = {
+            "length": meta.get("length"),
+            "touched": meta.get("touched"),
+        }
+    return social
+
+
 # ---------------------------------------------------------------- 历史收藏批量补齐
 
 _backfill_lock = threading.Lock()

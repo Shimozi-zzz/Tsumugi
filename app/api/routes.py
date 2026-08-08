@@ -1,6 +1,7 @@
 """API 路由 - 资料管理、检索、RAG 问答（含 SSE 流式）"""
 import json
 import os
+import re
 import uuid
 from typing import List, Optional
 
@@ -47,6 +48,7 @@ from app.schemas import (
     LLMTestResponse,
     QueryRequest,
     RAGResponse,
+    RelatedSourceOut,
     RetrievedChunk,
     ReviewCreate,
     ReviewOut,
@@ -1142,7 +1144,8 @@ async def external_detail(source: str, external_id: str):
 
 @router.get("/items/{item_id}/detail", response_model=ItemDetailOut)
 async def item_detail(item_id: int, db: Session = Depends(get_db)):
-    """已收藏条目详情：从 raw_metadata 提炼 detail（含角色），供详情弹层。"""
+    """已收藏条目详情：从 raw_metadata 提炼 detail（含角色），供详情弹层与
+    Review Studio Overview（ADR 0026：含完整简介、reference_text、热度替代数据）。"""
     item = db.get(Item, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="条目不存在")
@@ -1153,6 +1156,7 @@ async def item_detail(item_id: int, db: Session = Depends(get_db)):
     meta = detail.get("metadata") if isinstance(detail, dict) else {}
     if not isinstance(meta, dict):
         meta = {}
+    from app.external_refs import extract_social_meta
     return ItemDetailOut(
         id=item.id,
         title=item.title,
@@ -1165,9 +1169,62 @@ async def item_detail(item_id: int, db: Session = Depends(get_db)):
         my_rating=reviews.get_my_rating(item_id, db=db),
         tags=[t.name for t in item.tags] or meta.get("tags") or [],
         characters=meta.get("characters") or [],
+        reference_text=meta.get("reference_text"),
+        social=extract_social_meta(meta),
         raw_metadata=raw,
         created_at=item.created_at,
     )
+
+
+def _title_key(title: Optional[str]) -> str:
+    """跨来源标题近似匹配键（ADR 0026 多来源切换）：小写 + 去除空格/全角标点/括号。
+
+    用于"同一作品从不同来源各自收藏一份"的场景（Bangumi 中文名 ↔ 萌娘百科同名
+    页面等），不做完整合并去重，只做切换查看。
+    """
+    if not title:
+        return ""
+    s = str(title).lower().strip()
+    s = re.sub(r"[：:（）()\[\]【】「」『』《》\-—_·、，。.,\s]", "", s)
+    return s
+
+
+@router.get("/items/{item_id}/related", response_model=List[RelatedSourceOut])
+async def related_external_items(item_id: int, db: Session = Depends(get_db)):
+    """同一作品跨来源的兄弟条目（Review Studio Overview 多来源切换用）。
+
+    按规范化标题匹配其它非本地来源的已收藏条目；匹配不到返回空列表
+    （如 VNDB 英文名 vs Bangumi 中文名通常不匹配，属预期）。
+    """
+    item = db.get(Item, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="条目不存在")
+    if item.source == "local":
+        return []
+    key = _title_key(item.title)
+    if not key:
+        return []
+    others = db.query(Item).filter(
+        Item.source != "local", Item.source != item.source
+    ).all()
+    siblings = []
+    for it in others:
+        if it.id == item.id or _title_key(it.title) != key:
+            continue
+        raw = it.raw_metadata if isinstance(it.raw_metadata, dict) else None
+        detail = raw.get("detail") if isinstance(raw, dict) else None
+        meta = detail.get("metadata") if isinstance(detail, dict) else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        siblings.append(RelatedSourceOut(
+            id=it.id,
+            title=it.title,
+            source=it.source,
+            external_id=it.external_id,
+            image_url=it.image_url or (detail or {}).get("image_url"),
+            rating=meta.get("rating"),
+        ))
+    return siblings
 
 
 @router.post("/items/{item_id}/refresh-external", response_model=ItemDetailOut)

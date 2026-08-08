@@ -168,6 +168,9 @@ def _page_to_detail(page: Dict[str, Any]) -> ItemDetail:
             # tags 与 categories 同源（已过滤维护类），供统一"标签"字段消费
             "tags": cats,
             "length": page.get("length"),
+            # 页面信息（ADR 0026：MediaWiki 无公开评论/热度数据，仅页面元信息）
+            "touched": page.get("touched"),
+            "lastrevid": page.get("lastrevid"),
         },
     )
 

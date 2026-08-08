@@ -376,6 +376,14 @@ export async function fetchItemDetail(itemId) {
   return body;
 }
 
+// 同一作品跨来源的兄弟条目（Review Studio Overview 多来源切换，ADR 0026）
+export async function fetchRelatedSources(itemId) {
+  const resp = await fetch(`${API_BASE}/items/${itemId}/related`);
+  const body = await resp.json().catch(() => []);
+  if (!resp.ok) throw new Error(body.detail || "获取关联来源失败");
+  return Array.isArray(body) ? body : [];
+}
+
 export async function fetchExternalDetail(source, externalId) {
   const resp = await fetch(`${API_BASE}/external/detail?source=${encodeURIComponent(source)}&external_id=${encodeURIComponent(externalId)}`);
   const body = await resp.json().catch(() => ({}));

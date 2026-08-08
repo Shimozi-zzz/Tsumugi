@@ -49,6 +49,39 @@ class TestBuildReferenceText:
         assert external_refs.get_stored_reference(item) == external_refs.build_reference_text(detail)
 
 
+# ---------------------------------------------------------------- 热度/评分分布（ADR 0026）
+
+class TestExtractSocialMeta:
+    def test_bangumi_rating_and_collection(self):
+        meta = {
+            "rating": 8.9,
+            "rating_info": {"rank": 11, "total": 8413,
+                            "count": {"1": 15, "2": 3, "3": 7, "4": 16, "5": 37,
+                                      "6": 137, "7": 502, "8": 1697, "9": 3430, "10": 2569}},
+            "collection": {"wish": 2966, "collect": 10334, "doing": 1310,
+                           "on_hold": 826, "dropped": 112},
+        }
+        s = external_refs.extract_social_meta(meta)
+        assert s["rating_rank"] == 11
+        assert s["rating_total"] == 8413
+        assert s["rating_distribution"]["10"] == 2569
+        assert s["collection"]["collect"] == 10334
+
+    def test_vndb_votecount(self):
+        s = external_refs.extract_social_meta({"rating": 8.45, "votecount": 8675})
+        assert s["votecount"] == 8675
+        assert "collection" not in s
+
+    def test_moegirl_page_info(self):
+        s = external_refs.extract_social_meta({"length": 3490, "touched": "2026-04-18T15:33:45Z"})
+        assert s["page_info"]["length"] == 3490
+        assert s["page_info"]["touched"].startswith("2026-04")
+
+    def test_empty_and_none(self):
+        assert external_refs.extract_social_meta({}) == {}
+        assert external_refs.extract_social_meta(None) == {}
+
+
 # ---------------------------------------------------------------- chunk 重建
 
 class TestReplaceChunks:

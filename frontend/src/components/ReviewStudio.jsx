@@ -4,7 +4,8 @@
 // 正文：衬线字体 + ~720px 阅读宽度 + 1.78 行高（iA Writer / Bear 式写作空间）。
 import React, { useEffect, useRef, useState } from "react";
 import {
-  fetchItemDetail, fetchItemReviews, createReview, updateReview, deleteReview, filePathToUrl,
+  fetchItemDetail, fetchItemReviews, fetchRelatedSources,
+  createReview, updateReview, deleteReview, filePathToUrl,
 } from "../api.js";
 import { renderMarkdown } from "../markdown.js";
 import { toast } from "../toast.js";
@@ -50,9 +51,125 @@ function useAutoGrow() {
 
 const emptyForm = { title: "", content: "", rating: "", status: "", spoiler: false, font_size: DEFAULT_FONT };
 
+function sourceName(source) {
+  return { bangumi: "Bangumi", moegirl: "萌娘百科", vndb: "VNDB" }[source] || source || "本地";
+}
+
+// 完整简介：优先 detail.description（raw_metadata 已下载全文），缺失时从
+// reference_text 的"# 作品简介"小节提取（ADR 0026 用足已下载数据）
+function introText(detail) {
+  const desc = (detail?.description || "").trim();
+  if (desc) return desc;
+  const ref = detail?.reference_text || "";
+  const m = ref.match(/^# 作品简介\s*\n+([\s\S]*?)(?=\n# |$)/m);
+  return (m?.[1] || ref).trim() || "暂无简介。";
+}
+
+// 热度/评分分布替代数据（ADR 0026 实测三源无公开评论文本）
+function SocialBlock({ source, social, rating }) {
+  if (!social || Object.keys(social).length === 0) {
+    return (
+      <div className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+        暂无热度数据（可在详情弹层点「刷新资料」重新拉取）
+      </div>
+    );
+  }
+  const dist = social.rating_distribution;
+  const total = social.rating_total || 0;
+  return (
+    <div className="space-y-2">
+      {dist && (
+        <div>
+          <div className="flex items-baseline justify-between mb-1">
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              评分分布{typeof social.rating_rank === "number" ? ` · 排第 ${social.rating_rank}` : ""}
+              {total ? ` · ${total} 人评分` : ""}
+            </span>
+          </div>
+          <div className="flex items-end gap-[3px] h-8">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((s) => {
+              const n = dist[s] || 0;
+              const h = total ? Math.max((n / total) * 100, 2) : 2;
+              return (
+                <div key={s} className="flex-1 flex flex-col items-center gap-0.5" title={`${s}分：${n} 人`}>
+                  <div className="w-full rounded-sm" style={{ height: `${h}%`, minHeight: 2, backgroundColor: "var(--accent)" }} />
+                  <span className="text-[9px]" style={{ color: "var(--text-secondary)" }}>{s}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {social.collection && (
+        <div className="text-[11px] leading-5">
+          <span style={{ color: "var(--text-secondary)" }}>收藏 </span>
+          {[["wish", "想看"], ["doing", "在看"], ["collect", "看过"], ["on_hold", "搁置"], ["dropped", "弃坑"]].map(([k, label]) => (
+            <span key={k} className="mr-2" style={{ color: "var(--text)" }}>
+              {label} {social.collection[k] ?? 0}
+            </span>
+          ))}
+        </div>
+      )}
+      {social.votecount != null && (
+        <div className="text-[11px]">
+          <span style={{ color: "var(--text-secondary)" }}>评分 </span>
+          <span style={{ color: "var(--text)" }}>{rating ?? "-"} / 10</span>
+          <span className="ml-2" style={{ color: "var(--text-secondary)" }}>投票 {social.votecount} 人</span>
+        </div>
+      )}
+      {social.page_info && (
+        <div className="text-[11px] leading-5" style={{ color: "var(--text-secondary)" }}>
+          页面长度 {social.page_info.length ?? "-"} 字节
+          {social.page_info.touched ? ` · 最后编辑 ${String(social.page_info.touched).slice(0, 10)}` : ""}
+          <div className="mt-0.5">（该数据源未公开评论/评分数据）</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 紧凑角色列表：行 = 名字 + 关系 + 可展开的小传
+function CompactCharacters({ characters, expanded, onToggle }) {
+  if (!characters || characters.length === 0) {
+    return <div className="text-[11px]" style={{ color: "var(--text-secondary)" }}>暂无角色数据。</div>;
+  }
+  return (
+    <div className="space-y-1">
+      {characters.map((c, i) => {
+        const key = c.id ?? i;
+        const open = expanded.has(key);
+        const summary = (c.summary || "").trim();
+        return (
+          <div key={key} className="rounded-lg px-2.5 py-1.5"
+            style={{ backgroundColor: "rgba(128,128,128,0.05)", border: "1px solid var(--panel-border)" }}>
+            <button type="button" onClick={() => onToggle(key)}
+              className="w-full flex items-center gap-2 text-left">
+              <span className="text-[11px] w-2 shrink-0" style={{ color: "var(--accent)" }}>{open ? "▾" : "▸"}</span>
+              <span className="text-[13px] font-medium" style={{ color: "var(--text)" }}>{c.name || "?"}</span>
+              {c.relation && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{c.relation}</span>}
+            </button>
+            {(open || !summary) && summary && (
+              <div className="text-[12px] pl-4 mt-1 leading-relaxed whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>
+                {summary}
+                {Array.isArray(c.actors) && c.actors.length > 0 && (
+                  <div className="mt-0.5">声优：{c.actors.join("、")}</div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ReviewStudio({ item, onClose, refreshItems }) {
   const [detail, setDetail] = useState(null);
   const [reviews, setReviews] = useState([]);
+  const [related, setRelated] = useState([]);        // 同作品跨来源兄弟条目（ADR 0026）
+  const [sourceDetails, setSourceDetails] = useState({}); // itemId -> ItemDetailOut（懒加载）
+  const [activeSourceId, setActiveSourceId] = useState(null);
+  const [expandedChars, setExpandedChars] = useState(new Set());
   const [tab, setTab] = useState("overview");
   const [editingId, setEditingId] = useState(null);
   const [preview, setPreview] = useState(false);
@@ -64,9 +181,25 @@ export default function ReviewStudio({ item, onClose, refreshItems }) {
 
   useEffect(() => {
     fetchItemDetail(item.id).then(setDetail).catch(() => {});
+    fetchRelatedSources(item.id).then(setRelated).catch(() => {});
+    setActiveSourceId(item.id);
     loadReviews();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
+
+  // 切换来源时懒加载该来源条目的详情（当前条目已加载，直接复用）
+  function selectSource(srcId) {
+    setActiveSourceId(srcId);
+    setExpandedChars(new Set());
+    if (srcId === item.id) return;
+    if (sourceDetails[srcId]) return;
+    fetchItemDetail(srcId).then((d) => {
+      setSourceDetails((prev) => ({ ...prev, [srcId]: d }));
+    }).catch((e) => toast.error(e.message));
+  }
+
+  const activeDetail = activeSourceId === item.id ? detail : (sourceDetails[activeSourceId] || null);
+  const activeRelated = related.find((r) => r.id === activeSourceId);
 
   function loadReviews() {
     fetchItemReviews(item.id).then(setReviews).catch((e) => setError(e.message));
@@ -200,19 +333,68 @@ export default function ReviewStudio({ item, onClose, refreshItems }) {
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {tab === "overview" && (
                 <>
-                  <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                    <div className="mb-2"><b style={{ color: "var(--text)" }}>简介</b></div>
-                    <div className="whitespace-pre-wrap leading-relaxed" style={{ fontSize: 13 }}>
-                      {detail?.description || "暂无简介。"}
+                  {/* 多来源切换（ADR 0026）：当前条目 + 同作品其它来源的收藏 */}
+                  {related.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {[{ id: item.id, source: detail?.source, title: item.title }, ...related].map((r) => {
+                        const active = activeSourceId === r.id;
+                        return (
+                          <button key={r.id} type="button" onClick={() => selectSource(r.id)}
+                            className="px-2 py-1 rounded-lg text-[11px]"
+                            style={{ backgroundColor: active ? "var(--accent)" : "var(--accent-soft)",
+                              color: active ? "#fff" : "var(--accent)" }}>
+                            {sourceName(r.source)}
+                          </button>
+                        );
+                      })}
                     </div>
-                  </div>
-                  {(detail?.tags || []).length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {(detail.tags || []).map((t) => (
-                        <span key={t} className="text-[11px] px-2 py-0.5 rounded-full"
-                          style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{t}</span>
-                      ))}
+                  )}
+                  {!activeDetail && (
+                    <div className="text-sm py-6 text-center" style={{ color: "var(--text-secondary)" }}>
+                      {activeSourceId !== item.id ? "加载该来源资料…" : "暂无资料"}
                     </div>
+                  )}
+                  {activeDetail && (
+                    <>
+                      <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <b style={{ color: "var(--text)" }}>简介</b>
+                          {activeRelated && <span className="text-[10px]" style={{ color: "var(--text-secondary)" }}>来自 {sourceName(activeRelated.source)}</span>}
+                          {activeDetail.rating != null && (
+                            <span className="text-[11px] ml-auto shrink-0" style={{ color: "var(--amber, #ffc24b)" }}>★{activeDetail.rating}</span>
+                          )}
+                        </div>
+                        <div className="whitespace-pre-wrap leading-relaxed" style={{ fontSize: 13 }}>
+                          {introText(activeDetail)}
+                        </div>
+                      </div>
+                      {(activeDetail.tags || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {(activeDetail.tags || []).map((t) => (
+                            <span key={t} className="text-[11px] px-2 py-0.5 rounded-full"
+                              style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{t}</span>
+                          ))}
+                        </div>
+                      )}
+                      {/* 热度/评分分布替代数据（ADR 0026） */}
+                      <div>
+                        <div className="text-[11px] mb-1.5" style={{ color: "var(--text-secondary)" }}>热度 / 评分分布</div>
+                        <SocialBlock source={activeDetail.source} social={activeDetail.social} rating={activeDetail.rating} />
+                      </div>
+                      {/* 紧凑角色列表（完整资料已下载，Overview 用足） */}
+                      <div>
+                        <div className="text-[11px] mb-1.5" style={{ color: "var(--text-secondary)" }}>角色（{activeDetail.characters?.length || 0}）</div>
+                        <CompactCharacters
+                          characters={activeDetail.characters}
+                          expanded={expandedChars}
+                          onToggle={(k) => setExpandedChars((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(k)) next.delete(k); else next.add(k);
+                            return next;
+                          })}
+                        />
+                      </div>
+                    </>
                   )}
                 </>
               )}

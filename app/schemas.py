@@ -186,8 +186,22 @@ class ItemDetailOut(BaseModel):
     my_rating: Optional[float] = None  # 该 item 全部 Review 评分的均值（无打分=null）
     tags: List[str] = []
     characters: List[dict] = []
+    # 完整资料文本（ADR 0025：简介+角色小传），Overview 展示"完整简介"兜底用
+    reference_text: Optional[str] = None
+    # 热度/评分分布替代数据（ADR 0026：三源无公开评论文本，见 extract_social_meta）
+    social: Dict[str, Any] = {}
     raw_metadata: Optional[dict] = None
     created_at: Optional[datetime] = None
+
+
+class RelatedSourceOut(BaseModel):
+    """同一作品跨来源收藏的兄弟条目（ADR 0026 多来源切换，按规范化标题匹配）。"""
+    id: int
+    title: str
+    source: str
+    external_id: Optional[str] = None
+    image_url: Optional[str] = None
+    rating: Optional[float] = None
 
 
 class CharacterOut(BaseModel):
