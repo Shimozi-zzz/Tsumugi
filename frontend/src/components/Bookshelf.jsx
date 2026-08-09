@@ -3,6 +3,7 @@ import React, { useRef, useState } from "react";
 import { fetchItemDetail } from "../api.js";
 import { readCssVar } from "../shareCard.js";
 import { spineColor, spineSeed } from "../bookshelf.js";
+import CoverAmbient from "./CoverAmbient.jsx";
 
 export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, selectedIds, onToggleSelect, onContextMenu }) {
   const [hover, setHover] = useState(null); // {it, x, y, rating, loading}
@@ -47,7 +48,8 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
           const color = spineColor(accent, spineSeed(it));
           const selected = selectedIds && selectedIds.has(it.id);
           return (
-            <button key={it.id}
+            <CoverAmbient key={it.id} src={coverOf(it)} radius={6} blur={12} spread={1} alphaFactor={0.7}>
+            <button
               onClick={() => { if (selectMode) onToggleSelect?.(it.id); else onOpenItem(it); }}
               onMouseEnter={(e) => startHover(e, it)}
               onMouseLeave={clearHover}
@@ -56,6 +58,7 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
               className="shrink-0 relative overflow-hidden"
               style={{
                 width: 36, height: 236, borderRadius: 6,
+                // ADR 0019：书脊主体配色仍按标签哈希决定，取色高光只是 hover 的额外点缀层
                 backgroundColor: color, cursor: "pointer",
                 border: selected ? "2px solid var(--accent)" : "1px solid rgba(255,255,255,0.14)",
                 boxShadow: selected ? "0 0 0 2px var(--accent-soft)" : "inset 2px 0 0 rgba(255,255,255,0.16), 0 2px 6px rgba(0,0,0,0.18)",
@@ -85,6 +88,7 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
               <span className="absolute left-0 right-0 bottom-0"
                 style={{ height: 9, backgroundColor: "rgba(0,0,0,0.18)" }} />
             </button>
+            </CoverAmbient>
           );
         })}
         {items.length === 0 && (

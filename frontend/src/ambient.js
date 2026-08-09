@@ -67,50 +67,43 @@ export function dominantColors(pixels) {
   return { primary, secondary };
 }
 
+/** 内部计算（Canvas 读像素 → 直方图主导色）。独立导出以便测试验证缓存命中。 */
+export async function _computePalette(src, size) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  const read = async (imgSrc) => {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error("load"));
+      i.src = imgSrc;
+    });
+    ctx.drawImage(img, 0, 0, size, size);
+    return dominantColors(ctx.getImageData(0, 0, size, size).data);
+  };
+  try {
+    // 直接读（同源 /static 成功；跨域会因 taint 抛错）
+    return await read(src);
+  } catch {
+    // taint 或加载失败 → 转 data URL（CORS fetch）再读
+    const dataUrl = await imageUrlToDataUrl(src);
+    if (!dataUrl) return null;
+    return await read(dataUrl);
+  }
+}
+
 /**
- * 从封面地址提取主色调（前端 Canvas）。带缓存：同一 URL 只算一次。
- * 返回 Promise<{primary, secondary}|null>。
- *
- * 加载策略：
- * 1) 优先直接加载原 URL 绘制——同源 /static 缓存封面（含扩展名被猜成 .img、
- *    Content-Type 为 octet-stream 的）浏览器 img 元素会按内容嗅探解码，且同源
- *    不污染 canvas，直接可读；
- * 2) 跨域封面会污染 canvas（getImageData 抛 SecurityError）→ 回退复用安利卡的
- *    imageUrlToDataUrl（CORS fetch → data URL）；非 CORS 远程返回 null 降级。
+ * 从封面地址提取主色调（前端 Canvas）。带缓存：同一 URL 只算一次，命中时直接返回
+ * 同一 Promise（不重复计算）。返回 Promise<{primary, secondary}|null> 或 null（无 src）。
+ * 非 async：避免 async 每次调用都包一层新 Promise 包装，破坏缓存引用的可观察性。
  */
-export async function extractPalette(src, { size = 32 } = {}) {
+export function extractPalette(src, { size = 32 } = {}) {
   if (!src) return null;
   if (cache.has(src)) return cache.get(src);
-  const promise = (async () => {
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return null;
-      const read = async (imgSrc) => {
-        const img = await new Promise((res, rej) => {
-          const i = new Image();
-          i.onload = () => res(i);
-          i.onerror = () => rej(new Error("load"));
-          i.src = imgSrc;
-        });
-        ctx.drawImage(img, 0, 0, size, size);
-        return dominantColors(ctx.getImageData(0, 0, size, size).data);
-      };
-      try {
-        // 直接读（同源 /static 成功；跨域会因 taint 抛错）
-        return await read(src);
-      } catch {
-        // taint 或加载失败 → 转 data URL（CORS fetch）再读
-        const dataUrl = await imageUrlToDataUrl(src);
-        if (!dataUrl) return null;
-        return await read(dataUrl);
-      }
-    } catch {
-      return null; // 环境不支持 / 全部失败 → 降级
-    }
-  })();
+  const promise = _computePalette(src, size).catch(() => null);
   cache.set(src, promise);
   if (cache.size > CACHE_MAX) {
     const first = cache.keys().next().value;

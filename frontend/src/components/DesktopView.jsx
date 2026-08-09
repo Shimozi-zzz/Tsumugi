@@ -26,6 +26,7 @@ import ItemDetailPanel from "./ItemDetailPanel.jsx";
 import ToastHost from "./ToastHost.jsx";
 import ContextMenu from "./ContextMenu.jsx";
 import CommandPalette from "./CommandPalette.jsx";
+import CoverAmbient from "./CoverAmbient.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
 import BangumiPanel from "./BangumiPanel.jsx";
@@ -664,8 +665,12 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   }
 
   function cardCover(it) {
+    // 优先本地缓存的封面（同源可读、可靠），与详情面板/安利卡一致；远程 image_url 兜底
+    if (it.file_path) {
+      const local = filePathToUrl(it.file_path);
+      if (local) return local;
+    }
     if (it.image_url) return it.image_url;
-    if (it.file_path) return filePathToUrl(it.file_path);
     return null;
   }
 
@@ -1266,7 +1271,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 {libFiltered.map((it) => {
                   const selected = selectedIds.has(it.id);
                   return (
-                  <div key={it.id} className="desk-card group cursor-pointer"
+                  <CoverAmbient key={it.id} src={cardCover(it)} alphaFactor={0.6}>
+                  <div className="desk-card group cursor-pointer"
                     onClick={() => { if (selectMode) toggleSelect(it.id); else if (it.source !== "local") openItemDetail(it); }}
                     onContextMenu={(e) => openCtxMenu(e, it)}
                     style={selected ? { borderColor: "var(--accent)", boxShadow: "0 0 0 2px var(--accent-soft)" } : undefined}>
@@ -1317,6 +1323,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                       </div>
                     </div>
                   </div>
+                  </CoverAmbient>
                   );
                 })}
               </div>
