@@ -856,6 +856,41 @@ async def get_activity(year: Optional[int] = Query(None, ge=2000, le=2100),
         raise HTTPException(status_code=500, detail=f"年度统计失败：{e}")
 
 
+# ========== 数据备份/导出/导入（ADR 0038） ==========
+
+@router.get("/backup/export")
+async def export_backup(db: Session = Depends(get_db)):
+    """导出图书馆数据为单个 JSON 文档（含 items/reviews/tags/sources/llm_providers，
+    不含明文密钥；向量库不导出，可从内容重建）。"""
+    from app import backup
+    try:
+        return await run_in_threadpool(backup.export_backup, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出失败：{e}")
+
+
+@router.post("/backup/import")
+async def import_backup(body: dict):
+    """导入备份 JSON（后台线程，幂等合并；进度轮询 status）。"""
+    from app import backup
+    try:
+        job_id = backup.start_import(body)
+        return {"job_id": job_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导入失败：{e}")
+
+
+@router.get("/backup/import/status/{job_id}")
+async def import_status(job_id: str):
+    from app import backup
+    job = backup.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="导入任务不存在")
+    return job
+
+
 # ========== 检索 ==========
 
 @router.post("/search", response_model=SearchResponse)

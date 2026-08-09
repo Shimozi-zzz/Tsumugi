@@ -323,6 +323,33 @@ export async function fetchActivity(year) {
   return body;
 }
 
+// ---- 数据备份/导出/导入（ADR 0038）----
+
+export async function exportBackup() {
+  const resp = await fetch(`${API_BASE}/backup/export`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "导出失败");
+  return body;
+}
+
+export async function importBackup(data) {
+  const resp = await fetch(`${API_BASE}/backup/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "导入失败");
+  return body;
+}
+
+export async function fetchImportStatus(jobId) {
+  const resp = await fetch(`${API_BASE}/backup/import/status/${jobId}`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "获取导入状态失败");
+  return body;
+}
+
 export async function createDeclarativeConnector(config) {
   const resp = await fetch(`${API_BASE}/connectors`, {
     method: "POST",

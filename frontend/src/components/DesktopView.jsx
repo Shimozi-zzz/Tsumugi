@@ -10,7 +10,7 @@ import {
   fetchCharacters, fetchItemDetail, fetchExternalDetail,
   refreshExternalItem, fetchPlugins, acknowledgePlugins,
   batchTagItems, batchDeleteItems, setItemTags,
-  fetchLLMProviders,
+  fetchLLMProviders, exportBackup, importBackup, fetchImportStatus,
 } from "../api.js";
 import InspectorPanel from "./InspectorPanel.jsx";
 import ReviewStudio from "./ReviewStudio.jsx";
@@ -703,6 +703,61 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     } catch (err) { toast.error(err.message); }
   }
 
+  // ---- 数据备份/导出/导入（ADR 0038） ----
+  const [backupState, setBackupState] = useState({ exporting: false, importing: false, progress: null });
+  const backupFileRef = useRef(null);
+
+  async function handleExportBackup() {
+    setBackupState((s) => ({ ...s, exporting: true }));
+    try {
+      const data = await exportBackup();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      a.href = url;
+      a.download = `tsumugi-backup-${ts}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`已导出 ${(data.data?.items || []).length} 个条目`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBackupState((s) => ({ ...s, exporting: false }));
+    }
+  }
+
+  async function handleImportFile(file) {
+    if (!file) return;
+    setBackupState({ exporting: false, importing: true, progress: null });
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const { job_id } = await importBackup(data);
+      // 轮询导入任务进度（后台线程重建向量，可能较慢）
+      for (let i = 0; i < 600; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        const st = await fetchImportStatus(job_id);
+        if (st.state === "done") {
+          setBackupState({ exporting: false, importing: false, progress: null });
+          toast.success(st.message || "导入完成");
+          refresh();
+          setCharRefreshKey((k) => k + 1);
+          return;
+        }
+        if (st.state === "error") { throw new Error(st.message || "导入失败"); }
+        setBackupState((s) => ({
+          exporting: false, importing: true,
+          progress: st.total ? Math.min(100, Math.round((st.current / st.total) * 100)) : null,
+        }));
+      }
+      throw new Error("导入超时");
+    } catch (err) {
+      setBackupState({ exporting: false, importing: false, progress: null });
+      toast.error(err.message || "导入失败（文件格式是否正确？）");
+    }
+  }
+
   // Esc 关闭导入浮层
   useEffect(() => {
     if (!showImport) return;
@@ -830,6 +885,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     { key: "nav", label: "导航栏" },
     { key: "sources", label: "数据源" },
     { key: "plugins", label: "插件" },
+    { key: "backup", label: "备份" },
   ];
   // 是否已有问答内容（决定搜索框居中/置顶）
   const hasContent = !!(answer || sources.length > 0 || fedResults.length > 0);
@@ -1907,6 +1963,54 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                     </p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* 备份（ADR 0038：导出/导入图书馆数据） */}
+            {settingsTab === "backup" && (
+              <div className="space-y-4">
+                <div className="desk-askbar rounded-2xl p-5"
+                  style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
+                  <h3 className="text-sm font-medium mb-2">导出图书馆数据</h3>
+                  <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
+                    生成一个 JSON 备份文件（含笔记 / 书评 / 条目元数据（含已下载的百科资料）/
+                    标签 / 数据源配置（不含明文密钥））。向量库不导出，导入时从内容重建。
+                  </p>
+                  <button onClick={handleExportBackup} disabled={backupState.exporting}
+                    className="px-4 py-2 rounded-xl text-xs font-medium disabled:opacity-40"
+                    style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                    {backupState.exporting ? "正在生成…" : "导出图书馆数据"}
+                  </button>
+                </div>
+
+                <div className="desk-askbar rounded-2xl p-5"
+                  style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
+                  <h3 className="text-sm font-medium mb-2">导入图书馆数据</h3>
+                  <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
+                    选择导出的 JSON 备份文件导入。幂等合并：外部条目按
+                    (数据源, 外部ID)、本地笔记按内容指纹去重，命中则刷新元数据，
+                    未命中则新建（并重建向量，首次导入可能需要加载嵌入模型）。
+                  </p>
+                  <input ref={backupFileRef} type="file" accept=".json,application/json" className="hidden"
+                    onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; handleImportFile(f); }} />
+                  <button onClick={() => backupFileRef.current?.click()} disabled={backupState.importing}
+                    className="px-4 py-2 rounded-xl text-xs font-medium disabled:opacity-40"
+                    style={{ backgroundColor: backupState.importing ? "var(--surface-2)" : "var(--accent)",
+                      color: backupState.importing ? "var(--text-secondary)" : "#fff" }}>
+                    {backupState.importing ? "正在导入…" : "选择备份文件导入"}
+                  </button>
+                  {backupState.importing && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <div className="flex-1 h-1.5 rounded-full overflow-hidden"
+                        style={{ backgroundColor: "var(--surface-2)" }}>
+                        <div className="h-full rounded-full" style={{ width: `${backupState.progress ?? 30}%`, backgroundColor: "var(--accent)" }} />
+                      </div>
+                      <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                        {backupState.progress != null ? `${backupState.progress}%` : "重建向量中…"}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
