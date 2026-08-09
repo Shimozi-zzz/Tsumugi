@@ -231,6 +231,18 @@ export async function fetchItemMemories(itemId) {
   return Array.isArray(body) ? body : [];
 }
 
+export async function fetchMemories(filters = {}) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters)) {
+    if (v !== undefined && v !== null && v !== "") params.set(k, v);
+  }
+  const qs = params.toString();
+  const resp = await fetch(`${API_BASE}/memories${qs ? "?" + qs : ""}`);
+  const body = await resp.json().catch(() => []);
+  if (!resp.ok) throw new Error(body.detail || "获取记忆失败");
+  return Array.isArray(body) ? body : [];
+}
+
 // ---- LLM Provider（可插拔化）----
 
 export async function fetchLLMProviders() {

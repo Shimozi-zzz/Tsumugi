@@ -28,6 +28,7 @@ import ContextMenu from "./ContextMenu.jsx";
 import CommandPalette from "./CommandPalette.jsx";
 import CoverAmbient from "./CoverAmbient.jsx";
 import HomeShrine from "./HomeShrine.jsx";
+import MemoryGallery from "./MemoryGallery.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
 import BangumiPanel from "./BangumiPanel.jsx";
@@ -78,6 +79,12 @@ const NAV = {
       <rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />
     </svg>
   ) },
+  memories: { key: "memories", label: "记忆回廊", icon: (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 4v16M20 4v16" /><path d="M4 7h4v4H4zM10 7h4v4h-4zM16 7h4v4h-4z" />
+      <path d="M4 14h16" /><path d="M4 17h4v3H4zM10 17h4v3h-4zM16 17h4v3h-4z" />
+    </svg>
+  ) },
   settings: { key: "settings", label: "设置", icon: (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
@@ -87,7 +94,7 @@ const NAV = {
 };
 
 // 可自由排序的键（settings 除外）
-const SORTABLE_KEYS = ["ask", "library", "inspector", "characters", "voice", "summary"];
+const SORTABLE_KEYS = ["ask", "library", "inspector", "characters", "voice", "summary", "memories"];
 
 const NAV_ORDER_KEY = "tsumugi-nav-order";
 
@@ -938,6 +945,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     },
     openVoiceGraph: () => { setVoiceFocus(null); setSection("voice"); },
     openSummary: () => setSection("summary"),
+    openMemories: () => setSection("memories"),
   }), [paletteItems, allTags, setTheme, detailBrowseId]);
 
   // 神殿首页（ADR 0039）：代表封面 = 最近的外部收藏（有封面）的封面，驱动首页环境光
@@ -1640,6 +1648,12 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               </div>
             </div>
             <YearlySummary />
+          </div>
+        )}
+
+        {section === "memories" && (
+          <div className="max-w-3xl mx-auto mt-6">
+            <MemoryGallery onOpenWork={(itemId) => { setSection("library"); setLibView("list"); setDetailBrowseId(itemId); }} />
           </div>
         )}
 
