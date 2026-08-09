@@ -40,6 +40,7 @@ class Item(Base):
     chunks = relationship("Chunk", back_populates="item", cascade="all, delete-orphan")
     tags = relationship("Tag", secondary=item_tag_association, back_populates="items")
     reviews = relationship("Review", back_populates="item", cascade="all, delete-orphan")
+    memories = relationship("Memory", back_populates="item", cascade="all, delete-orphan")
 
 
 class Chunk(Base):
@@ -95,6 +96,33 @@ class Review(Base):
     # 关系
     item = relationship("Item", back_populates="reviews")
     chunks = relationship("Chunk", back_populates="review", cascade="all, delete-orphan")
+
+
+class Memory(Base):
+    """记忆条目 - 独立的容器，收纳"图书馆里发生过的、值得被记住的时刻"（v1.1 / ADR 0041）。
+
+    Memory 不是 Review 的视图：Review 只是其中一种素材来源（source_type=review），
+    本轮只实现 review 来源；为未来的 text/image/collection/milestone 等类型预留
+    source_type 扩展空间（不做白名单硬校验，别把表设计成只能装 Review）。
+    Memory 表本身不参与 RAG 检索（语义容器，检索仍走底层 Review 的
+    source_type=review 机制，见 ADR 0041）。
+    """
+    __tablename__ = "memories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False, index=True)
+    # 素材来源类型：review（本轮）/ 预留 text / image / collection / milestone
+    source_type = Column(String(20), nullable=False, default="review")
+    # 指向具体来源记录的引用（source_type=review 时 = Review.id；多态引用，不做 FK）
+    source_ref = Column(Integer, nullable=True, index=True)
+    # 这段记忆发生的时间（时间轴排序用；review 场景 = Review.created_at）
+    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    # 简短展示摘要（列表/时间轴展示免实时关联查询完整 Review 内容）
+    summary = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # 关系
+    item = relationship("Item", back_populates="memories")
 
 
 class Source(Base):

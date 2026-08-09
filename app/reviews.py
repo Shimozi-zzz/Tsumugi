@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from app import embeddings, vectorstore
+from app import embeddings, memories, vectorstore
 from app.ingest import split_text
 from app.models import Chunk, Item, Review
 
@@ -96,7 +96,10 @@ def create_review(
             font_size=font_size,
         )
         db.add(review)
-        db.flush()  # 拿到 review.id
+        db.flush()  # 拿到 review.id（server_default 的 created_at 随之加载）
+
+        # Review 创建即生成对应 Memory 条目（ADR 0041：source_type=review）
+        memories.ensure_review_memory(review, db)
 
         try:
             _write_review_vectors(db, review)
@@ -162,6 +165,8 @@ def update_review(
                 _delete_review_vectors(db, review)
                 db.flush()
                 _write_review_vectors(db, review)
+            # Review 编辑时同步 Memory 摘要（仅更新已存在的记录，ADR 0041）
+            memories.sync_review_memory(review, db)
             db.commit()
             db.refresh(review)
             return review
@@ -182,6 +187,7 @@ def delete_review(review_id: int, db: Optional[Session] = None) -> bool:
         if review is None:
             return False
         _delete_review_vectors(db, review)
+        memories.delete_review_memory(review_id, db)  # 不留孤儿 Memory（ADR 0041）
         db.delete(review)
         db.commit()
         return True

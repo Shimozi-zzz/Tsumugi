@@ -283,6 +283,22 @@ class ReviewOut(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+class MemoryOut(BaseModel):
+    """记忆条目响应（Phase A / ADR 0041）。
+
+    Memory 是独立容器；source_type 本轮为 review，未来扩展 text/image/
+    collection/milestone。summary 为简短摘要，列表/时间轴展示用。
+    """
+    id: int
+    item_id: int
+    item_title: str = ""
+    source_type: str = "review"
+    source_ref: Optional[int] = None
+    occurred_at: Optional[datetime] = None
+    summary: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
 class RetrievedChunk(BaseModel):
     content: str
     item_title: str

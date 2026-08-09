@@ -13,13 +13,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import ingest, provider_store, providers, rag, retrieval, reviews, stats
+from app import ingest, memories, provider_store, providers, rag, retrieval, reviews, stats
 from app.connectors import persistence as connector_persistence
 from app.connectors import registry as connector_registry
 from app.connectors.base import ConnectorError, validate_proxy_url
 from app.database import get_db
 from app.embeddings import EmbeddingError
-from app.models import Item, Review, Tag, item_tag_association
+from app.models import Item, Memory, Review, Tag, item_tag_association
 from app.schemas import (
     BangumiAuthorizeOut,
     BangumiImportStartOut,
@@ -46,6 +46,7 @@ from app.schemas import (
     LLMProviderOut,
     LLMTestRequest,
     LLMTestResponse,
+    MemoryOut,
     QueryRequest,
     RAGResponse,
     RelatedSourceOut,
@@ -607,6 +608,50 @@ async def list_all_reviews(
     rows = db.query(Review).order_by(Review.created_at.desc()) \
         .offset(skip).limit(limit).all()
     return [_review_out(r, db) for r in rows]
+
+
+# ========== Memory 记忆（Phase A，ADR 0041） ==========
+
+def _memory_out(mem: Memory, db: Session) -> MemoryOut:
+    item = db.get(Item, mem.item_id)  # 显式加载，避免 DetachedInstanceError
+    return MemoryOut(
+        id=mem.id,
+        item_id=mem.item_id,
+        item_title=item.title if item else "",
+        source_type=mem.source_type,
+        source_ref=mem.source_ref,
+        occurred_at=mem.occurred_at,
+        summary=mem.summary,
+        created_at=mem.created_at,
+    )
+
+
+@router.get("/items/{item_id}/memories", response_model=List[MemoryOut])
+async def list_item_memories(item_id: int, db: Session = Depends(get_db)):
+    """某作品的全部记忆（按发生时间倒序）。Phase B 作品记忆时间轴用。"""
+    if db.get(Item, item_id) is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    rows = memories.list_item_memories(item_id, db=db)
+    return [_memory_out(m, db) for m in rows]
+
+
+@router.get("/memories", response_model=List[MemoryOut])
+async def list_memories(
+    item_id: Optional[int] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """全局记忆查询（Phase C 记忆回廊用）：按时间范围 / item 筛选。
+
+    start/end 支持 ISO 时间或纯日期（如 2023，作 end 时按当日结束处理）。
+    """
+    rows = memories.query_memories(
+        db, item_id=item_id, start=start, end=end, skip=skip, limit=limit,
+    )
+    return [_memory_out(m, db) for m in rows]
 
 
 # ========== LLM Provider 管理 ==========
