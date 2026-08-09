@@ -167,8 +167,10 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [showShortcuts, setShowShortcuts] = useState(false);
   // 命令面板（ADR 0031：Ctrl/Cmd+K）
   const [commandOpen, setCommandOpen] = useState(false);
-  // 声优图谱聚焦（ADR 0032：角色墙/命令入口传入声优名，图谱自动选中）
+  // 声优图谱聚焦（ADR 0032/0036：角色墙/命令入口传入声优名，图谱自动选中）
   const [voiceFocus, setVoiceFocus] = useState(null);
+  // 离开声优图谱时清空聚焦（否则再次进入会重新聚焦上次的声优，而非搜索入口）
+  useEffect(() => { if (section !== "voice") setVoiceFocus(null); }, [section]);
 
   // 侧栏可拖拽宽度（最大页面 1/3）
   const [sidebarWidth, setSidebarWidth] = useState(224);

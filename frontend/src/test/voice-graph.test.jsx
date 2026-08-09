@@ -1,5 +1,5 @@
-// 声优图谱（ADR 0032 + 0035）：默认阈值3、标签分级（高连接才有文字）、点击交互、命令面板动作项
-// 注意：SVG 文字标签用 <svg text> 精确查询（getByText 会把 <title> 子文本算进父节点，造成误匹配）
+﻿// 声优图谱（ADR 0036：搜索驱动的"以人为中心"邻域视图）：
+// 搜索过滤 / 邻域渲染（节点远小于全局）/ 角色墙跳转邻域 / 概览模式入口
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import React from "react";
@@ -14,16 +14,17 @@ const DATA = {
   works: [
     { item_id: 1, title: "作品甲", image_url: null, source: "fake" },
     { item_id: 2, title: "作品乙", image_url: null, source: "fake" },
+    { item_id: 3, title: "作品丙", image_url: null, source: "fake" },
   ],
   actors: [
-    { name: "声优甲", work_count: 5, role_count: 5,
+    { name: "声优甲", work_count: 4, role_count: 4,
       works: [{ item_id: 1, title: "作品甲", roles: ["角色X", "角色A"] }, { item_id: 2, title: "作品乙", roles: ["角色Y"] }] },
     { name: "声优乙", work_count: 3, role_count: 3,
-      works: [{ item_id: 1, title: "作品甲", roles: ["角色Z"] }, { item_id: 2, title: "作品乙", roles: ["角色W"] }] },
-    { name: "声优独", work_count: 1, role_count: 1,
-      works: [{ item_id: 1, title: "作品甲", roles: ["角色P"] }] },
+      works: [{ item_id: 1, title: "作品甲", roles: ["角色Z"] }, { item_id: 3, title: "作品丙", roles: ["角色B"] }] },
+    { name: "声优丙", work_count: 3, role_count: 3,
+      works: [{ item_id: 2, title: "作品乙", roles: ["角色W"] }, { item_id: 3, title: "作品丙", roles: ["角色C"] }] },
   ],
-  stats: { actor_count: 3, work_count: 2, missing_actor_chars: 0 },
+  stats: { actor_count: 3, work_count: 3, missing_actor_chars: 0 },
 };
 
 function svgTexts(container) {
@@ -34,6 +35,9 @@ function clickSvgText(container, text) {
   if (el) fireEvent.click(el);
   return !!el;
 }
+function svgTitles(container) {
+  return [...container.querySelectorAll("svg circle title")].map((t) => t.textContent || "");
+}
 
 function mockFetch() {
   global.fetch = vi.fn((url) => {
@@ -41,7 +45,6 @@ function mockFetch() {
     return ok({});
   });
 }
-
 function renderGraph(props = {}) {
   const onOpenWork = vi.fn();
   const utils = render(<VoiceGraphView focusActor={props.focusActor ?? null} onOpenWork={onOpenWork} />);
@@ -51,62 +54,76 @@ function renderGraph(props = {}) {
 beforeEach(() => { localStorage.clear(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-describe("VoiceGraphView（声优图谱）", () => {
-  it("默认阈值=3：配音≥3 的声优有节点，只配1作的过滤，且默认选中档位 3", async () => {
+describe("声优图谱（ADR 0036 邻域视图）", () => {
+  it("默认=搜索引导态：不渲染全局图，显示引导文案 + 快捷入口", async () => {
     mockFetch();
     const { container } = renderGraph();
-    await waitFor(() => expect(container.querySelectorAll("svg text").length).toBeGreaterThan(0));
-    const texts = svgTexts(container);
-    expect(texts).toContain("声优甲");   // work_count 5
-    expect(texts).toContain("作品甲");
-    expect(texts).not.toContain("声优独"); // work_count 1 被过滤（只在其 circle <title> 里可 hover 得知）
-    expect(screen.getByText(/当前：2 声优 \/ 2 作品/)).toBeTruthy();
-    // 默认选中档位是 3（按钮背景 = accent）
-    expect(screen.getByText("3").style.backgroundColor).toBe("var(--accent)");
-    expect(screen.getByText("2").style.backgroundColor).toBe("var(--surface-2)");
+    await waitFor(() => expect(screen.getByText(/搜索一个声优开始探索/)).toBeTruthy());
+    expect(screen.getByText(/配音作品最多的声优/)).toBeTruthy();
+    expect(screen.queryByText(/全局概览/)).toBeNull(); // 默认不是全局图
+    expect(container.querySelectorAll("svg[aria-label='声优邻域关系图']").length).toBe(0);
+    expect(screen.getByRole("button", { name: /声优甲/ })).toBeTruthy(); // 快捷入口
   });
 
-  it("标签分级：高连接声优(≥4)有文字标签，低连接(3)只显示圆点+hover title", async () => {
+  it("搜索过滤：输入名字显示匹配声优，无匹配显示空状态", async () => {
     mockFetch();
-    const { container } = renderGraph();
-    await waitFor(() => expect(svgTexts(container)).toContain("声优甲")); // work_count 5 ≥ LABEL_ACTOR_MIN → 有标签
-    expect(svgTexts(container)).not.toContain("声优乙");                   // work_count 3 < 4 → 无文字标签
-    // 但声优乙的圆点存在，且带 hover title（名称可 hover 得知）
-    const titles = [...container.querySelectorAll("svg circle title")].map((t) => t.textContent);
-    expect(titles.some((t) => t.includes("声优乙：配音 3 部作品"))).toBe(true);
+    renderGraph();
+    await waitFor(() => expect(screen.getByRole("button", { name: /声优甲/ })).toBeTruthy());
+    const input = document.querySelector("input[placeholder*='搜索声优']");
+    fireEvent.change(input, { target: { value: "声优乙" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /声优乙/ })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /声优丙/ })).toBeNull(); // 过滤掉了
+    fireEvent.change(input, { target: { value: "不存在的声优zzz" } });
+    await waitFor(() => expect(screen.getByText(/没有匹配「不存在的声优zzz」的声优/)).toBeTruthy());
   });
 
-  it("点击声优 → 展示完整配音列表（作品 → 角色）", async () => {
-    mockFetch();
-    const { container } = renderGraph();
-    await waitFor(() => expect(clickSvgText(container, "声优甲")).toBe(true));
-    await waitFor(() => expect(screen.getByText(/配音 5 部作品 · 5 个角色/)).toBeTruthy());
-    expect(screen.getByText("「角色X」")).toBeTruthy();
-    expect(screen.getAllByText("作品甲").length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("点击作品节点 → onOpenWork(item_id)（复用主从视图）", async () => {
+  it("选中声优 → 邻域视图：只渲染该声优的作品/角色/共同出演，节点远小于全局", async () => {
     mockFetch();
     const { container, onOpenWork } = renderGraph();
-    await waitFor(() => expect(clickSvgText(container, "作品甲")).toBe(true));
+    await waitFor(() => expect(screen.getByRole("button", { name: /声优甲/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /声优甲/ }));
+    await waitFor(() => expect(container.querySelectorAll("svg[aria-label='声优邻域关系图']").length).toBe(1));
+    const texts = svgTexts(container);
+    expect(texts).toContain("声优甲"); // 中心声优
+    expect(texts).toContain("作品甲");
+    expect(texts).toContain("作品乙");
+    expect(texts).not.toContain("作品丙"); // 声优甲没配过作品丙 → 不进邻域
+    // 共同出演的外环声优（通过 title 可 hover 得知）
+    const titles = svgTitles(container).join("|");
+    expect(titles).toContain("声优乙");
+    expect(titles).toContain("声优丙");
+    // 邻域节点数远小于全局概览（1中心 + 2作品 + 3角色 + 2共同出演 ≈ 8）
+    const egoCircles = container.querySelectorAll("svg[aria-label='声优邻域关系图'] circle").length;
+    expect(egoCircles).toBeLessThanOrEqual(10);
+    // 点作品 → 复用主从视图
+    expect(clickSvgText(container, "作品甲")).toBe(true);
     expect(onOpenWork).toHaveBeenCalledWith(1);
   });
 
-  it("focusActor → 自动选中并展示该声优配音列表", async () => {
+  it("从角色墙跳转（focusActor）→ 直接进入该声优邻域视图", async () => {
     mockFetch();
-    renderGraph({ focusActor: "声优甲" });
-    await waitFor(() => expect(screen.getByText(/配音 5 部作品 · 5 个角色/)).toBeTruthy());
-    expect(screen.getByText("「角色Y」")).toBeTruthy();
+    const { container } = renderGraph({ focusActor: "声优乙" });
+    await waitFor(() => expect(container.querySelectorAll("svg[aria-label='声优邻域关系图']").length).toBe(1));
+    const texts = svgTexts(container);
+    expect(texts).toContain("声优乙");
+    expect(texts).toContain("作品甲");
+    expect(texts).toContain("作品丙");
+    expect(texts).not.toContain("作品乙"); // 声优乙没配过作品乙
   });
 
-  it("阈值调节：调到 5 后，配音作品数=3 的声优被过滤", async () => {
+  it("概览模式入口：主动进入，提示数据量大并渲染全局图（节点更多）", async () => {
     mockFetch();
     const { container } = renderGraph();
-    await waitFor(() => expect(svgTexts(container)).toContain("声优甲"));
-    fireEvent.click(screen.getByText("5"));
-    await waitFor(() => expect(screen.getByText(/当前：1 声优/)).toBeTruthy());
-    expect(svgTexts(container)).toContain("声优甲");
-    expect(svgTexts(container)).not.toContain("声优乙");
+    await waitFor(() => expect(screen.getByRole("button", { name: /声优甲/ })).toBeTruthy());
+    fireEvent.click(screen.getByText("查看全部声优网络"));
+    await waitFor(() => expect(screen.getByText(/全局概览：同时渲染/)).toBeTruthy());
+    expect(screen.getByText(/数据量大、边密集/)).toBeTruthy();
+    const overview = container.querySelector("svg[aria-label='声优全局概览']");
+    expect(overview).toBeTruthy();
+    // 全局图包含声优甲没配过的作品丙，且节点数多于邻域
+    const texts = svgTexts(container);
+    expect(texts).toContain("作品丙");
+    expect(overview.querySelectorAll("circle").length).toBeGreaterThan(8);
   });
 });
 

@@ -1,7 +1,7 @@
-// 声优图谱布局与标签策略（ADR 0035）：标签分级/碰撞避让/布局分散
+// 声优图谱布局与标签策略（ADR 0035/0036）：标签分级/碰撞避让/布局分散/邻域构建
 import { describe, it, expect } from "vitest";
 import {
-  LABEL_ACTOR_MIN, VIEW_H, VIEW_W, estimateLabel, layoutGraph, pickLabels,
+  LABEL_ACTOR_MIN, VIEW_H, VIEW_W, buildEgo, estimateLabel, layoutEgoGraph, layoutGraph, pickLabels,
 } from "../voiceLayout.js";
 
 describe("pickLabels（标签碰撞避让）", () => {
@@ -70,5 +70,45 @@ describe("layoutGraph（布局分散）", () => {
 
   it("LABEL_ACTOR_MIN 默认 >= 4（只给高连接声优文字标签）", () => {
     expect(LABEL_ACTOR_MIN).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("buildEgo（单声优邻域，ADR 0036）", () => {
+  const data = {
+    works: [
+      { item_id: 1, title: "作品甲" }, { item_id: 2, title: "作品乙" }, { item_id: 3, title: "作品丙" },
+    ],
+    actors: [
+      { name: "声优甲", work_count: 2, works: [{ item_id: 1, roles: ["X"] }, { item_id: 2, roles: ["Y"] }] },
+      { name: "声优乙", work_count: 2, works: [{ item_id: 1, roles: ["Z"] }, { item_id: 3, roles: ["B"] }] },
+      { name: "声优丙", work_count: 2, works: [{ item_id: 1, roles: ["W"] }, { item_id: 3, roles: ["C"] }] },
+    ],
+  };
+
+  it("只包含选中声优的作品/角色，与共同出演的其它声优", () => {
+    const ego = buildEgo(data.actors[0], data);
+    expect(ego.works.map((w) => w.item_id)).toEqual([1, 2]); // 不含作品丙
+    expect(ego.chars.map((c) => c.name)).toEqual(["X", "Y"]); // 只含声优甲的角色
+    const co = ego.coActors.map((c) => c.name).sort();
+    expect(co).toEqual(["声优丙", "声优乙"]); // 与作品甲/作品乙共同出演
+    // 共同出演声优的 shared 只含共享作品
+    const yi = ego.coActors.find((c) => c.name === "声优乙");
+    expect(yi.shared).toEqual([1]);
+  });
+
+  it("coActorCap 限制共同出演声优数量（避免滚雪球成大图）", () => {
+    const ego = buildEgo(data.actors[0], data, { coActorCap: 1 });
+    expect(ego.coActors.length).toBe(1);
+  });
+
+  it("layoutEgoGraph 放射状：中心=选中声优，作品/共同出演在环上", () => {
+    const ego = buildEgo(data.actors[0], data);
+    layoutEgoGraph(ego);
+    expect(ego.actor.x).toBeCloseTo(VIEW_W / 2);
+    expect(ego.actor.y).toBeCloseTo(VIEW_H / 2);
+    // 作品在中心附近的内环，共同出演在外环（外环半径更大 → 距中心更远）
+    const workDist = Math.hypot(ego.works[0].x - ego.actor.x, ego.works[0].y - ego.actor.y);
+    const coDist = Math.hypot(ego.coActors[0].x - ego.actor.x, ego.coActors[0].y - ego.actor.y);
+    expect(coDist).toBeGreaterThan(workDist);
   });
 });

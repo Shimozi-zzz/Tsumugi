@@ -111,3 +111,81 @@ export function pickLabels(candidates, forcedKeys = []) {
 export function shortText(s, max) {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
+
+/**
+ * 单声优邻域（ego network）放射状布局（ADR 0036）：
+ * - 选中声优居中；TA 配音过的作品沿内环（R1）；
+ * - 角色小圆点置于 声优→作品 线段中点偏移；
+ * - 共同出演的其它声优沿外环（R2），只表达"与这个声优合作过"这层关系，不展开。
+ * 规模天然小（一个声优通常几部到十几部作品），无需复杂力导向。
+ */
+export const EGO_R1 = 150; // 作品环半径
+export const EGO_R2 = 270; // 共同出演声优环半径
+
+export function layoutEgoGraph(ego) {
+  const cx = VIEW_W / 2, cy = VIEW_H / 2;
+  ego.actor.x = cx;
+  ego.actor.y = cy;
+  ego.works.forEach((w, i) => {
+    const ang = (2 * Math.PI * i) / Math.max(ego.works.length, 1) - Math.PI / 2;
+    w.x = cx + EGO_R1 * Math.cos(ang);
+    w.y = cy + EGO_R1 * Math.sin(ang);
+  });
+  ego.coActors.forEach((c, i) => {
+    const ang = (2 * Math.PI * i) / Math.max(ego.coActors.length, 1) - Math.PI / 2 + 0.12;
+    c.x = cx + EGO_R2 * Math.cos(ang);
+    c.y = cy + EGO_R2 * Math.sin(ang);
+  });
+  let ci = 0;
+  ego.chars.forEach((ch) => {
+    const w = ego.works.find((x) => x.item_id === ch.work_id);
+    if (!w) { ch.x = cx; ch.y = cy; return; }
+    const mx = (ego.actor.x + w.x) / 2, my = (ego.actor.y + w.y) / 2;
+    const dx = w.x - ego.actor.x, dy = w.y - ego.actor.y, len = Math.hypot(dx, dy) || 1;
+    const off = (ci % 2 ? 1 : -1) * 8 * ((ci >> 1) % 3 + 1);
+    ch.x = mx + (-dy / len) * off;
+    ch.y = my + (dx / len) * off;
+    ci++;
+  });
+}
+
+/**
+ * 从 voice-relations 数据构建某声优的邻域对象：
+ * { actor, works:[{item_id,title,roles}], coActors:[{name, shared:[work_id]}], chars:[{name,actor,work_id}] }
+ * coActors 只取"与该声优共同出演"的其他声优（按共享作品数排序，截断到 cap，避免滚雪球）。
+ */
+export function buildEgo(actor, data, { coActorCap = 40 } = {}) {
+  const workTitle = new Map((data.works || []).map((w) => [w.item_id, w.title]));
+  const works = (actor.works || []).map((w) => ({
+    item_id: w.item_id, title: workTitle.get(w.item_id) || w.title, roles: w.roles || [],
+  }));
+  // work_id -> 出演声优名集合
+  const workActors = new Map();
+  for (const a of data.actors || []) {
+    for (const w of a.works || []) {
+      let set = workActors.get(w.item_id);
+      if (!set) { set = new Set(); workActors.set(w.item_id, set); }
+      set.add(a.name);
+    }
+  }
+  const coMap = new Map();
+  for (const w of works) {
+    const names = workActors.get(w.item_id) || new Set();
+    for (const n of names) {
+      if (n === actor.name) continue;
+      let e = coMap.get(n);
+      if (!e) { e = { name: n, shared: [] }; coMap.set(n, e); }
+      e.shared.push(w.item_id);
+    }
+  }
+  const coActors = [...coMap.values()]
+    .sort((a, b) => b.shared.length - a.shared.length)
+    .slice(0, coActorCap);
+  const chars = [];
+  for (const w of works) {
+    for (const role of w.roles) {
+      chars.push({ name: role, actor: actor.name, work_id: w.item_id });
+    }
+  }
+  return { actor: { ...actor }, works, coActors, chars };
+}
