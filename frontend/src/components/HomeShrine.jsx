@@ -1,14 +1,18 @@
-// 神殿首页（ADR 0039，Layer 1：不含角色台词系统）
+// 神殿首页（ADR 0039 空间氛围 + 0040 看守猫娘台词，Layer 2 第一步）
 // 用空间隐喻 + 留白 + 仪式节奏传达"被认真对待的空间"，不是数据仪表盘：
 // - 纵轴构图：上方鸟居轮廓线（极简几何符号）→ 中部搜索栏（焦点"祭坛"）→
-//   下方"最近供奉"（最近收藏的封面以纵深/退级方式排布，非平铺网格）；
+//   看守猫娘台词（一行轻语，搜索栏与供奉之间）→ 下方"最近供奉"（纵深/退级排布）；
 // - 氛围：最近活跃作品的封面主色作为环境光（radial 渐变），随"最近在关注什么"
 //   变化；无数据/取色失败回退主题表面色；
 // - 仪式过渡：每日首次打开播放"暗幕渐亮 + 内容渐次呈现"（纯 CSS transition），
-//   同一天后续访问简化；点击/按键可跳过。
-import React, { useEffect, useState } from "react";
+//   同一天后续访问简化；点击/按键可跳过；
+// - 猫娘台词（ADR 0040）：按真实数据（最近收藏时间/书评数/里程碑/上次打开间隔/
+//   时段）匹配场景，同一场景随机一句；每次进入首页选定一句后本次访问保持稳定
+//   （不来回跳变）。台词库见 ../mascot.js。
+import React, { useEffect, useRef, useState } from "react";
 import { filePathToUrl } from "../api.js";
 import { extractPalette } from "../ambient.js";
+import { matchScene, selectLine, computeLastVisitGap } from "../mascot.js";
 
 const RITUAL_KEY = "tsumugi-home-ritual";
 
@@ -99,11 +103,33 @@ function RecentOfferings({ items, recentReviews, onOpenWork }) {
   );
 }
 
-export default function HomeShrine({ representativeCover, recentItems, recentReviews, onOpenWork, children }) {
+export default function HomeShrine({
+  representativeCover, recentItems, recentReviews, onOpenWork, children,
+  collectionCount, reviewCount, newestCollectionAt, newestReviewAt,
+}) {
   const [palette, setPalette] = useState(null);
   const [ritual, setRitual] = useState(() => shouldPlayRitual());
   const [revealed, setRevealed] = useState(false);
   const [skipped, setSkipped] = useState(false);
+
+  // 猫娘台词：数据就绪后选一次（想念/里程碑/新收藏/写书评/时段/兜底），
+  // 本次访问内保持稳定。chosenRef 防止数据刷新导致台词跳变。
+  const [mascotLine, setMascotLine] = useState(null);
+  const mascotChosen = useRef(false);
+  useEffect(() => {
+    if (mascotChosen.current) return;
+    if (collectionCount == null || reviewCount == null) return; // 数据未就绪
+    mascotChosen.current = true;
+    const scene = matchScene({
+      hour: new Date().getHours(),
+      collectionCount,
+      reviewCount,
+      newestCollectionAt: newestCollectionAt || null,
+      newestReviewAt: newestReviewAt || null,
+      lastVisitGap: computeLastVisitGap(),
+    });
+    setMascotLine(selectLine(scene));
+  }, [collectionCount, reviewCount, newestCollectionAt, newestReviewAt]);
 
   // 氛围色：代表封面主色 → 环境光；无封面/取色失败 → 回退主题表面色
   useEffect(() => {
@@ -155,7 +181,14 @@ export default function HomeShrine({ representativeCover, recentItems, recentRev
         <div className="shrine-item mt-6 w-full max-w-xl">
           {children}
         </div>
-        <div className="mt-8">
+        {/* 看守猫娘台词（ADR 0040）：搜索栏（祭坛）与供奉之间的一行轻语，随仪式渐次呈现 */}
+        {mascotLine && (
+          <div className="shrine-item mt-5 max-w-md text-center text-[12px] leading-relaxed"
+            style={{ color: "var(--text-secondary)", transitionDelay: "0.22s" }}>
+            {mascotLine}
+          </div>
+        )}
+        <div className="mt-7">
           <RecentOfferings items={recentItems} recentReviews={recentReviews} onOpenWork={onOpenWork} />
         </div>
         {ritual && !revealed && (

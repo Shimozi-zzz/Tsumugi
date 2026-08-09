@@ -134,8 +134,9 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [detailBrowseId, setDetailBrowseId] = useState(null);
   // 条目 → 追番状态 映射（取该条目最新书评的状态；用于状态分组列表）
   const [statusMap, setStatusMap] = useState({});
-  // 最近书评（首页"最近供奉"的文案，ADR 0039）
+  // 最近书评（首页"最近供奉"的文案，ADR 0039）；reviewCount 供猫娘台词里程碑判定
   const [recentReviews, setRecentReviews] = useState([]);
+  const [reviewCount, setReviewCount] = useState(null);
   useEffect(() => {
     fetchAllReviews()
       .then((reviews) => {
@@ -147,6 +148,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         }
         setStatusMap(map);
         setRecentReviews(reviews.slice(0, 3));
+        setReviewCount(reviews.length);
       })
       .catch(() => {});
   }, []);
@@ -284,6 +286,10 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [gridTotal, setGridTotal] = useState(0);
   const [gridLoading, setGridLoading] = useState(false);
   const [groupCounts, setGroupCounts] = useState({ all: total, note: 0, image: 0, external: 0 });
+  const [statsLoaded, setStatsLoaded] = useState(false);
+  // 最近一次外部收藏时间（猫娘台词"新收藏"判定，ADR 0040）：
+  // 与 collectionCount 同一批请求返回，避免依赖 App 的 items 异步到达导致台词选错场景
+  const [newestCollectionAt, setNewestCollectionAt] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -291,8 +297,12 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       fetchItems({ type: "image", limit: 1 }),
       fetchItems({ type: "external_ref", limit: 1 }),
     ])
-      .then(([n, im, ex]) => setGroupCounts({ all: total, note: n.total, image: im.total, external: ex.total }))
-      .catch(() => {});
+      .then(([n, im, ex]) => {
+        setGroupCounts({ all: total, note: n.total, image: im.total, external: ex.total });
+        setNewestCollectionAt(ex.items && ex.items.length ? (ex.items[0].created_at || null) : null);
+      })
+      .catch(() => {})
+      .finally(() => setStatsLoaded(true)); // 失败也视为已加载（用 0 兜底），供猫娘台词判定
   }, [items, total]);
 
   useEffect(() => {
@@ -933,6 +943,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   // 神殿首页（ADR 0039）：代表封面 = 最近的外部收藏（有封面）的封面，驱动首页环境光
   const recentExternalItems = (items || []).filter((it) => it.source !== "local" && cardCover(it)).slice(0, 6);
   const representativeCover = recentExternalItems.length ? cardCover(recentExternalItems[0]) : null;
+  // 猫娘台词数据（ADR 0040）：最近书评时间 + 收藏数/书评数
+  const newestReviewAt = recentReviews.length ? (recentReviews[0].created_at || null) : null;
 
   // 问答搜索栏（空态时放入神殿首页作为"祭坛"焦点，有内容时置顶）
   const askSearchBar = (
@@ -1499,7 +1511,10 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         {section === "ask" && !hasContent ? (
           /* 神殿首页（ADR 0039）：空态 = 空间隐喻的"参拜"入口 */
           <HomeShrine representativeCover={representativeCover} recentItems={recentExternalItems}
-            recentReviews={recentReviews} onOpenWork={(it) => openItemDetail(it)}>
+            recentReviews={recentReviews} onOpenWork={(it) => openItemDetail(it)}
+            collectionCount={statsLoaded ? groupCounts.external : null}
+            reviewCount={reviewCount}
+            newestCollectionAt={newestCollectionAt} newestReviewAt={newestReviewAt}>
             {askSearchBar}
           </HomeShrine>
         ) : section === "ask" ? (
