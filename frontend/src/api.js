@@ -222,6 +222,15 @@ export async function deleteReview(reviewId) {
   if (!resp.ok) throw new Error("删除书评失败");
 }
 
+// ---- Memory 记忆（Phase B 作品记忆时间轴，ADR 0041/0042）----
+
+export async function fetchItemMemories(itemId) {
+  const resp = await fetch(`${API_BASE}/items/${itemId}/memories`);
+  const body = await resp.json().catch(() => []);
+  if (!resp.ok) throw new Error(body.detail || "获取记忆失败");
+  return Array.isArray(body) ? body : [];
+}
+
 // ---- LLM Provider（可插拔化）----
 
 export async function fetchLLMProviders() {

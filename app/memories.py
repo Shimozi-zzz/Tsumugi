@@ -87,6 +87,35 @@ def list_item_memories(item_id: int, db: Session) -> List[Memory]:
         .order_by(Memory.occurred_at.desc(), Memory.id.desc()).all()
 
 
+def backfill_reviews(engine) -> int:
+    """给存量 Review 补生成 Memory 行（幂等：只为没有对应 Memory 的 Review 建）。
+
+    理由（ADR 0041/0042）：Phase B 时间轴要让**旧书评也能出现**——"这部作品在
+    我这里留下了什么"，而不是只对新书评生效。启动时调用，O(n) 次查询级别，
+    个人库体量下开销可忽略；多次运行只补缺口，不重复。
+    """
+    from sqlalchemy.orm import Session
+    from app.models import Review
+
+    with Session(engine) as db:
+        existing = {ref for (ref,) in db.query(Memory.source_ref)
+                    .filter(Memory.source_type == MEMORY_SOURCE_REVIEW).all()}
+        rows = []
+        for r in db.query(Review).all():
+            if r.id not in existing:
+                rows.append(Memory(
+                    item_id=r.item_id,
+                    source_type=MEMORY_SOURCE_REVIEW,
+                    source_ref=r.id,
+                    occurred_at=r.created_at or datetime.now(),
+                    summary=_review_summary(r),
+                ))
+        if rows:
+            db.add_all(rows)
+            db.commit()
+        return len(rows)
+
+
 def _parse_dt(s: str) -> datetime:
     """解析 ISO 时间；纯日期（YYYY-MM-DD）视为当日 00:00:00；年份（YYYY）视为 1 月 1 日。"""
     s = s.strip()

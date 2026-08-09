@@ -26,6 +26,10 @@ os.makedirs(settings.plugins_dir, exist_ok=True)
 Base.metadata.create_all(bind=engine)
 ensure_schema()  # 旧库补列（如 content_hash）
 
+# 存量 Review → Memory 补生成（幂等；让旧书评也出现在作品时间轴，ADR 0041/0042）
+import app.memories as _memories  # 函数内 import：避免启动期循环依赖（memories 依赖 models）
+_memories.backfill_reviews(engine)
+
 # 发现并注册内置 Connector（如 bangumi）
 connector_registry.discover()
 

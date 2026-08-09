@@ -139,6 +139,43 @@ class TestReviewDelete:
         assert db.query(Review).filter(Review.id == r.id).count() == 0
 
 
+class TestBackfill:
+    def test_backfills_existing_reviews_idempotent(self, db, fake_collection, patch_embeddings):
+        item = _mk_item(db, content="内容A" * 20)
+        # 模拟存量 Review（不走 create_review，无 Memory）
+        old = Review(item_id=item.id, title="旧书评", content="旧内容" * 20)
+        db.add(old)
+        db.commit()
+        assert db.query(Memory).count() == 0
+
+        n = memories.backfill_reviews(db.bind)
+        assert n == 1
+        mem = db.query(Memory).filter(Memory.source_ref == old.id).one()
+        assert mem.source_type == "review"
+        assert mem.summary == "旧书评"
+        assert mem.occurred_at == old.created_at
+
+        # 幂等：再跑不重复建
+        assert memories.backfill_reviews(db.bind) == 0
+        assert db.query(Memory).count() == 1
+
+    def test_backfill_skips_reviews_already_having_memory(self, db, fake_collection, patch_embeddings):
+        item = _mk_item(db, content="内容B" * 20)
+        r = reviews.create_review(item.id, "新书评内容" * 5, db=db)  # 已有 Memory
+        assert memories.backfill_reviews(db.bind) == 0
+        assert db.query(Memory).filter(Memory.source_ref == r.id).count() == 1
+
+    def test_backfill_falls_back_to_truncated_content_summary(self, db, fake_collection, patch_embeddings):
+        item = _mk_item(db, content="内容C" * 20)
+        old = Review(item_id=item.id, title="", content="很长的一段旧感想" * 30)
+        db.add(old)
+        db.commit()
+        memories.backfill_reviews(db.bind)
+        mem = db.query(Memory).filter(Memory.source_ref == old.id).one()
+        assert mem.summary.startswith("很长的一段旧感想")
+        assert mem.summary.endswith("…")
+
+
 class TestQueries:
     def test_list_item_memories_ordered_desc(self, db, fake_collection, patch_embeddings):
         item = _mk_item(db)

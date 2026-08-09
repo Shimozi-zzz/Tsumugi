@@ -3,10 +3,13 @@
 // 独立滚动，不跳转/不弹层。
 // ADR 0034：封面动态取色氛围——封面主色调作为表面色之上的柔和角部光晕（box-shadow
 // 平滑过渡），不覆盖文字/按钮；浅色主题克制、深色稍明显（--ambient-alpha）。
+// Phase B（ADR 0042）：双栏结构——"外部世界"（世界如何描述它）与"我的记录"
+// （我如何理解它，含 Memory 记忆时间轴）。
 import React, { useEffect, useState } from "react";
 import { fetchItemDetail, filePathToUrl } from "../api.js";
 import { InfoTable, TagCapsule, itemInfoRows } from "./ui.jsx";
 import { extractPalette } from "../ambient.js";
+import MemoryTimeline from "./MemoryTimeline.jsx";
 
 function introText(detail) {
   const desc = (detail?.description || "").trim();
@@ -109,6 +112,12 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
           </div>
         </div>
 
+        {/* 外部世界：世界如何描述它（Phase B，ADR 0042 双栏结构） */}
+        <div className="mb-3 flex items-baseline gap-2">
+          <span className="text-[11px] tracking-wider" style={{ color: "var(--accent)" }}>外部世界</span>
+          <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>· 世界如何描述它</span>
+        </div>
+
         {rows.length > 0 && (
           <div className="mb-4">
             <div className="text-[11px] mb-1.5 tracking-wider" style={{ color: "var(--text-secondary)" }}>基本信息</div>
@@ -141,6 +150,15 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
             </div>
           </div>
         )}
+
+        {/* 我的记录：我如何理解它（Phase B，ADR 0042）——Memory 记忆时间轴 */}
+        <div className="mt-7 pt-5 border-t" style={{ borderColor: "var(--panel-border)" }}>
+          <div className="mb-3 flex items-baseline gap-2">
+            <span className="text-[11px] tracking-wider" style={{ color: "var(--accent)" }}>我的记录</span>
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>· 我如何理解它</span>
+          </div>
+          <MemoryTimeline itemId={itemId} />
+        </div>
       </div>
     </div>
   );
