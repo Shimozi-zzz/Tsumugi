@@ -27,6 +27,7 @@ import ToastHost from "./ToastHost.jsx";
 import ContextMenu from "./ContextMenu.jsx";
 import CommandPalette from "./CommandPalette.jsx";
 import CoverAmbient from "./CoverAmbient.jsx";
+import HomeShrine from "./HomeShrine.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
 import BangumiPanel from "./BangumiPanel.jsx";
@@ -133,6 +134,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [detailBrowseId, setDetailBrowseId] = useState(null);
   // 条目 → 追番状态 映射（取该条目最新书评的状态；用于状态分组列表）
   const [statusMap, setStatusMap] = useState({});
+  // 最近书评（首页"最近供奉"的文案，ADR 0039）
+  const [recentReviews, setRecentReviews] = useState([]);
   useEffect(() => {
     fetchAllReviews()
       .then((reviews) => {
@@ -143,6 +146,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           }
         }
         setStatusMap(map);
+        setRecentReviews(reviews.slice(0, 3));
       })
       .catch(() => {});
   }, []);
@@ -926,6 +930,90 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     openSummary: () => setSection("summary"),
   }), [paletteItems, allTags, setTheme, detailBrowseId]);
 
+  // 神殿首页（ADR 0039）：代表封面 = 最近的外部收藏（有封面）的封面，驱动首页环境光
+  const recentExternalItems = (items || []).filter((it) => it.source !== "local" && cardCover(it)).slice(0, 6);
+  const representativeCover = recentExternalItems.length ? cardCover(recentExternalItems[0]) : null;
+
+  // 问答搜索栏（空态时放入神殿首页作为"祭坛"焦点，有内容时置顶）
+  const askSearchBar = (
+    <div className="relative w-full max-w-2xl">
+      <div
+        className="w-full desk-searchbar flex items-center gap-3 rounded-full px-5 py-3"
+        style={{
+          backgroundColor: "var(--input-bg)",
+          border: "1px solid var(--input-border)",
+          transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+        }}>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"
+          className="shrink-0" style={{ color: "var(--text-secondary)" }}>
+          <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
+        </svg>
+        <input ref={askInputRef} value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={(e) => { e.currentTarget.parentElement.style.borderColor = "var(--accent)"; e.currentTarget.parentElement.style.boxShadow = "0 0 0 3px var(--accent-soft)"; }}
+          onBlur={(e) => { e.currentTarget.parentElement.style.borderColor = "var(--input-border)"; e.currentTarget.parentElement.style.boxShadow = "0 2px 16px rgba(0,0,0,0.08)"; }}
+          onKeyDown={(e) => { if (e.key === "Enter") handleAsk(); }}
+          placeholder="搜索知识库并提问…（Enter）"
+          className="flex-1 bg-transparent outline-none text-base min-w-0"
+          style={{ color: "var(--text)" }} />
+        <button onClick={() => setHistoryOpen((v) => !v)} title="搜索历史"
+          className="shrink-0 p-1.5 rounded-full transition-colors"
+          style={{ color: "var(--text-secondary)", backgroundColor: historyOpen ? "var(--accent-soft)" : "transparent" }}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" />
+          </svg>
+        </button>
+        <button onClick={handleAsk} disabled={asking || !query.trim()}
+          className="text-sm px-4 py-1.5 rounded-full shrink-0 disabled:opacity-40 font-medium"
+          style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+          {asking ? "思考中…" : "提问"}
+        </button>
+        <button onClick={loadAiStatus} title="AI 问答状态（点击刷新）"
+          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px]"
+          style={{
+            backgroundColor: aiStatus?.enabled ? "var(--tag-bg)" : "rgba(245,158,11,0.14)",
+            color: aiStatus?.enabled ? "var(--tag-text)" : "#b45309",
+          }}>
+          <span className="w-1.5 h-1.5 rounded-full"
+            style={{ backgroundColor: aiStatus?.enabled ? "var(--ok)" : "#f59e0b" }} />
+          {aiStatus === null ? "AI…" : aiStatus.enabled ? `AI: ${aiStatus.name}` : "AI 未启用"}
+        </button>
+      </div>
+      {historyOpen && (
+        <div className="history-dropdown absolute right-0 top-full mt-2 w-full max-w-sm rounded-2xl p-3 z-30"
+          style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium" style={{ color: "var(--text)" }}>搜索历史</span>
+            {searchHistory.length > 0 && (
+              <button onClick={clearHistory} className="text-[11px]"
+                style={{ color: "var(--text-secondary)" }}>清空</button>
+            )}
+          </div>
+          {searchHistory.length === 0 ? (
+            <div className="text-xs py-2" style={{ color: "var(--text-secondary)" }}>暂无搜索记录</div>
+          ) : (
+            <ul className="space-y-0.5">
+              {searchHistory.map((h, i) => (
+                <li key={i}>
+                  <button onClick={() => handleHistoryClick(h)}
+                    className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded-lg text-sm hover:opacity-80"
+                    style={{ color: "var(--text)", backgroundColor: "rgba(255,255,255,0.04)" }}>
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8"
+                      className="shrink-0" style={{ color: "var(--text-secondary)" }}>
+                      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" />
+                    </svg>
+                    <span className="truncate">{h}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="desktop-view flex relative flex-1 min-h-0 overflow-hidden"
       data-testid="app-shell">
@@ -1408,95 +1496,18 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           </div>
         )}
 
-        {section === "ask" && (
+        {section === "ask" && !hasContent ? (
+          /* 神殿首页（ADR 0039）：空态 = 空间隐喻的"参拜"入口 */
+          <HomeShrine representativeCover={representativeCover} recentItems={recentExternalItems}
+            recentReviews={recentReviews} onOpenWork={(it) => openItemDetail(it)}>
+            {askSearchBar}
+          </HomeShrine>
+        ) : section === "ask" ? (
           <div className="max-w-3xl mx-auto flex flex-col h-full">
-            {/* 搜索栏（仅问答区块显示；无内容居中，有内容置顶） */}
+            {/* 搜索栏（有内容时置顶） */}
             <div className="flex justify-center transition-all duration-500 ease-in-out"
-              style={{
-                alignItems: hasContent ? "flex-start" : "center",
-                paddingTop: hasContent ? "1rem" : "16vh",
-                paddingBottom: hasContent ? "1rem" : "0",
-              }}>
-              <div className="relative w-full max-w-2xl">
-                <div
-                  className="w-full desk-searchbar flex items-center gap-3 rounded-full px-5 py-3"
-                  style={{
-                    backgroundColor: "var(--input-bg)",
-                    border: "1px solid var(--input-border)",
-                    transition: "border-color 0.2s ease, box-shadow 0.2s ease",
-                    boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-                  }}>
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"
-                    className="shrink-0" style={{ color: "var(--text-secondary)" }}>
-                    <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
-                  </svg>
-                  <input ref={askInputRef} value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onFocus={(e) => { e.currentTarget.parentElement.style.borderColor = "var(--accent)"; e.currentTarget.parentElement.style.boxShadow = "0 0 0 3px var(--accent-soft)"; }}
-                    onBlur={(e) => { e.currentTarget.parentElement.style.borderColor = "var(--input-border)"; e.currentTarget.parentElement.style.boxShadow = "0 2px 16px rgba(0,0,0,0.08)"; }}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleAsk(); }}
-                    placeholder="搜索知识库并提问…（Enter）"
-                    className="flex-1 bg-transparent outline-none text-base min-w-0"
-                    style={{ color: "var(--text)" }} />
-                  {/* 历史记录按钮 */}
-                  <button onClick={() => setHistoryOpen((v) => !v)} title="搜索历史"
-                    className="shrink-0 p-1.5 rounded-full transition-colors"
-                    style={{ color: "var(--text-secondary)", backgroundColor: historyOpen ? "var(--accent-soft)" : "transparent" }}>
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8">
-                      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" />
-                    </svg>
-                  </button>
-                  <button onClick={handleAsk} disabled={asking || !query.trim()}
-                    className="text-sm px-4 py-1.5 rounded-full shrink-0 disabled:opacity-40 font-medium"
-                    style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
-                    {asking ? "思考中…" : "提问"}
-                  </button>
-                  {/* AI 状态灯 */}
-                  <button onClick={loadAiStatus} title="AI 问答状态（点击刷新）"
-                    className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px]"
-                    style={{
-                      backgroundColor: aiStatus?.enabled ? "var(--tag-bg)" : "rgba(245,158,11,0.14)",
-                      color: aiStatus?.enabled ? "var(--tag-text)" : "#b45309",
-                    }}>
-                    <span className="w-1.5 h-1.5 rounded-full"
-                      style={{ backgroundColor: aiStatus?.enabled ? "var(--ok)" : "#f59e0b" }} />
-                    {aiStatus === null ? "AI…" : aiStatus.enabled ? `AI: ${aiStatus.name}` : "AI 未启用"}
-                  </button>
-                </div>
-
-                {/* 历史记录下拉 */}
-                {historyOpen && (
-                  <div className="history-dropdown absolute right-0 top-full mt-2 w-full max-w-sm rounded-2xl p-3 z-30"
-                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-medium" style={{ color: "var(--text)" }}>搜索历史</span>
-                      {searchHistory.length > 0 && (
-                        <button onClick={clearHistory} className="text-[11px]"
-                          style={{ color: "var(--text-secondary)" }}>清空</button>
-                      )}
-                    </div>
-                    {searchHistory.length === 0 ? (
-                      <div className="text-xs py-2" style={{ color: "var(--text-secondary)" }}>暂无搜索记录</div>
-                    ) : (
-                      <ul className="space-y-0.5">
-                        {searchHistory.map((h, i) => (
-                          <li key={i}>
-                            <button onClick={() => handleHistoryClick(h)}
-                              className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded-lg text-sm hover:opacity-80"
-                              style={{ color: "var(--text)", backgroundColor: "rgba(255,255,255,0.04)" }}>
-                              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8"
-                                className="shrink-0" style={{ color: "var(--text-secondary)" }}>
-                                <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" />
-                              </svg>
-                              <span className="truncate">{h}</span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-              </div>
+              style={{ alignItems: "flex-start", paddingTop: "1rem", paddingBottom: "1rem" }}>
+              {askSearchBar}
             </div>
 
             {askError && (
@@ -1555,7 +1566,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               </div>
             ) : null}
           </div>
-        )}
+        ) : null}
 
         {section === "inspector" && (
           <div className="max-w-3xl mx-auto mt-6">

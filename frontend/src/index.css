@@ -430,3 +430,31 @@ body {
 .review-studio img {
   animation: rs-fade-in 0.4s ease;
 }
+
+/* ============================================================
+   神殿首页（ADR 0039）：空间隐喻 + 留白 + 仪式节奏，token 体系内
+   - 氛围：封面取色作为环境光（radial 渐变，随最近关注的作品变化）
+   - 仪式过渡：每日首次打开时"暗幕渐亮 + 内容渐次呈现"，可点击/按键跳过
+   ============================================================ */
+.shrine .shrine-veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(8, 10, 18, 0.55);
+  opacity: 0;
+  transition: opacity 1s ease;
+  z-index: 2;
+}
+.shrine.shrine-ritual:not(.shrine-revealed) .shrine-veil { opacity: 0.55; }
+.shrine.shrine-ritual.shrine-revealed .shrine-veil { opacity: 0; }
+.shrine .shrine-item {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+.shrine.shrine-ritual:not(.shrine-revealed) .shrine-item {
+  opacity: 0;
+  transform: translateY(14px);
+}
+.shrine.shrine-skip .shrine-veil,
+.shrine.shrine-skip .shrine-item { transition: none !important; }
