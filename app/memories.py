@@ -19,7 +19,9 @@ from typing import List, Optional
 from sqlalchemy import Integer, cast, func
 from sqlalchemy.orm import Session
 
-from app.models import Item, Memory, Review
+from app import embeddings, vectorstore
+from app.ingest import split_text
+from app.models import Chunk, Item, Memory, Review
 
 MEMORY_SOURCE_REVIEW = "review"
 # P3（ADR 0047）：可直接创建的轻量 Memory 来源类型（不经过书评系统）
@@ -90,6 +92,51 @@ def delete_review_memory(review_id: int, db: Session) -> int:
     return deleted or 0
 
 
+def _memory_chunk_ids(mem: Memory, n: int) -> List[str]:
+    return [f"memory{mem.id}_chunk{i}" for i in range(n)]
+
+
+def _write_memory_vectors(db: Session, mem: Memory) -> None:
+    """把直接 Memory（text/milestone）的 summary 切分 → embedding → Chroma + Chunk 行。
+
+    P7（ADR 0051）：Memory 内容以 source_type=memory 参与个人语义检索
+    （"我以前写过哪些关于…"能找到轻量记忆）。与 review 向量同一模式。
+    """
+    chunks = split_text(mem.summary or "")
+    if not chunks:
+        return
+    vectors = embeddings.embed_texts(chunks)  # 可能抛 EmbeddingError
+    ids = _memory_chunk_ids(mem, len(chunks))
+    metadatas = [
+        {
+            "item_id": mem.item_id, "memory_id": mem.id, "chunk_index": i,
+            "source_type": "memory",
+        }
+        for i in range(len(chunks))
+    ]
+    vectorstore.get_collection().add(
+        ids=ids, embeddings=vectors, documents=chunks, metadatas=metadatas,
+    )
+    for i, (content, ref) in enumerate(zip(chunks, ids)):
+        db.add(Chunk(
+            item_id=mem.item_id, memory_id=mem.id,
+            content=content, chunk_index=i, embedding_ref=ref,
+            source_type="memory",
+        ))
+
+
+def _delete_memory_vectors(db: Session, mem: Memory) -> None:
+    """删除直接 Memory 的全部向量与 Chunk 行（删除记忆时调用）。"""
+    refs = [c.embedding_ref for c in db.query(Chunk)
+            .filter(Chunk.memory_id == mem.id).all() if c.embedding_ref]
+    if refs:
+        try:
+            vectorstore.get_collection().delete(ids=refs)
+        except Exception:
+            pass
+    db.query(Chunk).filter(Chunk.memory_id == mem.id).delete()
+
+
 def create_direct_memory(
     item_id: int,
     summary: str,
@@ -102,7 +149,8 @@ def create_direct_memory(
 
     - source_type ∈ DIRECT_MEMORY_TYPES（text / milestone）；summary 即正文；
     - emotion 可选（固定小集由前端 chips 提供，后端不强制枚举）；
-    - occurred_at 默认现在。
+    - occurred_at 默认现在；
+    - P7（ADR 0051）：summary 切分写入向量（source_type=memory）参与个人语义检索。
     """
     if source_type not in DIRECT_MEMORY_TYPES:
         raise ValueError(f"source_type 必须是 {DIRECT_MEMORY_TYPES} 之一")
@@ -120,13 +168,27 @@ def create_direct_memory(
         emotion=emotion or None,
     )
     db.add(mem)
-    db.commit()
-    db.refresh(mem)
-    return mem
+    db.flush()  # 拿到 id
+    try:
+        _write_memory_vectors(db, mem)
+        db.commit()
+        db.refresh(mem)
+        return mem
+    except Exception:
+        db.rollback()
+        if mem.id:
+            try:
+                refs = [c.embedding_ref for c in db.query(Chunk)
+                        .filter(Chunk.memory_id == mem.id).all() if c.embedding_ref]
+                if refs:
+                    vectorstore.get_collection().delete(ids=refs)
+            except Exception:
+                pass
+        raise
 
 
 def delete_direct_memory(memory_id: int, db: Session = None) -> bool:
-    """删除直接创建的 Memory（text/milestone，含其 media 附件级联）。"""
+    """删除直接创建的 Memory（text/milestone，含其媒体附件与向量级联）。"""
     own_session = db is None
     db = db or _session()
     try:
@@ -135,12 +197,29 @@ def delete_direct_memory(memory_id: int, db: Session = None) -> bool:
             return False
         if mem.source_type not in DIRECT_MEMORY_TYPES:
             return False  # review/collection 记忆由各自系统管理，不允许这里删
+        _delete_memory_vectors(db, mem)
         db.delete(mem)
         db.commit()
         return True
     finally:
         if own_session:
             db.close()
+
+
+def backfill_memory_vectors(engine) -> int:
+    """为缺向量的直接 Memory 幂等补向量（启动时调用；历史 text/milestone 记忆）。"""
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        n = 0
+        for mem in db.query(Memory).filter(Memory.source_type.in_(DIRECT_MEMORY_TYPES)).all():
+            has = db.query(Chunk.id).filter(Chunk.memory_id == mem.id).first() is not None
+            if not has:
+                _write_memory_vectors(db, mem)
+                n += 1
+        if n:
+            db.commit()
+        return n
 
 
 def list_item_memories(item_id: int, db: Session) -> List[Memory]:

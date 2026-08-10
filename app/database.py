@@ -47,6 +47,8 @@ def ensure_schema(bind=None):
         chunk_additions = {}
         if "review_id" not in chunk_cols:
             chunk_additions["review_id"] = "INTEGER"
+        if "memory_id" not in chunk_cols:
+            chunk_additions["memory_id"] = "INTEGER"
         if "source_type" not in chunk_cols:
             chunk_additions["source_type"] = "VARCHAR(20)"
         if "connector" not in chunk_cols:

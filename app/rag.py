@@ -90,6 +90,8 @@ def build_context_prompt(
             source_label = f"{source_label}（百科资料{f'：{conn}' if conn else ''}）"
         elif chunk.source_type == "note":
             source_label = f"{source_label}（我的笔记）"
+        elif chunk.source_type == "memory":
+            source_label = f"{source_label}（我的记忆）"
         block = f"[{i}] 来源：{source_label}\n{chunk.content}"
         if len(block) > budget:
             parts.append(block[:budget] + "\n…（此条已截断）")

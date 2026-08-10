@@ -68,6 +68,8 @@ class Chunk(Base):
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
     # 可空：NULL=条目自身内容；非空=该 review 的内容（RAG 检索区分来源）
     review_id = Column(Integer, ForeignKey("reviews.id"), nullable=True, index=True)
+    # P7（ADR 0051）：直接 Memory（text/milestone）内容参与检索（source_type=memory）
+    memory_id = Column(Integer, ForeignKey("memories.id"), nullable=True, index=True)
     content = Column(Text, nullable=False)  # 切分后的文本
     chunk_index = Column(Integer, nullable=False)  # 在原文中的顺序
     embedding_ref = Column(String(255), nullable=True)  # Chroma中的向量ID
@@ -81,6 +83,7 @@ class Chunk(Base):
     # 关系
     item = relationship("Item", back_populates="chunks")
     review = relationship("Review", back_populates="chunks")
+    memory = relationship("Memory", back_populates="chunks")
 
 
 class Tag(Base):
@@ -144,6 +147,7 @@ class Memory(Base):
     # 关系
     item = relationship("Item", back_populates="memories")
     media = relationship("Media", back_populates="memory", cascade="all, delete-orphan")
+    chunks = relationship("Chunk", back_populates="memory", cascade="all, delete-orphan")
 
 
 class Character(Base):

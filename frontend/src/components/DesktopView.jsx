@@ -44,6 +44,7 @@ function sourceTypeLabel(s) {
   }
   if (s.source_type === "review") return "我的书评";
   if (s.source_type === "note") return "我的笔记";
+  if (s.source_type === "memory") return "我的记忆"; // P7 / ADR 0051
   return "知识库";
 }
 

@@ -42,6 +42,10 @@ _collections.backfill_collections(engine)
 import app.characters as _characters
 _characters.backfill_characters(engine)
 
+# 存量直接 Memory → 向量补齐（P7 / ADR 0051：个人语义检索）
+import app.memories as _memories
+_memories.backfill_memory_vectors(engine)
+
 # 发现并注册内置 Connector（如 bangumi）
 connector_registry.discover()
 

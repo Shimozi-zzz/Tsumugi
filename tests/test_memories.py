@@ -214,6 +214,34 @@ class TestDirectMemory:
         assert memories.delete_direct_memory(r.id, db=db) is False
         assert db.query(Memory).filter(Memory.source_type == "review").count() == 1
 
+    def test_memory_vectors_indexed_and_retrievable(self, db, fake_collection, patch_embeddings):
+        """P7 / ADR 0051：直接 Memory 内容写入向量（source_type=memory），可被语义检索到。"""
+        from app.retrieval import retrieve_chunks
+        from app.models import Chunk
+
+        item = _mk_item(db, title="作品", content="原作内容" * 20)
+        mem = memories.create_direct_memory(item.id, "孤独是常伴的，但也很安静。", "text", db=db)
+        chunk_rows = db.query(Chunk).filter(Chunk.memory_id == mem.id).all()
+        assert len(chunk_rows) >= 1
+        assert chunk_rows[0].source_type == "memory"
+        assert chunk_rows[0].embedding_ref.startswith("memory")
+        # 语义检索命中（用与摘要一致的查询，假 embedding 下余弦=1 必排最前）
+        hits = retrieve_chunks("孤独是常伴的，但也很安静。", top_k=5, db=db)
+        assert any(h.source_type == "memory" and h.content and "孤独" in h.content for h in hits)
+        # 删除 → 向量与 chunk 清除
+        memories.delete_direct_memory(mem.id, db=db)
+        assert db.query(Chunk).filter(Chunk.memory_id == mem.id).count() == 0
+        assert not any(k.startswith(f"memory{mem.id}_") for k in fake_collection.vectors)
+
+    def test_backfill_memory_vectors_idempotent(self, db, fake_collection, patch_embeddings):
+        from app.models import Chunk
+
+        item = _mk_item(db)
+        mem = memories.create_direct_memory(item.id, "一条已有向量的记忆", "text", db=db)
+        # 再跑 backfill → 0（已有向量）
+        assert memories.backfill_memory_vectors(db.bind) == 0
+        assert db.query(Chunk).filter(Chunk.memory_id == mem.id).count() >= 1
+
 
 class TestApiMemory:
     """P3：直接 Memory 的 API（含媒体上传）。"""
