@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import ingest, memories, provider_store, providers, rag, retrieval, reviews, stats
+from app import ingest, memories, provider_store, providers, rag, retrieval, reviews, stats, work_model
 from app.connectors import persistence as connector_persistence
 from app.connectors import registry as connector_registry
 from app.connectors.base import ConnectorError, validate_proxy_url
@@ -60,6 +60,7 @@ from app.schemas import (
     TagMerge,
     TagOut,
     TagRename,
+    WorkUpdate,
 )
 from app.config import settings
 
@@ -99,6 +100,9 @@ def _item_out(item: Item) -> ItemOut:
         updated_at=item.updated_at,
         tags=[t.name for t in item.tags],
         chunks_count=len(item.chunks),
+        work_type=item.work_type,
+        alternative_title=item.alternative_title,
+        release_date=item.release_date,
     )
 
 
@@ -274,12 +278,13 @@ async def list_items(
     tag_match: str = Query("any"),
     type: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
+    work_type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """列出资料条目（分页 + 结构化筛选）。
 
     - tag：可传多次（?tag=a&tag=b），默认任意命中，tag_match=all 为全部命中
-    - type / source：精确匹配
+    - type / source / work_type：精确匹配（work_type 为 P1 世界轴列）
     返回 {total, items}，total 为**筛选后**总数（不受分页影响）。
     """
     query = db.query(Item)
@@ -304,6 +309,8 @@ async def list_items(
         query = query.filter(Item.type == type)
     if source:
         query = query.filter(Item.source == source)
+    if work_type:
+        query = query.filter(Item.work_type == work_type)
 
     total = query.count()
     items = query.order_by(Item.id.desc()).offset(skip).limit(limit).all()
@@ -383,6 +390,36 @@ async def update_item_tags(item_id: int, body: ItemTagsRequest, db: Session = De
     if fresh is None:
         raise HTTPException(status_code=404, detail="Item not found")
     return _item_out(fresh)
+
+
+@router.patch("/items/{item_id}/work", response_model=ItemOut)
+async def update_work_columns(item_id: int, body: WorkUpdate, db: Session = Depends(get_db)):
+    """手动编辑作品档案世界轴列（P1 / ADR 0045）：work_type/原名/发行。
+
+    - work_type 必须属于枚举（anime/manga/game/galgame/novel/other），
+      传空字符串表示清除（设为 None）；
+    - alternative_title / release_date 传空字符串同样表示清除；
+    - 用户手动改过的值，启动回填不会覆盖（回填只在 NULL 时写）。
+    """
+    item = db.get(Item, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    def _set(field: str, value):
+        if value is None:
+            return
+        setattr(item, field, value.strip() if value.strip() else None)
+
+    if body.work_type is not None:
+        wt = body.work_type.strip()
+        if wt and wt not in work_model.WORK_TYPES:
+            raise HTTPException(status_code=400, detail=f"work_type 必须是 {work_model.WORK_TYPES} 之一")
+        item.work_type = wt or None
+    _set("alternative_title", body.alternative_title)
+    _set("release_date", body.release_date)
+    db.commit()
+    db.refresh(item)
+    return _item_out(item)
 
 
 # ========== Bangumi OAuth + 批量导入 ==========
@@ -1218,6 +1255,8 @@ def _save_external_sync(req: SaveExternalRequest) -> IngestResponse:
         # 详情回填：raw_metadata 有内容则覆盖（保证角色墙数据落库）
         if raw_metadata is not None:
             obj.raw_metadata = raw_metadata
+            # P1 世界轴列：入库时即提炼（只填 NULL，不覆盖用户已填）
+            work_model.apply_work_columns(obj, raw_metadata)
             db.commit()
             db.refresh(obj)
         # 本地缩略图路径存到 file_path（与 image_url 区分：本地 vs 外部）
@@ -1304,6 +1343,9 @@ async def item_detail(item_id: int, db: Session = Depends(get_db)):
         social=extract_social_meta(meta),
         raw_metadata=raw,
         created_at=item.created_at,
+        work_type=item.work_type,
+        alternative_title=item.alternative_title,
+        release_date=item.release_date,
     )
 
 

@@ -136,13 +136,13 @@ describe("Playnite 式信息设计（ui 组件）", () => {
     expect(trs[0].style.borderTop).toBeFalsy();            // 首行无分隔线
   });
 
-  it("itemInfoRows：从 raw_metadata 提炼基本信息行", () => {
+  it("itemInfoRows：从 raw_metadata 提炼基本信息行（日期统一为发行日期）", () => {
     const detail = {
       source: "bangumi", rating: 8.9,
       raw_metadata: { detail: { metadata: { original_name: "STEINS;GATE", date: "2011-04" } } },
     };
     const labels = itemInfoRows(detail).map((r) => r.label);
-    expect(labels).toEqual(["数据源", "原名", "日期", "大众评分"]);
+    expect(labels).toEqual(["数据源", "原名", "发行日期", "大众评分"]);
   });
 
   it("TagCapsule：统一圆角胶囊（token 颜色）", () => {

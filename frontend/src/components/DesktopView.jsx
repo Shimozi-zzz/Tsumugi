@@ -29,6 +29,7 @@ import CommandPalette from "./CommandPalette.jsx";
 import CoverAmbient from "./CoverAmbient.jsx";
 import HomeShrine from "./HomeShrine.jsx";
 import MemoryGallery from "./MemoryGallery.jsx";
+import { WORK_TYPES, WORK_TYPE_LABEL } from "./ui.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
 import BangumiPanel from "./BangumiPanel.jsx";
@@ -910,8 +911,12 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   ];
   // 是否已有问答内容（决定搜索框居中/置顶）
   const hasContent = !!(answer || sources.length > 0 || fedResults.length > 0);
-  // 图书馆网格：按 libQuery 本地过滤（标题/内容）
+  // P1（ADR 0045）：图书馆按作品类型筛选（work_type）
+  const [activeWorkType, setActiveWorkType] = useState(null);
+  const workTypeOptions = WORK_TYPES.filter((t) => (gridItems || []).some((it) => it.work_type === t));
+  // 图书馆网格：按 work_type + libQuery 本地过滤（标题/内容）
   const libFiltered = gridItems.filter((it) => {
+    if (activeWorkType && it.work_type !== activeWorkType) return false;
     if (!libQuery.trim()) return true;
     const q = libQuery.trim().toLowerCase();
     return (it.title || "").toLowerCase().includes(q) || (it.content || "").toLowerCase().includes(q);
@@ -1394,6 +1399,26 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               </div>
             </div>
           </div>
+
+          {/* P1（ADR 0045）：按作品类型筛选（有该类型数据时显示 chips） */}
+          {workTypeOptions.length > 0 && (
+            <div className="flex items-center gap-1.5 mb-4 flex-wrap shrink-0">
+              <button onClick={() => setActiveWorkType(null)}
+                className="px-3 py-1 rounded-full text-xs transition-colors"
+                style={{ color: activeWorkType === null ? "#fff" : "var(--text-secondary)",
+                  backgroundColor: activeWorkType === null ? "var(--accent)" : "var(--accent-soft)" }}>
+                全部类型
+              </button>
+              {workTypeOptions.map((t) => (
+                <button key={t} onClick={() => setActiveWorkType(activeWorkType === t ? null : t)}
+                  className="px-3 py-1 rounded-full text-xs transition-colors"
+                  style={{ color: activeWorkType === t ? "#fff" : "var(--text-secondary)",
+                    backgroundColor: activeWorkType === t ? "var(--accent)" : "var(--accent-soft)" }}>
+                  {WORK_TYPE_LABEL[t]}
+                </button>
+              ))}
+            </div>
+          )}
 
             {gridLoading ? (
               <div className="flex-1 min-h-0 flex items-center justify-center text-sm"

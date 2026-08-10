@@ -33,7 +33,7 @@ export function buildCommands(ctx) {
       id: `item-${it.id}`,
       group: "条目",
       title: it.title,
-      keywords: [it.title, it.source || "", it.type],
+      keywords: [it.title, it.source || "", it.type, it.work_type || ""],
       icon: it.type === "note" ? "✎" : it.type === "image" ? "🖼" : it.source,
       run: () => ctx.openItem(it),
     });

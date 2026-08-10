@@ -6,8 +6,8 @@
 // Phase B（ADR 0042）：双栏结构——"外部世界"（世界如何描述它）与"我的记录"
 // （我如何理解它，含 Memory 记忆时间轴）。
 import React, { useEffect, useState } from "react";
-import { fetchItemDetail, filePathToUrl } from "../api.js";
-import { InfoTable, TagCapsule, itemInfoRows } from "./ui.jsx";
+import { fetchItemDetail, filePathToUrl, updateWorkColumns } from "../api.js";
+import { InfoTable, TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL } from "./ui.jsx";
 import { extractPalette } from "../ambient.js";
 import MemoryTimeline from "./MemoryTimeline.jsx";
 
@@ -57,6 +57,21 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
     extractPalette(coverSrc).then((p) => { if (!cancelled) setPalette(p); });
     return () => { cancelled = true; };
   }, [detail]);
+
+  // P1（ADR 0045）：外部作品可在"外部世界"区内联修正作品类型（回填只在 NULL 时写，
+  // 用户值不被覆盖）。Hook 放在所有条件返回之前，遵守 Rules of Hooks。
+  const [workType, setWorkType] = useState("");
+  const [workSaving, setWorkSaving] = useState(false);
+  useEffect(() => { if (detail) setWorkType(detail.work_type || ""); }, [detail?.work_type]);
+  function changeWorkType(e) {
+    const v = e.target.value;
+    setWorkType(v);
+    setWorkSaving(true);
+    updateWorkColumns(itemId, { work_type: v })
+      .then((fresh) => setDetail((d) => (d ? { ...d, work_type: fresh.work_type } : d)))
+      .catch(() => setWorkType((detail && detail.work_type) || ""))
+      .finally(() => setWorkSaving(false));
+  }
 
   if (itemId == null) {
     return (
@@ -112,10 +127,22 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
           </div>
         </div>
 
-        {/* 外部世界：世界如何描述它（Phase B，ADR 0042 双栏结构） */}
-        <div className="mb-3 flex items-baseline gap-2">
-          <span className="text-[11px] tracking-wider" style={{ color: "var(--accent)" }}>外部世界</span>
-          <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>· 世界如何描述它</span>
+        {/* 外部世界：世界如何描述它（Phase B，ADR 0042 双栏结构）
+            P1（ADR 0045）：右侧提供作品类型内联修正（外部作品） */}
+        <div className="mb-3 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[11px] tracking-wider" style={{ color: "var(--accent)" }}>外部世界</span>
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>· 世界如何描述它</span>
+          </div>
+          {detail.source !== "local" && (
+            <select value={workType} onChange={changeWorkType} title="作品类型（可手动修正）"
+              disabled={workSaving}
+              className="rounded-lg px-2 py-1 text-[11px] outline-none"
+              style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }}>
+              <option value="">未分类</option>
+              {WORK_TYPES.map((t) => <option key={t} value={t}>{WORK_TYPE_LABEL[t]}</option>)}
+            </select>
+          )}
         </div>
 
         {rows.length > 0 && (

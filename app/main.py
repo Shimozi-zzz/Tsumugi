@@ -30,6 +30,10 @@ ensure_schema()  # 旧库补列（如 content_hash）
 import app.memories as _memories  # 函数内 import：避免启动期循环依赖（memories 依赖 models）
 _memories.backfill_reviews(engine)
 
+# 存量外部条目 → 世界轴列幂等回填（work_type/原名/发行，只填 NULL，ADR 0045）
+import app.work_model as _work_model
+_work_model.backfill_work_columns(engine)
+
 # 发现并注册内置 Connector（如 bangumi）
 connector_registry.discover()
 

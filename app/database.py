@@ -33,6 +33,10 @@ def ensure_schema(bind=None):
             "external_id": "VARCHAR(255)",
             "raw_metadata": "TEXT",
             "synced_at": "DATETIME",
+            # P1 Work 模型世界轴列（ADR 0045）
+            "work_type": "VARCHAR(20)",
+            "alternative_title": "VARCHAR(255)",
+            "release_date": "VARCHAR(20)",
         }
         with engine.begin() as conn:
             for col, ddl_type in item_additions.items():

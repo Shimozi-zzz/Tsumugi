@@ -62,6 +62,17 @@ class ItemOut(BaseModel):
     updated_at: Optional[datetime] = None
     tags: List[str] = []
     chunks_count: int = 0
+    # P1 Work 模型世界轴列（ADR 0045）
+    work_type: Optional[str] = None
+    alternative_title: Optional[str] = None
+    release_date: Optional[str] = None
+
+
+class WorkUpdate(BaseModel):
+    """手动编辑作品档案的世界轴列（P1，详情页外部世界区内联编辑）。"""
+    work_type: Optional[str] = None
+    alternative_title: Optional[str] = None
+    release_date: Optional[str] = None
 
 
 class IngestResponse(BaseModel):
@@ -192,6 +203,10 @@ class ItemDetailOut(BaseModel):
     social: Dict[str, Any] = {}
     raw_metadata: Optional[dict] = None
     created_at: Optional[datetime] = None
+    # P1 Work 模型世界轴列（ADR 0045）
+    work_type: Optional[str] = None
+    alternative_title: Optional[str] = None
+    release_date: Optional[str] = None
 
 
 class RelatedSourceOut(BaseModel):

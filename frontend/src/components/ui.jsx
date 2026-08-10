@@ -56,15 +56,20 @@ const SRC_LABEL = { bangumi: "Bangumi", moegirl: "萌娘百科", vndb: "VNDB", l
  * 从条目详情（ItemDetailOut + raw_metadata.detail.metadata）提取"基本信息"属性行。
  * 供 InfoTable 使用：来源/原名/日期/平台/开发商/评分/投票数/卷数/集数/页面信息等。
  */
+// P1 Work 模型作品类型（ADR 0045）：galgame 涵盖视觉小说
+export const WORK_TYPES = ["anime", "manga", "game", "galgame", "novel", "other"];
+export const WORK_TYPE_LABEL = { anime: "动画", manga: "漫画", game: "游戏", galgame: "Galgame", novel: "小说", other: "其它" };
+
 export function itemInfoRows(detail) {
   if (!detail) return [];
   const raw = detail.raw_metadata && typeof detail.raw_metadata === "object" ? detail.raw_metadata : null;
   const meta = raw?.detail?.metadata || {};
   const rows = [];
   if (detail.source) rows.push({ label: "数据源", value: SRC_LABEL[detail.source] || detail.source });
-  if (meta.original_name) rows.push({ label: "原名", value: meta.original_name });
-  if (meta.date) rows.push({ label: "日期", value: String(meta.date) });
-  if (meta.released) rows.push({ label: "发行日期", value: String(meta.released) });
+  if (detail.work_type) rows.push({ label: "类型", value: WORK_TYPE_LABEL[detail.work_type] || detail.work_type });
+  if (detail.alternative_title || meta.original_name) rows.push({ label: "原名", value: detail.alternative_title || meta.original_name });
+  const release = detail.release_date || meta.date || meta.released;
+  if (release) rows.push({ label: "发行日期", value: String(release) });
   if (meta.platform) rows.push({ label: "平台", value: String(meta.platform) });
   if (Array.isArray(meta.developers) && meta.developers.length) rows.push({ label: "开发商", value: meta.developers.join("、") });
   if (detail.rating != null) rows.push({ label: "大众评分", value: `${detail.rating} / 10` });

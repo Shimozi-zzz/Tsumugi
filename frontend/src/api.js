@@ -116,7 +116,19 @@ export async function setItemTags(itemId, tagNames, mode = "add") {
     body: JSON.stringify({ tag_names: tagNames, mode }),
   });
   const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(body.detail || "标签更新失败");
+  if (!resp.ok) throw new Error(body.detail || "设置标签失败");
+  return body;
+}
+
+// 手动编辑作品档案世界轴列（P1 / ADR 0045）：work_type/原名/发行
+export async function updateWorkColumns(itemId, payload) {
+  const resp = await fetch(`${API_BASE}/items/${itemId}/work`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "更新作品档案失败");
   return body;
 }
 

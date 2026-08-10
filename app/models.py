@@ -35,6 +35,12 @@ class Item(Base):
     synced_at = Column(DateTime(timezone=True), nullable=True)  # 外部数据同步时间
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # 世界轴列（P1 Work 模型，ADR 0045）：作品类型 / 原名 / 发行日期。
+    # type 表示内容形态（note/image/external_ref），work_type 表示作品类型，二者正交。
+    # 从 raw_metadata 幂等回填（只填 NULL，不覆盖用户值）；creator/series 等推迟 P4 实体表。
+    work_type = Column(String(20), nullable=True, index=True)  # anime/manga/game/galgame/novel/other
+    alternative_title = Column(String(255), nullable=True)  # 原名/别名（多来源匹配用）
+    release_date = Column(String(20), nullable=True)  # 发行日期（字符串，按需取年份）
 
     # 关系
     chunks = relationship("Chunk", back_populates="item", cascade="all, delete-orphan")
