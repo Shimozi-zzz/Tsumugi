@@ -180,6 +180,84 @@ class TestOnThisDay:
         assert {r.summary for r in memories.query_on_this_day(db, month=2, day=28, max_year=2026)} == {"普通日"}
 
 
+class TestDirectMemory:
+    """P3 / ADR 0047：轻量文字/里程碑 Memory 直接创建、情绪、媒体附件。"""
+
+    def test_create_text_memory(self, db):
+        item = _mk_item(db)
+        mem = memories.create_direct_memory(item.id, "今天把这段重新看了一遍。", "text", emotion="感动", db=db)
+        assert mem.source_type == "text"
+        assert mem.emotion == "感动"
+        assert mem.summary == "今天把这段重新看了一遍。"
+
+    def test_create_milestone(self, db):
+        item = _mk_item(db)
+        mem = memories.create_direct_memory(item.id, "完成了这部作品。", "milestone", db=db)
+        assert mem.source_type == "milestone"
+        assert mem.emotion is None
+
+    def test_invalid(self, db):
+        item = _mk_item(db)
+        with pytest.raises(ValueError):
+            memories.create_direct_memory(item.id, "x", "review", db=db)  # review 不允许直接建
+        with pytest.raises(ValueError):
+            memories.create_direct_memory(item.id, "  ", "text", db=db)  # 空
+        with pytest.raises(ValueError):
+            memories.create_direct_memory(99999, "x", "text", db=db)
+
+    def test_delete_direct_only(self, db):
+        item = _mk_item(db)
+        mem = memories.create_direct_memory(item.id, "一条轻量记录", "text", db=db)
+        assert memories.delete_direct_memory(mem.id, db=db) is True
+        # review 记忆不允许从这里删
+        r = reviews.create_review(item.id, "书评内容" * 5, db=db)
+        assert memories.delete_direct_memory(r.id, db=db) is False
+        assert db.query(Memory).filter(Memory.source_type == "review").count() == 1
+
+
+class TestApiMemory:
+    """P3：直接 Memory 的 API（含媒体上传）。"""
+
+    @pytest.fixture
+    def client(self, db, fake_collection, patch_embeddings):
+        app = FastAPI()
+        app.include_router(router, prefix="/api")
+        def override_get_db():
+            yield db
+        app.dependency_overrides[get_db] = override_get_db
+        return TestClient(app)
+
+    def test_create_with_emotion_and_media(self, client, db):
+        item = _mk_item(db)
+        r = client.post(f"/api/items/{item.id}/memories",
+                        data={"summary": "一张截图记下这一刻", "source_type": "text", "emotion": "治愈"},
+                        files={"file": ("shot.png", b"\x89PNG\r\n\x1a\nfakeimage", "image/png")})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["emotion"] == "治愈"
+        assert len(body["media"]) == 1
+        assert body["media"][0]["url"].startswith("/static/uploads/")
+        # 真实文件已写入 upload_dir（内存库下路径存在与否不校验，校验 DB 记录）
+        from app.models import Media
+        media = db.query(Media).filter(Media.memory_id == body["id"]).one()
+        assert media.media_type == "image"
+        assert media.size == len(b"\x89PNG\r\n\x1a\nfakeimage")
+
+    def test_create_validation_and_delete(self, client, db):
+        item = _mk_item(db)
+        assert client.post(f"/api/items/{item.id}/memories", data={"summary": "x", "source_type": "bad"}).status_code == 400
+        r = client.post(f"/api/items/{item.id}/memories", data={"summary": "一条里程碑", "source_type": "milestone"})
+        assert r.status_code == 200
+        assert client.delete(f"/api/memories/{r.json()['id']}").json()["deleted"] == r.json()["id"]
+        assert client.get(f"/api/items/{item.id}/memories").json() == []
+
+    def test_list_includes_emotion(self, client, db):
+        item = _mk_item(db)
+        client.post(f"/api/items/{item.id}/memories", data={"summary": "有点怀念", "source_type": "text", "emotion": "怀念"})
+        rows = client.get(f"/api/items/{item.id}/memories").json()
+        assert rows[0]["emotion"] == "怀念"
+
+
 class TestBackfill:
     def test_backfills_existing_reviews_idempotent(self, db, fake_collection, patch_embeddings):
         item = _mk_item(db, content="内容A" * 20)

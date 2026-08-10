@@ -61,6 +61,9 @@ export const WORK_TYPES = ["anime", "manga", "game", "galgame", "novel", "other"
 export const WORK_TYPE_LABEL = { anime: "动画", manga: "漫画", game: "游戏", galgame: "Galgame", novel: "小说", other: "其它" };
 // P2 收藏状态（ADR 0046）
 export const COLLECTION_STATUSES = ["想看", "在看", "看完", "搁置", "弃坑"];
+// P3 记忆情绪（ADR 0047）：固定小集 + 自由
+export const MEMORY_EMOTIONS = ["开心", "感动", "遗憾", "怀念", "平静", "治愈"];
+export const MEMORY_TYPE_LABEL = { review: "书评", text: "记录", milestone: "里程碑", collection: "收藏" };
 
 export function itemInfoRows(detail) {
   if (!detail) return [];

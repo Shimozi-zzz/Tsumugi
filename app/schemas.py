@@ -313,7 +313,7 @@ class ReviewOut(BaseModel):
 
 
 class MemoryOut(BaseModel):
-    """记忆条目响应（Phase A / ADR 0041）。
+    """记忆条目响应（Phase A / ADR 0041 / 0047）。
 
     Memory 是独立容器；source_type 本轮为 review，未来扩展 text/image/
     collection/milestone。summary 为简短摘要，列表/时间轴展示用。
@@ -325,6 +325,8 @@ class MemoryOut(BaseModel):
     source_ref: Optional[int] = None
     occurred_at: Optional[datetime] = None
     summary: Optional[str] = None
+    emotion: Optional[str] = None  # P3：可选情绪标记
+    media: List[dict] = []  # P3：附件 [{id, url, media_type}]
     created_at: Optional[datetime] = None
 
 

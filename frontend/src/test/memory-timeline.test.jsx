@@ -48,8 +48,10 @@ describe("MemoryTimeline 时间轴", () => {
     expect(items[0].textContent).toContain("2026-08-01");
     expect(items[0].textContent).toContain("神作");
     expect(items[1].textContent).toContain("2026-08-15");
-    // 时间轴点用 --accent（review 可点）
-    expect(items[0].querySelector("span.rounded-full").style.backgroundColor).toBe("var(--accent)");
+    // 时间轴点用 --accent（review 可点；点在按钮外层的包裹 div 里，即按钮前一个兄弟）
+    const dot = items[0].previousElementSibling;
+    expect(dot.className).toContain("rounded-full");
+    expect(dot.style.backgroundColor).toBe("var(--accent)");
   });
 
   it("点击 review 记忆 → 只读弹层展示对应书评全文（markdown 已渲染）", async () => {
@@ -91,6 +93,24 @@ describe("MemoryTimeline 时间轴", () => {
     await waitFor(() => expect(screen.getByText("第二条")).toBeTruthy());
     expect(screen.queryByText("第一条")).toBeNull();
   });
+
+  it("P3：text 记忆显示「记录」徽标 + 情绪，点击弹出直接内容，可删除", async () => {
+    mockFetch({ memories: [
+      { id: 5, item_id: 1, item_title: "x", source_type: "text", source_ref: null, occurred_at: "2026-08-01T10:00:00", summary: "今天重温，还是很感动", emotion: "感动", media: [{ id: 1, url: "/static/uploads/a.png", media_type: "image" }], created_at: "2026-08-01T10:00:00" },
+    ] });
+    const { container } = render(<MemoryTimeline itemId={1} />);
+    await waitFor(() => expect(screen.getByText("今天重温，还是很感动")).toBeTruthy());
+    expect(screen.getByText("记录")).toBeTruthy();   // 类型徽标
+    expect(screen.getAllByText(/感动/).length).toBeGreaterThan(0); // 情绪
+    expect(container.querySelector("img")).toBeTruthy(); // 媒体缩略图
+    fireEvent.click(screen.getByText("今天重温，还是很感动"));
+    await waitFor(() => expect(document.querySelector(".doc")).toBeTruthy());
+    expect(document.querySelector(".doc").textContent).toContain("今天重温");
+    fireEvent.click(screen.getByTitle("关闭"));
+    // 删除
+    fireEvent.click(screen.getByTitle("删除这条记忆"));
+    await waitFor(() => expect(screen.queryByText("今天重温，还是很感动")).toBeNull());
+  });
 });
 
 describe("ItemDetailPanel 双栏结构（Phase B / ADR 0042）", () => {
@@ -123,7 +143,7 @@ describe("四套主题兼容", () => {
       const { container } = render(<ItemDetailPanel itemId={1} />);
       await waitFor(() => expect(screen.getByText("神作")).toBeTruthy());
       // 时间轴点使用 token 值（--accent 在不同主题派生不同，但结构一致）
-      const dot = container.querySelector("button span.rounded-full");
+      const dot = container.querySelector(".relative.pl-5 span.rounded-full");
       expect(dot.style.backgroundColor).toBe("var(--accent)");
       cleanup();
     }

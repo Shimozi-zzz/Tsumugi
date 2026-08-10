@@ -65,6 +65,12 @@ def ensure_schema(bind=None):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE reviews ADD COLUMN font_size INTEGER"))
     # reviews 表其余列由 create_all 负责（新表）
+    # P3（ADR 0047）：memories 加 emotion 列（media 表由 create_all 建）
+    if "memories" in insp.get_table_names():
+        mem_cols = {c["name"] for c in insp.get_columns("memories")}
+        if "emotion" not in mem_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE memories ADD COLUMN emotion VARCHAR(20)"))
 
 
 def _backfill_chunk_source_type(engine):

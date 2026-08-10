@@ -19,7 +19,7 @@ from app.connectors import registry as connector_registry
 from app.connectors.base import ConnectorError, validate_proxy_url
 from app.database import get_db
 from app.embeddings import EmbeddingError
-from app.models import Collection, Item, Memory, Review, Tag, item_tag_association
+from app.models import Collection, Item, Media, Memory, Review, Tag, item_tag_association
 from app.schemas import (
     BangumiAuthorizeOut,
     BangumiImportStartOut,
@@ -694,8 +694,17 @@ def _memory_out(mem: Memory, db: Session) -> MemoryOut:
         source_ref=mem.source_ref,
         occurred_at=mem.occurred_at,
         summary=mem.summary,
+        emotion=mem.emotion,
+        media=[{"id": m.id, "url": _media_url(m.file_path), "media_type": m.media_type} for m in mem.media],
         created_at=mem.created_at,
     )
+
+
+def _media_url(file_path: Optional[str]) -> str:
+    """本地附件路径（./data/uploads/x）→ 可访问 URL（/static/uploads/x）。"""
+    if not file_path:
+        return ""
+    return file_path.replace("\\", "/").replace("./data/", "/static/")
 
 
 @router.get("/items/{item_id}/memories", response_model=List[MemoryOut])
@@ -734,6 +743,55 @@ async def list_memories(
             db, item_id=item_id, start=start, end=end, skip=skip, limit=limit,
         )
     return [_memory_out(m, db) for m in rows]
+
+
+@router.post("/items/{item_id}/memories", response_model=MemoryOut)
+async def create_memory(
+    item_id: int,
+    summary: str = Form(...),
+    source_type: str = Form("text"),
+    emotion: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+):
+    """创建直接 Memory（P3 / ADR 0047）：轻量文字 / 里程碑 + 可选情绪 + 可选附图。
+
+    multipart/form-data：summary 必填；source_type ∈ text/milestone；
+    emotion 可选（前端固定小集）；file 可选（截图/插图，存 data/uploads）。
+    """
+    if db.get(Item, item_id) is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    try:
+        mem = await run_in_threadpool(
+            memories.create_direct_memory,
+            item_id=item_id, summary=summary, source_type=source_type,
+            emotion=emotion or None, db=db,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if file is not None and file.filename:
+        raw = await file.read()
+        ext = os.path.splitext(file.filename)[1] or ".png"
+        os.makedirs(settings.upload_dir, exist_ok=True)
+        saved = f"{uuid.uuid4().hex}{ext}"
+        with open(os.path.join(settings.upload_dir, saved), "wb") as f:
+            f.write(raw)
+        m = Media(item_id=item_id, memory_id=mem.id,
+                  file_path=f"./data/uploads/{saved}", media_type="image", size=len(raw))
+        db.add(m)
+        db.commit()
+        db.refresh(mem)
+    return _memory_out(mem, db)
+
+
+@router.delete("/memories/{memory_id}")
+async def delete_memory(memory_id: int):
+    """删除直接创建的 Memory（text/milestone，含其媒体附件级联；review/collection 不允许）。"""
+    ok = memories.delete_direct_memory(memory_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Memory not found 或不允许删除")
+    return {"deleted": memory_id}
 
 
 # ========== LLM Provider 管理 ==========

@@ -119,18 +119,37 @@ class Memory(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False, index=True)
-    # 素材来源类型：review（本轮）/ 预留 text / image / collection / milestone
+    # 素材来源类型：review / collection / text / milestone（P3 起 text+milestone 直接创建）
     source_type = Column(String(20), nullable=False, default="review")
-    # 指向具体来源记录的引用（source_type=review 时 = Review.id；多态引用，不做 FK）
+    # 指向具体来源记录的引用（source_type=review 时 = Review.id；collection 时 = item.id；
+    # text/milestone 无主记录，为 NULL）。多态引用，不做 FK。
     source_ref = Column(Integer, nullable=True, index=True)
     # 这段记忆发生的时间（时间轴排序用；review 场景 = Review.created_at）
     occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
-    # 简短展示摘要（列表/时间轴展示免实时关联查询完整 Review 内容）
+    # 简短展示摘要（列表/时间轴展示免实时关联查询完整内容；text 记忆摘要即正文）
     summary = Column(Text, nullable=True)
+    # 可选情绪标记（P3 / ADR 0047）：开心/感动/遗憾/怀念/平静/治愈…（固定小集，自由）
+    emotion = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # 关系
     item = relationship("Item", back_populates="memories")
+    media = relationship("Media", back_populates="memory", cascade="all, delete-orphan")
+
+
+class Media(Base):
+    """附件资源（P3 / ADR 0047）：Memory 的截图/插图/图片记录。"""
+    __tablename__ = "media"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False, index=True)
+    memory_id = Column(Integer, ForeignKey("memories.id"), nullable=True, index=True)
+    file_path = Column(String(500), nullable=False)  # "./data/uploads/xxx.png"
+    media_type = Column(String(20), nullable=True)  # image / future: video/audio
+    size = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    memory = relationship("Memory", back_populates="media")
 
 
 class Collection(Base):

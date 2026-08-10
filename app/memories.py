@@ -22,6 +22,14 @@ from sqlalchemy.orm import Session
 from app.models import Item, Memory, Review
 
 MEMORY_SOURCE_REVIEW = "review"
+# P3（ADR 0047）：可直接创建的轻量 Memory 来源类型（不经过书评系统）
+DIRECT_MEMORY_TYPES = ["text", "milestone"]
+
+
+def _session():
+    # 函数体内 import：与 reviews._session 同套路，测试 patch 时能覆盖
+    from app.database import SessionLocal
+    return SessionLocal()
 
 _SUMMARY_LIMIT = 40
 
@@ -80,6 +88,59 @@ def delete_review_memory(review_id: int, db: Session) -> int:
         Memory.source_ref == review_id,
     ).delete()
     return deleted or 0
+
+
+def create_direct_memory(
+    item_id: int,
+    summary: str,
+    source_type: str,
+    emotion: Optional[str] = None,
+    occurred_at: Optional[datetime] = None,
+    db: Session = None,
+) -> Memory:
+    """创建一条直接创建的 Memory（P3 / ADR 0047）：轻量文字/里程碑，不经过书评。
+
+    - source_type ∈ DIRECT_MEMORY_TYPES（text / milestone）；summary 即正文；
+    - emotion 可选（固定小集由前端 chips 提供，后端不强制枚举）；
+    - occurred_at 默认现在。
+    """
+    if source_type not in DIRECT_MEMORY_TYPES:
+        raise ValueError(f"source_type 必须是 {DIRECT_MEMORY_TYPES} 之一")
+    if not summary or not summary.strip():
+        raise ValueError("轻量记录不能为空")
+    item = db.get(Item, item_id)
+    if item is None:
+        raise ValueError(f"item {item_id} 不存在")
+    mem = Memory(
+        item_id=item_id,
+        source_type=source_type,
+        source_ref=None,
+        occurred_at=occurred_at or datetime.now(),
+        summary=summary.strip(),
+        emotion=emotion or None,
+    )
+    db.add(mem)
+    db.commit()
+    db.refresh(mem)
+    return mem
+
+
+def delete_direct_memory(memory_id: int, db: Session = None) -> bool:
+    """删除直接创建的 Memory（text/milestone，含其 media 附件级联）。"""
+    own_session = db is None
+    db = db or _session()
+    try:
+        mem = db.get(Memory, memory_id)
+        if mem is None:
+            return False
+        if mem.source_type not in DIRECT_MEMORY_TYPES:
+            return False  # review/collection 记忆由各自系统管理，不允许这里删
+        db.delete(mem)
+        db.commit()
+        return True
+    finally:
+        if own_session:
+            db.close()
 
 
 def list_item_memories(item_id: int, db: Session) -> List[Memory]:

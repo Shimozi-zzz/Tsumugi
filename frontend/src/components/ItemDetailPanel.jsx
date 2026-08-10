@@ -5,9 +5,9 @@
 // 平滑过渡），不覆盖文字/按钮；浅色主题克制、深色稍明显（--ambient-alpha）。
 // Phase B（ADR 0042）：双栏结构——"外部世界"（世界如何描述它）与"我的记录"
 // （我如何理解它，含 Memory 记忆时间轴）。
-import React, { useEffect, useState } from "react";
-import { fetchItemDetail, filePathToUrl, updateWorkColumns, updateCollection } from "../api.js";
-import { InfoTable, TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL, COLLECTION_STATUSES } from "./ui.jsx";
+import React, { useEffect, useRef, useState } from "react";
+import { fetchItemDetail, filePathToUrl, updateWorkColumns, updateCollection, createDirectMemory } from "../api.js";
+import { InfoTable, TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL, COLLECTION_STATUSES, MEMORY_EMOTIONS } from "./ui.jsx";
 import { extractPalette } from "../ambient.js";
 import MemoryTimeline from "./MemoryTimeline.jsx";
 
@@ -90,6 +90,26 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
       } : d)))
       .catch(() => { if (detail) { setColStatus(detail.collection_status || ""); setFavorite(!!detail.favorite); } })
       .finally(() => setColSaving(false));
+  }
+
+  // P3（ADR 0047）：轻量记录 / 里程碑 composer（一句话 + 情绪 + 可选附图）
+  const [draft, setDraft] = useState("");
+  const [draftEmotion, setDraftEmotion] = useState("");
+  const [draftFile, setDraftFile] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [timelineRefresh, setTimelineRefresh] = useState(0);
+  const fileInputRef = useRef(null);
+  async function submitDirect(sourceType, text) {
+    setRecording(true);
+    try {
+      await createDirectMemory(itemId, {
+        summary: text, source_type: sourceType,
+        emotion: draftEmotion, file: sourceType === "text" ? draftFile : null,
+      });
+      setDraft(""); setDraftEmotion(""); setDraftFile(null);
+      setTimelineRefresh((k) => k + 1);
+    } catch { /* 静默失败，保留输入便于重试 */ }
+    finally { setRecording(false); }
   }
 
   if (itemId == null) {
@@ -227,7 +247,45 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
               )}
             </div>
           )}
-          <MemoryTimeline itemId={itemId} />
+          {/* P3（ADR 0047）：轻量记录 composer + 里程碑 */}
+          {detail.source !== "local" && (
+            <div className="mb-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <input value={draft} onChange={(e) => setDraft(e.target.value)}
+                  placeholder="写一句此刻的感想…（轻量记录，不写正式书评）"
+                  className="flex-1 min-w-0 rounded-lg px-3 py-1.5 text-[12px] outline-none"
+                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }} />
+                <select value={draftEmotion} onChange={(e) => setDraftEmotion(e.target.value)}
+                  title="情绪（可选）"
+                  className="rounded-lg px-2 py-1.5 text-[11px] outline-none"
+                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }}>
+                  <option value="">情绪</option>
+                  {MEMORY_EMOTIONS.map((e) => <option key={e} value={e}>{e}</option>)}
+                </select>
+                <input type="file" accept="image/*" hidden ref={fileInputRef}
+                  onChange={(e) => setDraftFile(e.target.files?.[0] || null)} />
+                <button onClick={() => fileInputRef.current?.click()} title="附带一张图片"
+                  className="px-2 py-1.5 rounded-lg text-[11px]"
+                  style={{ color: "var(--text-secondary)", backgroundColor: "var(--accent-soft)" }}>
+                  {draftFile ? "🖼 ✓" : "🖼"}
+                </button>
+                <button onClick={() => submitDirect("text", draft)} disabled={!draft.trim() || recording}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-medium disabled:opacity-40"
+                  style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                  记录
+                </button>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <button onClick={() => submitDirect("milestone", "完成了这部作品。")} disabled={recording}
+                  className="px-2.5 py-1 rounded-full text-[11px]"
+                  style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>✓ 完成了</button>
+                <button onClick={() => submitDirect("milestone", "重新打开了这部作品。")} disabled={recording}
+                  className="px-2.5 py-1 rounded-full text-[11px]"
+                  style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>↺ 重新打开</button>
+              </div>
+            </div>
+          )}
+          <MemoryTimeline itemId={itemId} refreshKey={timelineRefresh} />
         </div>
       </div>
     </div>

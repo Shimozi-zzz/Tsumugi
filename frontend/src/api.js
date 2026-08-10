@@ -275,6 +275,27 @@ export async function fetchMemories(filters = {}) {
   return Array.isArray(body) ? body : [];
 }
 
+// ---- P3 / ADR 0047：直接创建轻量 Memory（文字/里程碑 + 可选情绪 + 可选附图）----
+
+export async function createDirectMemory(itemId, { summary, source_type = "text", emotion = "", file = null } = {}) {
+  const fd = new FormData();
+  fd.append("summary", summary);
+  fd.append("source_type", source_type);
+  if (emotion) fd.append("emotion", emotion);
+  if (file) fd.append("file", file);
+  const resp = await fetch(`${API_BASE}/items/${itemId}/memories`, { method: "POST", body: fd });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "记录失败");
+  return body;
+}
+
+export async function deleteMemory(memoryId) {
+  const resp = await fetch(`${API_BASE}/memories/${memoryId}`, { method: "DELETE" });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "删除记忆失败");
+  return body;
+}
+
 // ---- LLM Provider（可插拔化）----
 
 export async function fetchLLMProviders() {
