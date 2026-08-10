@@ -139,6 +139,47 @@ class TestReviewDelete:
         assert db.query(Review).filter(Review.id == r.id).count() == 0
 
 
+class TestOnThisDay:
+    """跨年同月同日查询（Phase E 往年今日）：严格月日匹配 + 年份过滤 + 排序。"""
+
+    def _mk(self, db, item, occurred, summary="s"):
+        m = Memory(item_id=item.id, source_type="review", source_ref=1,
+                   occurred_at=occurred, summary=summary)
+        db.add(m)
+        return m
+
+    def test_strict_month_day_and_max_year(self, db, fake_collection, patch_embeddings):
+        item = _mk_item(db)
+        self._mk(db, item, datetime(2024, 8, 9, 10, 0), "两年前")
+        self._mk(db, item, datetime(2022, 8, 9, 10, 0), "四年前")
+        self._mk(db, item, datetime(2026, 8, 9, 10, 0), "今年")
+        self._mk(db, item, datetime(2024, 7, 9, 10, 0), "不同月")
+        self._mk(db, item, datetime(2024, 8, 1, 10, 0), "不同日")
+        db.commit()
+        rows = memories.query_on_this_day(db, month=8, day=9, max_year=2026)
+        assert {r.summary for r in rows} == {"两年前", "四年前"}  # 严格 08-09 且 year<2026
+        assert [r.occurred_at for r in rows] == sorted([r.occurred_at for r in rows], reverse=True)
+
+    def test_max_year_none_includes_current(self, db, fake_collection, patch_embeddings):
+        item = _mk_item(db)
+        self._mk(db, item, datetime(2026, 8, 9, 10, 0), "今年")
+        db.commit()
+        assert len(memories.query_on_this_day(db, month=8, day=9)) == 1  # 不传 max_year 含今年
+        assert memories.query_on_this_day(db, month=8, day=9, max_year=2026) == []
+
+    def test_leap_day_strict(self, db, fake_collection, patch_embeddings):
+        """2月29日：只在 2月29日当天命中（闰年才有），2月28日不前移匹配。"""
+        item = _mk_item(db)
+        self._mk(db, item, datetime(2024, 2, 29, 10, 0), "闰日记忆")
+        self._mk(db, item, datetime(2020, 2, 29, 10, 0), "更早闰日")
+        self._mk(db, item, datetime(2024, 2, 28, 10, 0), "普通日")
+        db.commit()
+        rows = memories.query_on_this_day(db, month=2, day=29, max_year=2026)
+        assert {r.summary for r in rows} == {"闰日记忆", "更早闰日"}
+        # 2月28日不匹配 2月29日
+        assert {r.summary for r in memories.query_on_this_day(db, month=2, day=28, max_year=2026)} == {"普通日"}
+
+
 class TestBackfill:
     def test_backfills_existing_reviews_idempotent(self, db, fake_collection, patch_embeddings):
         item = _mk_item(db, content="内容A" * 20)
@@ -269,6 +310,19 @@ class TestApi:
         rows = client.get("/api/memories?start=2023&end=2025").json()
         assert len(rows) == 1
         assert client.get("/api/memories?start=2026").json() == []
+
+    def test_api_on_this_day(self, client, db, fake_collection, patch_embeddings):
+        item = _mk_item(db, title="命运石之门")
+        m = Memory(item_id=item.id, source_type="review", source_ref=1,
+                   occurred_at=datetime(2024, 8, 9, 10, 0), summary="两年前的今天")
+        db.add(m)
+        db.commit()
+        rows = client.get("/api/memories?month=8&day=9&max_year=2026").json()
+        assert len(rows) == 1
+        assert rows[0]["summary"] == "两年前的今天"
+        assert rows[0]["item_title"] == "命运石之门"
+        # 不传 month/day → 走原全局查询（Phase C 兼容），max_year 参数被忽略
+        assert len(client.get("/api/memories?max_year=2026").json()) == 1
 
     def test_api_item_not_found(self, client):
         assert client.get("/api/items/9999/memories").status_code == 404

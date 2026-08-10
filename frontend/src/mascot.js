@@ -123,6 +123,16 @@ export const MASCOT_LINES = {
     "主人好喵～书都在，我都在。",
     "主人请随意，这里的一切都是为主人留着的。",
   ],
+  // 往年今日（Phase E）：模板带占位符 {yearsLabel}/{title}/{summary}，由 selectLine
+  // 用命中的真实 Memory 填充（"2年前的今天，你为《XX》写下了「……」"具体唤起）。
+  // 遵守人设：称呼"主人"、"喵～"克制（1/5）、情绪直给。
+  on_this_day: [
+    "主人，{yearsLabel}的今天，你为《{title}》写下了「{summary}」。",
+    "诶——{yearsLabel}的今天，主人给《{title}》留下了「{summary}」。要回去看看那时的自己吗？",
+    "{yearsLabel}的今天，主人写下的《{title}》书评我还好好收着：「{summary}」。",
+    "主人还记得吗？{yearsLabel}的今天，你为《{title}》写下了「{summary}」喵～",
+    "{yearsLabel}的今天，主人为《{title}》留下了「{summary}」。时间过得真快呢。",
+  ],
 };
 
 export const MILESTONES = {
@@ -165,13 +175,42 @@ export function pickLine(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+export function yearOfMemory(iso) {
+  const y = Number(String(iso || "").slice(0, 4));
+  return Number.isFinite(y) && y > 0 ? y : NaN;
+}
+
+/** "去年"/"N年前" 标签（Phase E 往年今日台词用）。 */
+export function yearsAgoLabel(occurredAt) {
+  const y = yearOfMemory(occurredAt);
+  if (!y) return "";
+  const diff = new Date().getFullYear() - y;
+  if (diff <= 0) return "今年";
+  return diff === 1 ? "去年" : `${diff}年前`;
+}
+
+function fillOnThisDay(tpl, mem, label) {
+  const title = mem?.item_title || (mem?.item_id != null ? `作品 #${mem.item_id}` : "一部作品");
+  const summary = (mem?.summary || "一段感想").replace(/[「」]/g, "");
+  return tpl
+    .replace("{yearsLabel}", label)
+    .replace("{title}", title)
+    .replace("{summary}", summary);
+}
+
 // 场景匹配（纯函数）：根据真实数据选触发场景。优先级（高→低）：
-// 想念 > 里程碑 > 新收藏 > 写书评 > 时段问候 > 兜底
-// 理由见 docs/decisions/0040-mascot-lines.md。
-// ctx: { hour, collectionCount, reviewCount, newestCollectionAt, newestReviewAt, lastVisitGap }
+// 往年今日 > 想念 > 里程碑 > 新收藏 > 写书评 > 时段问候 > 兜底
+// 理由见 docs/decisions/0040-mascot-lines.md 与 0044-on-this-day.md。
+// ctx: { hour, collectionCount, reviewCount, newestCollectionAt, newestReviewAt,
+//        lastVisitGap, onThisDay }
 export function matchScene(ctx) {
   const now = Date.now();
   const hour = typeof ctx.hour === "number" ? ctx.hour : NaN;
+
+  // 往年今日（Phase E）：触发条件天然稀疏（一年里大多日子不命中），一旦命中
+  // 就是当天最有分量的时刻，插入**最高优先级**（高于想念）。ctx.onThisDay =
+  // 后端命中的 Memory（null/undefined 则不触发）。
+  if (ctx.onThisDay) return { scene: "on_this_day", memory: ctx.onThisDay };
 
   // 想念：距上次打开超过 3 天（只在整个页面会话的首次匹配时可能成立，见 computeLastVisitGap）
   if ((ctx.lastVisitGap || 0) > WINDOWS_MS.missingDays) return { scene: "missing_you" };
@@ -202,6 +241,11 @@ export function matchScene(ctx) {
 /** 按匹配到的场景从台词库随机取一句（失败兜底用 fallback）。 */
 export function selectLine(scene) {
   if (!scene) return pickLine(MASCOT_LINES.fallback);
+  if (scene.scene === "on_this_day") {
+    const mem = scene.memory;
+    const tpl = pickLine(MASCOT_LINES.on_this_day);
+    return fillOnThisDay(tpl, mem, yearsAgoLabel(mem?.occurred_at));
+  }
   if (scene.scene === "milestone") {
     const list = MASCOT_LINES.milestones[scene.variant];
     return list && list.length ? pickLine(list) : pickLine(MASCOT_LINES.fallback);

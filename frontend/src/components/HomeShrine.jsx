@@ -10,9 +10,10 @@
 //   时段）匹配场景，同一场景随机一句；每次进入首页选定一句后本次访问保持稳定
 //   （不来回跳变）。台词库见 ../mascot.js。
 import React, { useEffect, useRef, useState } from "react";
-import { filePathToUrl } from "../api.js";
+import { filePathToUrl, fetchMemories } from "../api.js";
 import { extractPalette } from "../ambient.js";
 import { matchScene, selectLine, computeLastVisitGap } from "../mascot.js";
+import MemoryReviewModal from "./MemoryReviewModal.jsx";
 
 const RITUAL_KEY = "tsumugi-home-ritual";
 
@@ -112,23 +113,37 @@ export default function HomeShrine({
   const [revealed, setRevealed] = useState(false);
   const [skipped, setSkipped] = useState(false);
 
-  // 猫娘台词：数据就绪后选一次（想念/里程碑/新收藏/写书评/时段/兜底），
+  // 猫娘台词：数据就绪后选一次（往年今日/想念/里程碑/新收藏/写书评/时段/兜底），
   // 本次访问内保持稳定。chosenRef 防止数据刷新导致台词跳变。
+  // Phase E 往年今日：先异步查"历史同月同日"记忆，命中则置最高优先级场景。
+  const [mascotScene, setMascotScene] = useState(null);
   const [mascotLine, setMascotLine] = useState(null);
+  const [showMemory, setShowMemory] = useState(false); // 往年今日 → 只读弹层
   const mascotChosen = useRef(false);
   useEffect(() => {
     if (mascotChosen.current) return;
     if (collectionCount == null || reviewCount == null) return; // 数据未就绪
     mascotChosen.current = true;
-    const scene = matchScene({
-      hour: new Date().getHours(),
+    let cancelled = false;
+    const now = new Date();
+    const base = {
+      hour: now.getHours(),
       collectionCount,
       reviewCount,
       newestCollectionAt: newestCollectionAt || null,
       newestReviewAt: newestReviewAt || null,
       lastVisitGap: computeLastVisitGap(),
-    });
-    setMascotLine(selectLine(scene));
+    };
+    const pick = (onThisDay) => {
+      if (cancelled) return;
+      const scene = matchScene({ ...base, onThisDay });
+      setMascotScene(scene);
+      setMascotLine(selectLine(scene));
+    };
+    fetchMemories({ month: now.getMonth() + 1, day: now.getDate(), max_year: now.getFullYear() })
+      .then((list) => pick(list && list.length ? list[0] : null))
+      .catch(() => pick(null)); // 查询失败不阻塞日常问候
+    return () => { cancelled = true; };
   }, [collectionCount, reviewCount, newestCollectionAt, newestReviewAt]);
 
   // 氛围色：代表封面主色 → 环境光；无封面/取色失败 → 回退主题表面色
@@ -181,11 +196,29 @@ export default function HomeShrine({
         <div className="shrine-item mt-6 w-full max-w-xl">
           {children}
         </div>
-        {/* 看守猫娘台词（ADR 0040）：搜索栏（祭坛）与供奉之间的一行轻语，随仪式渐次呈现 */}
+        {/* 看守猫娘台词（ADR 0040 / Phase E 往年今日）：搜索栏（祭坛）与供奉之间
+            的一行轻语，随仪式渐次呈现；往年今日命中时可点击查看那段记忆 */}
         {mascotLine && (
           <div className="shrine-item mt-5 max-w-md text-center text-[12px] leading-relaxed"
             style={{ color: "var(--text-secondary)", transitionDelay: "0.22s" }}>
-            {mascotLine}
+            {mascotScene?.scene === "on_this_day" ? (
+              <>
+                <div className="text-[10px] tracking-[0.3em] mb-1" style={{ color: "var(--accent)" }}>
+                  ◇ 往年今日
+                </div>
+                <button type="button" onClick={() => setShowMemory(true)} title="查看这段记忆"
+                  className="inline-block hover:opacity-80 transition-opacity"
+                  style={{ color: "var(--text-secondary)" }}>
+                  {mascotLine}
+                </button>
+              </>
+            ) : (
+              mascotLine
+            )}
+            {showMemory && mascotScene?.memory && (
+              <MemoryReviewModal itemId={mascotScene.memory.item_id}
+                sourceRef={mascotScene.memory.source_ref} onClose={() => setShowMemory(false)} />
+            )}
           </div>
         )}
         <div className="mt-7">

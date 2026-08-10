@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   MASCOT_LINES, MILESTONES, WINDOWS_MS,
-  pickLine, matchScene, selectLine,
+  pickLine, matchScene, selectLine, yearsAgoLabel,
   computeLastVisitGap, resetMascotSession,
 } from "../mascot.js";
 
@@ -25,6 +25,18 @@ beforeEach(() => { localStorage.clear(); resetMascotSession(); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("matchScene（场景匹配）", () => {
+  it("往年今日命中 → on_this_day 优先级最高（高于想念/里程碑）", () => {
+    const mem = { item_id: 1, item_title: "命运石之门", source_ref: 10, occurred_at: "2024-08-09T10:00:00", summary: "神作" };
+    // 即使久别（想念）也优先往年今日
+    const scene = matchScene(ctx({ lastVisitGap: 4 * 24 * 60 * 60 * 1000, onThisDay: mem }));
+    expect(scene.scene).toBe("on_this_day");
+    expect(scene.memory).toBe(mem);
+    // 即使命中里程碑也优先往年今日
+    expect(matchScene(ctx({ collectionCount: 100, onThisDay: mem })).scene).toBe("on_this_day");
+    // 未命中（onThisDay null）→ 走原有优先级（想念）
+    expect(matchScene(ctx({ lastVisitGap: 4 * 24 * 60 * 60 * 1000, onThisDay: null }))).toEqual({ scene: "missing_you" });
+  });
+
   it("距上次打开超过 3 天 → 想念（优先级最高）", () => {
     expect(matchScene(ctx({ lastVisitGap: 4 * 24 * 60 * 60 * 1000 }))).toEqual({ scene: "missing_you" });
     // 即使刚有新收藏，久别重逢的想念仍优先
@@ -83,6 +95,22 @@ describe("selectLine / pickLine（随机选取）", () => {
     vi.spyOn(Math, "random").mockReturnValue(0.99);
     expect(pickLine(["甲", "乙"])).toBe("乙");
     expect(pickLine([])).toBe("");
+  });
+
+  it("往年今日台词：占位符被真实记忆信息填充（年份标签/标题/摘要），喵～克制", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const line = selectLine({ scene: "on_this_day", memory: { item_id: 1, item_title: "命运石之门", source_ref: 10, occurred_at: "2024-08-09T10:00:00", summary: "神作" } });
+    expect(line).toContain("《命运石之门》");
+    expect(line).toContain("神作");
+    expect(line).toContain("今天"); // "2年前的今天"（当前年-2024=2，测试若在2026跑）
+    // 无 memory 时兜底不崩溃
+    expect(selectLine({ scene: "on_this_day", memory: null })).toContain("一部作品");
+  });
+
+  it("yearsAgoLabel：1→去年，N→N年前", () => {
+    expect(yearsAgoLabel("2025-08-09T10:00:00")).toMatch(/去年|1年前/);
+    expect(yearsAgoLabel("2020-08-09T10:00:00")).toContain("年前");
+    expect(yearsAgoLabel("")).toBe("");
   });
 
   it("selectLine 按场景取对应台词库，缺库兜底 fallback", () => {

@@ -2,12 +2,11 @@
 // 调用 Phase A 的 /items/{id}/memories 接口，展示该作品的全部 Memory。
 // - 排序：**正序（旧→新）**——"回望"这段关系的开始到现在，读起来像一部
 //   编年史（理由见 docs/decisions/0042-memory-timeline.md）；
-// - source_type=review 的记忆可点击：只读弹出对应书评全文（复用 renderMarkdown +
-//   .doc 样式），不打断主从浏览流；未来 text/image/collection 等来源无需弹窗，降级为不可点；
+// - source_type=review 的记忆可点击：复用 MemoryReviewModal 只读展示完整书评；
 // - 空状态：刚收藏还没写过书评时给引导文案，不显示空白。
 import React, { useEffect, useState } from "react";
-import { fetchItemMemories, fetchItemReviews } from "../api.js";
-import { renderMarkdown } from "../markdown.js";
+import { fetchItemMemories } from "../api.js";
+import MemoryReviewModal from "./MemoryReviewModal.jsx";
 
 function formatDate(iso) {
   if (!iso) return "";
@@ -23,7 +22,7 @@ export default function MemoryTimeline({ itemId }) {
   const [memories, setMemories] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [openReview, setOpenReview] = useState(null); // {mem, review|null, error}
+  const [openRef, setOpenRef] = useState(null); // 正在只读查看的 review id（null=关闭）
 
   useEffect(() => {
     if (itemId == null) { setMemories([]); setError(""); return; }
@@ -37,17 +36,9 @@ export default function MemoryTimeline({ itemId }) {
     return () => { cancelled = true; };
   }, [itemId]);
 
-  // 点击 review 记忆 → 拉该作品书评列表，按 source_ref 找到对应 review，只读展示
-  async function openMemory(mem) {
+  function openMemory(mem) {
     if (mem.source_type !== "review") return;
-    setOpenReview({ mem, review: null, error: "" });
-    try {
-      const reviews = await fetchItemReviews(itemId);
-      const review = (reviews || []).find((r) => r.id === mem.source_ref) || null;
-      setOpenReview({ mem, review, error: review ? "" : "未找到对应书评" });
-    } catch (e) {
-      setOpenReview({ mem, review: null, error: e.message });
-    }
+    setOpenRef(mem.source_ref);
   }
 
   let body;
@@ -99,40 +90,9 @@ export default function MemoryTimeline({ itemId }) {
     <>
       {body}
 
-      {/* 只读书评弹层（复用 .doc markdown 样式；轻量覆盖，不打断主从浏览） */}
-      {openReview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6"
-          style={{ backgroundColor: "rgba(8,10,18,0.55)" }}
-          onClick={() => setOpenReview(null)}>
-          <div className="w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-2xl p-5"
-            style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", boxShadow: "var(--shadow-md)" }}
-            onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div className="min-w-0">
-                <div className="text-sm font-medium" style={{ color: "var(--text)" }}>
-                  {openReview.review?.title || "书评"}
-                </div>
-                {openReview.review && (
-                  <div className="text-[11px] mt-1 flex flex-wrap gap-x-3 gap-y-1"
-                    style={{ color: "var(--text-secondary)" }}>
-                    {openReview.review.rating != null && <span>评分 ★{openReview.review.rating}</span>}
-                    {openReview.review.status && <span>状态 {openReview.review.status}</span>}
-                    <span>{formatDate(openReview.review.created_at)}</span>
-                  </div>
-                )}
-              </div>
-              <button onClick={() => setOpenReview(null)} title="关闭"
-                className="shrink-0 px-2 py-0.5 rounded-lg text-sm"
-                style={{ color: "var(--text-secondary)" }}>✕</button>
-            </div>
-            <div className="doc text-[13px] leading-relaxed"
-              dangerouslySetInnerHTML={{
-                __html: openReview.review
-                  ? renderMarkdown(openReview.review.content)
-                  : `<p style="color:var(--text-secondary)">${openReview.error || "加载中…"}</p>`,
-              }} />
-          </div>
-        </div>
+      {/* 只读书评弹层（复用 MemoryReviewModal，Phase E 同样复用） */}
+      {openRef != null && (
+        <MemoryReviewModal itemId={itemId} sourceRef={openRef} onClose={() => setOpenRef(null)} />
       )}
     </>
   );

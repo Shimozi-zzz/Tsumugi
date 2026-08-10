@@ -16,6 +16,7 @@ Memory 是独立容器：收纳"图书馆里发生过的、值得被记住的时
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+from sqlalchemy import Integer, cast, func
 from sqlalchemy.orm import Session
 
 from app.models import Item, Memory, Review
@@ -85,6 +86,32 @@ def list_item_memories(item_id: int, db: Session) -> List[Memory]:
     """某作品的全部 Memory，按发生时间倒序（最新在前）。Phase B 作品时间轴用。"""
     return db.query(Memory).filter(Memory.item_id == item_id) \
         .order_by(Memory.occurred_at.desc(), Memory.id.desc()).all()
+
+
+def query_on_this_day(
+    db: Session,
+    month: int,
+    day: int,
+    max_year: Optional[int] = None,
+    limit: int = 20,
+) -> List[Memory]:
+    """跨年同月同日查询（Phase E 往年今日）：历史上任意年份、月-日与目标相同的 Memory。
+
+    - 只匹配**严格同月同日**：2 月 29 日的记忆只在 2 月 29 日当天被命中
+      （闰年才有），2 月 28 日不"前移/后移"匹配——避免"前天/昨天"式的模糊
+      （见 ADR 0044 闰年边界说明）；
+    - max_year 通常传当前年份，过滤掉今年（往年今日 = year < 今年）；
+    - 排序：年份倒序（最近的年份在前），同一天内 occurred_at 倒序——
+      前端取首条即"最近的年份、该日最新一条"，作为选取规则（ADR 0044）。
+    """
+    mm = f"{int(month):02d}"
+    dd = f"{int(day):02d}"
+    q = db.query(Memory).filter(func.strftime("%m-%d", Memory.occurred_at) == f"{mm}-{dd}")
+    if max_year is not None:
+        # strftime 返回 TEXT，与整数比较永远 false（SQLite 排序：数字 < 文本）；
+        # 必须 CAST 成 INTEGER（substr 同理）。
+        q = q.filter(cast(func.strftime("%Y", Memory.occurred_at), Integer) < max_year)
+    return q.order_by(Memory.occurred_at.desc(), Memory.id.desc()).limit(limit).all()
 
 
 def backfill_reviews(engine) -> int:

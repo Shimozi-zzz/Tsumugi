@@ -1,7 +1,8 @@
 // 神殿首页（ADR 0039）：空间隐喻渲染、氛围色环境光、每日一次仪式过渡
-// （ADR 0040）：看守猫娘台词按真实数据展示，本次访问内稳定
+// （ADR 0040 / Phase E）：看守猫娘台词按真实数据展示，本次访问内稳定；往年今日命中时
+// 展示可点击的"◇ 往年今日"台词并打开只读书评弹层
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import React from "react";
 import HomeShrine from "../components/HomeShrine.jsx";
 import { MASCOT_LINES, resetMascotSession } from "../mascot.js";
@@ -11,6 +12,20 @@ vi.mock("../ambient.js", async (importOriginal) => {
   return { ...mod, extractPalette: vi.fn() };
 });
 import { extractPalette } from "../ambient.js";
+
+function ok(payload, status = 200) {
+  return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(payload) });
+}
+
+// HomeShrine 会异步调 /memories（往年今日，Phase E）与 /items/{id}/reviews（只读弹层）
+function mockFetch({ memories = [], reviews = [] } = {}) {
+  global.fetch = vi.fn((url) => {
+    const u = String(url);
+    if (u.includes("/memories")) return ok(memories);
+    if (u.includes("/reviews")) return ok(reviews);
+    return ok({});
+  });
+}
 
 function isoHoursAgo(h) {
   return new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
@@ -38,7 +53,7 @@ function ambientLayer(container) {
     (d.style.background || "").includes("radial-gradient"));
 }
 
-beforeEach(() => { localStorage.clear(); resetMascotSession(); extractPalette.mockClear(); });
+beforeEach(() => { localStorage.clear(); resetMascotSession(); extractPalette.mockClear(); mockFetch(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("HomeShrine（神殿首页）", () => {
@@ -95,15 +110,18 @@ describe("HomeShrine（神殿首页）", () => {
     expect(shrine.className).toContain("shrine-revealed");
   });
 
-  it("数据就绪 + 最近有新收藏 → 展示猫娘台词（来自 new_collection 库），本次访问内稳定", () => {
+  it("数据就绪 + 最近有新收藏 → 展示猫娘台词（来自 new_collection 库），本次访问内稳定", async () => {
     vi.spyOn(Math, "random").mockReturnValueOnce(0).mockReturnValue(0.99);
     const { container, rerender } = renderShrine({
       collectionCount: 3,
       reviewCount: 0,
       newestCollectionAt: isoHoursAgo(1),
     });
+    await waitFor(() => {
+      const lineEl = [...container.querySelectorAll(".shrine-item")].find((d) => MASCOT_LINES.new_collection.includes(d.textContent));
+      expect(lineEl).toBeTruthy();
+    });
     const lineEl = [...container.querySelectorAll(".shrine-item")].find((d) => MASCOT_LINES.new_collection.includes(d.textContent));
-    expect(lineEl).toBeTruthy();
     const firstLine = lineEl.textContent;
     expect(MASCOT_LINES.new_collection[0]).toBe(firstLine); // random=0 → 第一句
 
@@ -123,12 +141,41 @@ describe("HomeShrine（神殿首页）", () => {
     expect(lineEl2.textContent).toBe(firstLine);
   });
 
-  it("收藏数命中里程碑 → 展示对应里程碑台词", () => {
+  it("收藏数命中里程碑 → 展示对应里程碑台词", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const { container } = renderShrine({ collectionCount: 100, reviewCount: 0 });
+    await waitFor(() => {
+      const el = [...container.querySelectorAll(".shrine-item")].find((d) => MASCOT_LINES.milestones["collection:100"].includes(d.textContent));
+      expect(el).toBeTruthy();
+    });
     const el = [...container.querySelectorAll(".shrine-item")].find((d) => MASCOT_LINES.milestones["collection:100"].includes(d.textContent));
-    expect(el).toBeTruthy();
     expect(MASCOT_LINES.milestones["collection:100"][0]).toBe(el.textContent);
+  });
+
+  it("往年今日命中 → 展示可点击台词（含年份/标题/摘要），点击打开只读书评弹层", async () => {
+    mockFetch({
+      memories: [{ id: 99, item_id: 1, item_title: "命运石之门", source_type: "review", source_ref: 10, occurred_at: "2024-08-09T10:00:00", summary: "神作", created_at: "2024-08-09T10:00:00" }],
+      reviews: [{ id: 10, item_id: 1, title: "神作", content: "# 标题\n正文", rating: 9, status: "看完", created_at: "2024-08-09T10:00:00" }],
+    });
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { container } = renderShrine({ collectionCount: 3, reviewCount: 0 });
+    await waitFor(() => expect(screen.getByText("◇ 往年今日")).toBeTruthy());
+    const line = [...container.querySelectorAll("button")].find((b) => b.textContent.includes("命运石之门"));
+    expect(line).toBeTruthy();
+    expect(line.textContent).toContain("《命运石之门》");
+    expect(line.textContent).toContain("神作");
+    fireEvent.click(line);
+    await waitFor(() => expect(document.querySelector(".doc h1")?.textContent).toBe("标题"));
+  });
+
+  it("往年今日未命中 → 日常问候照常，不出现往年今日标记", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    renderShrine({ collectionCount: 3, reviewCount: 0, newestCollectionAt: isoHoursAgo(1) });
+    await waitFor(() => {
+      const anyLine = [...document.querySelectorAll(".shrine-item")].some((d) => MASCOT_LINES.new_collection.includes(d.textContent));
+      expect(anyLine).toBeTruthy();
+    });
+    expect(screen.queryByText("◇ 往年今日")).toBeNull();
   });
 
   it("数据未就绪（counts 为 null）→ 不展示猫娘台词", () => {

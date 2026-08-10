@@ -640,17 +640,27 @@ async def list_memories(
     item_id: Optional[int] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
+    month: Optional[int] = None,
+    day: Optional[int] = None,
+    max_year: Optional[int] = None,
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
-    """全局记忆查询（Phase C 记忆回廊用）：按时间范围 / item 筛选。
+    """全局记忆查询（Phase C 记忆回廊）：按时间范围 / item 筛选。
 
     start/end 支持 ISO 时间或纯日期（如 2023，作 end 时按当日结束处理）。
+    传 month+day 时切换为"跨年同月同日"查询（Phase E 往年今日）：
+    命中历史任意年份同月同日的记忆，max_year 过滤掉当年（默认传今年）。
     """
-    rows = memories.query_memories(
-        db, item_id=item_id, start=start, end=end, skip=skip, limit=limit,
-    )
+    if month is not None and day is not None:
+        rows = memories.query_on_this_day(
+            db, month=month, day=day, max_year=max_year, limit=limit,
+        )
+    else:
+        rows = memories.query_memories(
+            db, item_id=item_id, start=start, end=end, skip=skip, limit=limit,
+        )
     return [_memory_out(m, db) for m in rows]
 
 
