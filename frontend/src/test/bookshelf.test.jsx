@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import React from "react";
-import { stringHash, spineSeed, spineColor, hexToHsl, primaryTag } from "../bookshelf.js";
+import { stringHash, spineSeed, spineColor, hexToHsl, primaryTag, spineThickness, groupBookshelf } from "../bookshelf.js";
 import Bookshelf from "../components/Bookshelf.jsx";
 import DesktopView from "../components/DesktopView.jsx";
 
@@ -45,6 +45,29 @@ describe("bookshelf 纯函数", () => {
     expect(c1).not.toBe(c2);
     expect(c1).toMatch(/^hsl\(/);
   });
+
+  it("spineThickness（P5）：正文越长书脊越厚，带钳制；无正文用 chunk 兜底", () => {
+    expect(spineThickness({ content: "" })).toBeGreaterThanOrEqual(9);
+    const thin = spineThickness({ content: "短" });
+    const thick = spineThickness({ content: "长".repeat(10000) });
+    expect(thick).toBeGreaterThan(thin);
+    expect(thick).toBeLessThanOrEqual(28);
+    expect(spineThickness({ content: "长".repeat(100000) })).toBeLessThanOrEqual(28); // 上界钳制
+    expect(spineThickness({ content: "", chunks_count: 20 })).toBeGreaterThan(spineThickness({ content: "", chunks_count: 1 }));
+  });
+
+  it("groupBookshelf（P5）：按主标签分架，未分类排最后，数量降序", () => {
+    const items = [
+      { id: 1, title: "A", tags: ["恋爱"] },
+      { id: 2, title: "B", tags: ["恋爱"] },
+      { id: 3, title: "C", tags: ["科幻"] },
+      { id: 4, title: "D", tags: [] },
+    ];
+    const groups = groupBookshelf(items);
+    expect(groups.map((g) => g.tag)).toEqual(["恋爱", "科幻", "未分类"]);
+    expect(groups[0].items.map((i) => i.id)).toEqual([1, 2]);
+    expect(groups[2].items[0].id).toBe(4);
+  });
 });
 
 describe("Bookshelf 组件", () => {
@@ -59,6 +82,24 @@ describe("Bookshelf 组件", () => {
     // 书脊标题用 vertical-rl 书写模式
     const vertical = container.querySelector('span[style*="vertical-rl"], span[style*="vertical-rl"]');
     expect(vertical).toBeTruthy();
+  });
+
+  it("P5 真书架：按主标签分架 + 层板线 + 取书浮起类", () => {
+    const { container } = renderShelf([
+      { id: 1, title: "辉夜大小姐", tags: ["恋爱"], content: "" },
+      { id: 2, title: "命运石之门", tags: ["科幻"], content: "" },
+    ]);
+    // 两层书架（恋爱/科幻），每层有标签
+    const groups = [...container.querySelectorAll('[data-testid="shelf-group"]')];
+    expect(groups.length).toBe(2);
+    expect(groups[0].textContent).toContain("恋爱");
+    expect(groups[1].textContent).toContain("科幻");
+    // 层板线存在
+    expect(container.querySelector(".shelf-board")).toBeTruthy();
+    // 书脊带取书浮起类
+    const book = container.querySelector("button.shelf-book");
+    expect(book).toBeTruthy();
+    expect(book.className).toContain("shelf-book");
   });
 
   it("点击书脊 → onOpenItem 携带该条目", () => {

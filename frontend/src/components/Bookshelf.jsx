@@ -1,8 +1,11 @@
-// 书架/书脊视图：窄条竖排标题 + hover 抽书预览（封面/标题/我的评分）+ 点击进详情
+// 真书架（P5 / ADR 0049）：层板线 + 按主标签分架 + 书脊厚度来自数据 + hover 取书浮起
+// 对 ADR 0019"书脊列表"的有意推翻（详见 ADR 0049）；书脊配色仍按标签哈希（0019），
+// 但书架有了"空间"：每层一个分类标签 + 层板线，书站上去、hover 浮起、点击进详情。
+// hover 抽书预览（封面/标题/我的评分）保留。
 import React, { useRef, useState } from "react";
 import { fetchItemDetail } from "../api.js";
 import { readCssVar } from "../shareCard.js";
-import { spineColor, spineSeed } from "../bookshelf.js";
+import { spineColor, spineSeed, spineThickness, groupBookshelf } from "../bookshelf.js";
 import CoverAmbient from "./CoverAmbient.jsx";
 
 export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, selectedIds, onToggleSelect, onContextMenu }) {
@@ -40,63 +43,79 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
     setHover(null);
   }
 
+  const groups = groupBookshelf(items);
+
   return (
     <div>
-      <div className="flex items-start gap-2.5 overflow-x-auto pb-3"
-        style={{ minHeight: 248, scrollbarWidth: "thin" }}>
-        {items.map((it) => {
-          const color = spineColor(accent, spineSeed(it));
-          const selected = selectedIds && selectedIds.has(it.id);
-          return (
-            <CoverAmbient key={it.id} src={coverOf(it)} radius={6} blur={12} spread={1} alphaFactor={0.7}>
-            <button
-              onClick={() => { if (selectMode) onToggleSelect?.(it.id); else onOpenItem(it); }}
-              onMouseEnter={(e) => startHover(e, it)}
-              onMouseLeave={clearHover}
-              onContextMenu={(e) => onContextMenu?.(e, it)}
-              title={it.title}
-              className="shrink-0 relative overflow-hidden"
-              style={{
-                width: 36, height: 236, borderRadius: 6,
-                // ADR 0019：书脊主体配色仍按标签哈希决定，取色高光只是 hover 的额外点缀层
-                backgroundColor: color, cursor: "pointer",
-                border: selected ? "2px solid var(--accent)" : "1px solid rgba(255,255,255,0.14)",
-                boxShadow: selected ? "0 0 0 2px var(--accent-soft)" : "inset 2px 0 0 rgba(255,255,255,0.16), 0 2px 6px rgba(0,0,0,0.18)",
-              }}>
-              {selectMode && (
-                <span className="absolute top-1 left-1 z-10 w-4 h-4 rounded-full flex items-center justify-center text-[10px]"
-                  style={{ backgroundColor: selected ? "var(--accent)" : "rgba(255,255,255,0.9)",
-                    color: selected ? "#fff" : "var(--text-secondary)",
-                    border: "1px solid var(--accent)" }}>
-                  {selected ? "✓" : ""}
-                </span>
-              )}
-              {/* 书脊高光条（左侧） */}
-              <span className="absolute left-0 top-0 bottom-0"
-                style={{ width: 2, backgroundColor: "rgba(255,255,255,0.20)" }} />
-              {/* 竖排标题 */}
-              <span className="absolute inset-0 flex items-start justify-center"
-                style={{
-                  writingMode: "vertical-rl", textOrientation: "mixed",
-                  padding: "12px 7px", fontSize: 11, color: "#fff",
-                  letterSpacing: 2, lineHeight: 1.35, fontWeight: 500,
-                  textAlign: "center", wordBreak: "break-all",
-                }}>
-                {it.title}
-              </span>
-              {/* 底部色带（书脊装帧感） */}
-              <span className="absolute left-0 right-0 bottom-0"
-                style={{ height: 9, backgroundColor: "rgba(0,0,0,0.18)" }} />
-            </button>
-            </CoverAmbient>
-          );
-        })}
-        {items.length === 0 && (
-          <div className="text-sm py-16" style={{ color: "var(--text-secondary)" }}>
-            书架是空的
+      {groups.map((g) => (
+        <div key={g.tag} className="mb-6" data-testid="shelf-group">
+          {/* 分类架标签 */}
+          <div className="flex items-baseline gap-2 mb-1 px-1">
+            <span className="text-[11px] tracking-[0.25em]" style={{ color: "var(--accent)" }}>{g.tag}</span>
+            <span className="text-[10px] tabular-nums" style={{ color: "var(--text-secondary)" }}>{g.items.length} 册</span>
           </div>
-        )}
-      </div>
+          {/* 一层书（站在层板上） */}
+          <div className="flex items-end gap-1.5 px-1 overflow-x-auto"
+            style={{ minHeight: 216, scrollbarWidth: "thin" }}>
+            {g.items.map((it) => {
+              const color = spineColor(accent, spineSeed(it));
+              const selected = selectedIds && selectedIds.has(it.id);
+              return (
+                <CoverAmbient key={it.id} src={coverOf(it)} radius={6} blur={12} spread={1} alphaFactor={0.7}>
+                <button
+                  onClick={() => { if (selectMode) onToggleSelect?.(it.id); else onOpenItem(it); }}
+                  onMouseEnter={(e) => startHover(e, it)}
+                  onMouseLeave={clearHover}
+                  onContextMenu={(e) => onContextMenu?.(e, it)}
+                  title={it.title}
+                  className="shelf-book shrink-0 relative overflow-hidden"
+                  style={{
+                    width: spineThickness(it), height: 210, borderRadius: 5,
+                    backgroundColor: color, cursor: "pointer",
+                    border: selected ? "2px solid var(--accent)" : "1px solid rgba(255,255,255,0.14)",
+                    boxShadow: selected ? "0 0 0 2px var(--accent-soft)" : "inset 2px 0 0 rgba(255,255,255,0.16), 0 2px 6px rgba(0,0,0,0.18)",
+                  }}>
+                  {selectMode && (
+                    <span className="absolute top-1 left-1 z-10 w-4 h-4 rounded-full flex items-center justify-center text-[10px]"
+                      style={{ backgroundColor: selected ? "var(--accent)" : "rgba(255,255,255,0.9)",
+                        color: selected ? "#fff" : "var(--text-secondary)",
+                        border: "1px solid var(--accent)" }}>
+                      {selected ? "✓" : ""}
+                    </span>
+                  )}
+                  <span className="absolute left-0 top-0 bottom-0"
+                    style={{ width: 2, backgroundColor: "rgba(255,255,255,0.20)" }} />
+                  <span className="absolute inset-0 flex items-start justify-center"
+                    style={{
+                      writingMode: "vertical-rl", textOrientation: "mixed",
+                      padding: "12px 6px", fontSize: 11, color: "#fff",
+                      letterSpacing: 2, lineHeight: 1.35, fontWeight: 500,
+                      textAlign: "center", wordBreak: "break-all",
+                    }}>
+                    {it.title}
+                  </span>
+                  <span className="absolute left-0 right-0 bottom-0"
+                    style={{ height: 9, backgroundColor: "rgba(0,0,0,0.18)" }} />
+                </button>
+                </CoverAmbient>
+              );
+            })}
+          </div>
+          {/* 层板线（书架板，书站在上面） */}
+          <div className="shelf-board mx-1 mt-0.5"
+            style={{
+              height: 7, borderRadius: 3,
+              background: "linear-gradient(180deg, var(--surface-2), var(--surface-1))",
+              borderBottom: "1px solid var(--panel-border)",
+              boxShadow: "0 2px 3px rgba(0,0,0,0.10)",
+            }} />
+        </div>
+      ))}
+      {items.length === 0 && (
+        <div className="text-sm py-16" style={{ color: "var(--text-secondary)" }}>
+          书架是空的
+        </div>
+      )}
 
       {/* hover 抽书预览（fixed 定位，脱离滚动） */}
       {hover && (

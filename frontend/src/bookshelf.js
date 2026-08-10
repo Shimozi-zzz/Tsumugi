@@ -75,3 +75,35 @@ export function spineColor(accentHex, seed) {
     Math.min(Math.max(l * 0.72, 0.4), 0.58),
   );
 }
+
+/**
+ * 书脊厚度来自数据（P5 / ADR 0049 真书架）：正文越长书脊越厚（9~28px）。
+ * 取正文长度与 chunk 数（外部资料参考文本较多）两者的较大值，让"书"有真实体积差异。
+ */
+export function spineThickness(it) {
+  const contentLen = (it && (it.content || "").length) || 0;
+  const chunks = (it && it.chunks_count) || 1;
+  const fromContent = Math.round(contentLen / 500);
+  const fromChunks = Math.round(chunks * 1.5);
+  return Math.max(9, Math.min(28, 8 + Math.max(fromContent, fromChunks)));
+}
+
+/**
+ * 按主分类标签分架（P5 / ADR 0049）：每个标签一个书架层，"未分类"排最后；
+ * 层内保持原顺序。返回 [{ tag, items }]。
+ */
+export function groupBookshelf(items) {
+  const groups = new Map();
+  for (const it of items || []) {
+    const tag = primaryTag(it) || "未分类";
+    if (!groups.has(tag)) groups.set(tag, []);
+    groups.get(tag).push(it);
+  }
+  return [...groups.entries()]
+    .map(([tag, list]) => ({ tag, items: list }))
+    .sort((a, b) => {
+      if (a.tag === "未分类") return 1;
+      if (b.tag === "未分类") return -1;
+      return b.items.length - a.items.length;
+    });
+}

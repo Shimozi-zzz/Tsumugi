@@ -458,3 +458,7 @@ body {
 }
 .shrine.shrine-skip .shrine-veil,
 .shrine.shrine-skip .shrine-item { transition: none !important; }
+
+/* P5 / ADR 0049 真书架：取书浮起（hover）*/
+.shelf-book { transition: transform .18s ease, box-shadow .18s ease; }
+.shelf-book:hover { transform: translateY(-5px); }
