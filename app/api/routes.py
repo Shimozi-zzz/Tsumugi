@@ -13,13 +13,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
-from app import collections, ingest, memories, provider_store, providers, rag, retrieval, reviews, stats, work_model
+from app import characters, collections, ingest, memories, provider_store, providers, rag, retrieval, reviews, stats, work_model
 from app.connectors import persistence as connector_persistence
 from app.connectors import registry as connector_registry
 from app.connectors.base import ConnectorError, validate_proxy_url
 from app.database import get_db
 from app.embeddings import EmbeddingError
-from app.models import Collection, Item, Media, Memory, Review, Tag, item_tag_association
+from app.models import Character, Collection, Item, Media, Memory, Review, Tag, item_tag_association
 from app.schemas import (
     BangumiAuthorizeOut,
     BangumiImportStartOut,
@@ -1352,6 +1352,10 @@ def _save_external_sync(req: SaveExternalRequest) -> IngestResponse:
             work_model.apply_work_columns(obj, raw_metadata)
             db.commit()
             db.refresh(obj)
+            # P4（ADR 0048）：重建该作品的角色索引（从 raw_metadata 提炼）
+            characters.sync_characters(obj, db)
+            db.commit()
+            db.refresh(obj)
         # 本地缩略图路径存到 file_path（与 image_url 区分：本地 vs 外部）
         if local_thumb and not obj.file_path:
             obj.file_path = local_thumb
@@ -1571,23 +1575,6 @@ async def backfill_external_reference_route(
     }
 
 
-def _extract_characters(item: Item) -> list:
-    """从条目的 raw_metadata 提取角色列表（统一结构，见 ADR 0016）。"""
-    raw = item.raw_metadata
-    if not isinstance(raw, dict):
-        return []
-    detail = raw.get("detail")
-    if not isinstance(detail, dict):
-        return []
-    meta = detail.get("metadata")
-    if not isinstance(meta, dict):
-        return []
-    chars = meta.get("characters")
-    if isinstance(chars, list):
-        return [c for c in chars if isinstance(c, dict)]
-    return []
-
-
 def bangumi_import_backfill(limit: int = 10) -> bool:
     """角色墙懒加载补详情（非阻塞后台单飞；单次最多补 limit 条）。"""
     from app import bangumi_import
@@ -1599,79 +1586,61 @@ def bangumi_import_backfill(limit: int = 10) -> bool:
 
 @router.get("/characters", response_model=CharactersResponse)
 async def list_characters(db: Session = Depends(get_db)):
-    """角色墙：跨已收藏外部作品聚合角色（按 source+角色id 去重合并作品）。
+    """角色墙（P4 / ADR 0048）：从 characters 实体表跨作品聚合（不再实时扫描 raw_metadata）。
 
     批量导入的 bangumi 条目没有角色详情，这里做**懒加载补详情**（后台非阻塞
-    单飞，受令牌桶限流约束分批推进），多次查看角色墙逐步补齐；本响应不等待
-    补详情完成，立即返回当前已聚合的角色。
+    单飞，受令牌桶限流约束分批推进），补详情后角色索引由同步逻辑重建。
     """
     bangumi_import_backfill()  # 非阻塞触发补详情
-    items = db.query(Item).filter(Item.source != "local").all()
-    by_char: dict = {}
-    for it in items:
-        for c in _extract_characters(it):
-            name = c.get("name")
-            if not name:
-                continue
-            key = (it.source, c.get("id") or name)
-            entry = by_char.setdefault(key, {
-                "id": c.get("id"),
-                "name": str(name),
-                "image_url": c.get("image_url"),
-                "relation": c.get("relation"),
-                "summary": c.get("summary") or "",
-                "actors": c.get("actors") or [],
-                "source": it.source,
-                "works": [],
-            })
-            entry["works"].append({
-                "item_id": it.id,
-                "title": it.title,
-                "image_url": it.image_url,
-                "source": it.source,
-            })
-    chars = sorted(by_char.values(), key=lambda c: c["name"])
+    rows = db.query(Character).options(selectinload(Character.works)) \
+        .order_by(Character.name).all()
+    chars = []
+    for ch in rows:
+        chars.append({
+            "id": ch.id,
+            "name": ch.name,
+            "image_url": ch.image_url,
+            "relation": ch.relation,
+            "summary": ch.summary or "",
+            "actors": json.loads(ch.actors) if ch.actors else [],
+            "source": ch.source,
+            "works": [
+                {"item_id": w.id, "title": w.title, "image_url": w.image_url, "source": w.source}
+                for w in ch.works
+            ],
+        })
     return {"characters": chars}
 
 
 @router.get("/voice-relations")
 async def voice_relations(db: Session = Depends(get_db)):
-    """声优关系聚合（ADR 0032）：声优 → 配过的角色 → 所属作品 三层关系。
+    """声优关系聚合（ADR 0032 / P4）：声优 → 配过的角色 → 所属作品 三层关系。
 
-    实时从 raw_metadata.detail.metadata.characters 扫描聚合（同角色墙"内嵌 + 实时
-    聚合"决策，不建独立表）。actors 为归一化后的声优名列表（字符串）。
+    从 characters 实体表读取（actors 为 JSON 数组，作品经 character_works 关联）。
     返回：works（作品）/ actors（含各自 works→roles）/ stats（含缺失声优的角色数）。
-    图谱阈值（配音作品数≥N）由前端过滤，接口返回全量。
     """
-    items = db.query(Item).filter(Item.source != "local").all()
+    rows = db.query(Character).options(selectinload(Character.works)).all()
     works: dict = {}
     actor_map: dict = {}
     missing_actor_chars = 0
-    for it in items:
-        chars = _extract_characters(it)
-        if not chars:
+    for ch in rows:
+        if not ch.works:
             continue
-        works[it.id] = {
-            "item_id": it.id, "title": it.title,
-            "image_url": it.image_url, "source": it.source,
-        }
-        for ch in chars:
-            name = ch.get("name")
-            if not name:
+        actors = json.loads(ch.actors) if ch.actors else []
+        if not actors:
+            missing_actor_chars += 1
+        for w in ch.works:
+            works[w.id] = {"item_id": w.id, "title": w.title,
+                           "image_url": w.image_url, "source": w.source}
+        for a in actors:
+            a_name = str(a).strip()
+            if not a_name:
                 continue
-            actors = ch.get("actors") or []
-            if not actors:
-                missing_actor_chars += 1
-            for a in actors:
-                a_name = str(a).strip()
-                if not a_name:
-                    continue
-                entry = actor_map.setdefault(a_name, {"name": a_name, "works": {}})
-                w = entry["works"].setdefault(it.id, {
-                    "item_id": it.id, "title": it.title, "roles": [],
-                })
-                if name not in w["roles"]:
-                    w["roles"].append(name)
+            entry = actor_map.setdefault(a_name, {"name": a_name, "works": {}})
+            for w in ch.works:
+                ww = entry["works"].setdefault(w.id, {"item_id": w.id, "title": w.title, "roles": []})
+                if ch.name not in ww["roles"]:
+                    ww["roles"].append(ch.name)
 
     actors = [
         {

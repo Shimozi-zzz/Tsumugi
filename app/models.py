@@ -15,6 +15,14 @@ item_tag_association = Table(
     Column('tag_id', Integer, ForeignKey('tags.id'), primary_key=True)
 )
 
+# 多对多关联表：Character <-> Item（P4 / ADR 0048：角色实体化）
+character_works = Table(
+    'character_works',
+    Base.metadata,
+    Column('character_id', Integer, ForeignKey('characters.id'), primary_key=True),
+    Column('item_id', Integer, ForeignKey('items.id'), primary_key=True)
+)
+
 
 class Item(Base):
     """资料条目 - 统一模型，支持多种数据源"""
@@ -49,6 +57,7 @@ class Item(Base):
     memories = relationship("Memory", back_populates="item", cascade="all, delete-orphan")
     collection = relationship("Collection", back_populates="item", uselist=False,
                               cascade="all, delete-orphan")
+    characters = relationship("Character", secondary=character_works, back_populates="works")
 
 
 class Chunk(Base):
@@ -135,6 +144,27 @@ class Memory(Base):
     # 关系
     item = relationship("Item", back_populates="memories")
     media = relationship("Media", back_populates="memory", cascade="all, delete-orphan")
+
+
+class Character(Base):
+    """角色实体（P4 / ADR 0048）：跨作品聚合，独立于 raw_metadata。
+
+    从 raw_metadata.detail.metadata.characters 幂等提炼；去重键 = (source, external_id)
+    或 (source, name)。actors 存 JSON 数组（声优名）。relation 为合并角色定位（主角优先）。
+    """
+    __tablename__ = "characters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String(50), nullable=False)
+    external_id = Column(String(255), nullable=True)  # 数据源角色 id（跨作品去重键）
+    name = Column(String(255), nullable=False, index=True)
+    image_url = Column(String(500), nullable=True)
+    relation = Column(String(50), nullable=True)  # 主角/主要角色/配角/登场（合并，主角优先）
+    summary = Column(Text, nullable=True)
+    actors = Column(Text, nullable=True)  # JSON 数组（声优名）
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    works = relationship("Item", secondary=character_works, back_populates="characters")
 
 
 class Media(Base):

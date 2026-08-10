@@ -1,9 +1,9 @@
-"""声优关系聚合接口测试（ADR 0032）：声优 → 角色 → 作品 三层关系、缺失声优处理"""
+"""声优关系聚合接口测试（ADR 0032 / P4 ADR 0048）：声优 → 角色 → 作品 三层关系、缺失声优处理"""
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.routes import router
-from app import ingest
+from app import characters, ingest
 from app.database import get_db
 
 
@@ -19,11 +19,14 @@ def _mk_client(db):
 
 
 def _add_item(db, title, chars):
-    ingest.ingest_external(
+    it = ingest.ingest_external(
         source="fake", external_id=title, title=title, content="",
         raw_metadata={"detail": {"metadata": {"characters": chars}}},
         db=db,
     )
+    # P4（ADR 0048）：角色索引由 sync 重建（声优图谱从 characters 表读取）
+    characters.sync_characters(it, db)
+    db.commit()
 
 
 class TestVoiceRelations:

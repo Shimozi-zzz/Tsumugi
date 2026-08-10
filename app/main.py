@@ -38,6 +38,10 @@ _work_model.backfill_work_columns(engine)
 import app.collections as _collections
 _collections.backfill_collections(engine)
 
+# 存量外部条目 → Character 角色索引重建（P4 / ADR 0048）
+import app.characters as _characters
+_characters.backfill_characters(engine)
+
 # 发现并注册内置 Connector（如 bangumi）
 connector_registry.discover()
 
