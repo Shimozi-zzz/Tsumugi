@@ -3,7 +3,7 @@
 // 设置页分类：外观 / 导航栏 / 数据源（分类筛选在最上方）
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchItems, fetchTags, fetchAllReviews, streamRag, federatedSearch, deleteItem, saveExternal,
+  fetchItems, fetchTags, fetchAllReviews, fetchCollections, streamRag, federatedSearch, deleteItem, saveExternal,
   filePathToUrl, createItem, uploadItem, uploadItemCover,
   fetchConnectors, createDeclarativeConnector, deleteConnector,
   saveConnectorProxy, testConnectorProxy,
@@ -140,7 +140,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   }, [libView]);
   // 主从视图（ADR 0029 分组列表模式）：当前选中浏览的条目 id
   const [detailBrowseId, setDetailBrowseId] = useState(null);
-  // 条目 → 追番状态 映射（取该条目最新书评的状态；用于状态分组列表）
+  // 条目 → 追番状态 映射（P2 / ADR 0046：收藏状态源改为 collections 表，不再取书评状态）
   const [statusMap, setStatusMap] = useState({});
   // 最近书评（首页"最近供奉"的文案，ADR 0039）；reviewCount 供猫娘台词里程碑判定
   const [recentReviews, setRecentReviews] = useState([]);
@@ -148,15 +148,15 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   useEffect(() => {
     fetchAllReviews()
       .then((reviews) => {
-        const map = {};
-        for (const r of reviews) {
-          if (r.item_id != null && map[r.item_id] === undefined && r.status) {
-            map[r.item_id] = r.status; // /reviews 按 created_at 倒序，首见即最新
-          }
-        }
-        setStatusMap(map);
         setRecentReviews(reviews.slice(0, 3));
         setReviewCount(reviews.length);
+      })
+      .catch(() => {});
+    fetchCollections()
+      .then((rows) => {
+        const map = {};
+        for (const c of rows) if (c.status) map[c.item_id] = c.status;
+        setStatusMap(map);
       })
       .catch(() => {});
   }, []);

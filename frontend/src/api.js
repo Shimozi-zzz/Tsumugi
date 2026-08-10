@@ -132,6 +132,26 @@ export async function updateWorkColumns(itemId, payload) {
   return body;
 }
 
+// ---- Collection 收藏关系（P2 / ADR 0046）----
+
+export async function updateCollection(itemId, payload) {
+  const resp = await fetch(`${API_BASE}/items/${itemId}/collection`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "更新收藏失败");
+  return body;
+}
+
+export async function fetchCollections() {
+  const resp = await fetch(`${API_BASE}/collections`);
+  const body = await resp.json().catch(() => []);
+  if (!resp.ok) throw new Error(body.detail || "获取收藏失败");
+  return Array.isArray(body) ? body : [];
+}
+
 // ---- Bangumi OAuth + 批量导入 ----
 
 export async function fetchBangumiOAuthStatus() {

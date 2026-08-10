@@ -47,6 +47,8 @@ class Item(Base):
     tags = relationship("Tag", secondary=item_tag_association, back_populates="items")
     reviews = relationship("Review", back_populates="item", cascade="all, delete-orphan")
     memories = relationship("Memory", back_populates="item", cascade="all, delete-orphan")
+    collection = relationship("Collection", back_populates="item", uselist=False,
+                              cascade="all, delete-orphan")
 
 
 class Chunk(Base):
@@ -129,6 +131,24 @@ class Memory(Base):
 
     # 关系
     item = relationship("Item", back_populates="memories")
+
+
+class Collection(Base):
+    """收藏关系（P2 / ADR 0046）：用户×作品的个人状态，与 Review 分离。
+
+    1:1 关联 items（外部作品）：status=追番状态、added_at=收藏时间、favorite=是否喜欢。
+    收藏状态不再是 Review 的职责（历史从"从 Bangumi 导入"Review 迁移到本表）；
+    收藏时刻自动生成最轻的 Collection Memory（source_type=collection）。
+    """
+    __tablename__ = "collections"
+
+    item_id = Column(Integer, ForeignKey("items.id"), primary_key=True)
+    status = Column(String(20), nullable=True)  # 想看/在看/看完/搁置/弃坑
+    favorite = Column(Integer, default=0)  # 0/1
+    added_at = Column(DateTime(timezone=True), nullable=True)  # 收藏时间
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    item = relationship("Item", back_populates="collection")
 
 
 class Source(Base):

@@ -13,9 +13,10 @@ function ok(payload, status = 200) {
 
 const DETAIL = { id: 1, title: "空之境界", source: "bangumi", description: "简介", rating: 8.9,
   my_rating: null, tags: ["科幻"], reference_text: "", social: {}, raw_metadata: null, characters: [],
-  image_url: null, file_path: null, work_type: "anime", alternative_title: "空の境界", release_date: "2008-02-09" };
+  image_url: null, file_path: null, work_type: "anime", alternative_title: "空の境界", release_date: "2008-02-09",
+  collection_status: "看完", collected_at: "2026-08-01T10:00:00", favorite: true };
 
-function mockFetch({ items = [], detail = DETAIL, workTypePatch = null } = {}) {
+function mockFetch({ items = [], detail = DETAIL, workTypePatch = null, collections = [] } = {}) {
   global.fetch = vi.fn((url, opts = {}) => {
     const u = String(url);
     const m = opts.method || "GET";
@@ -26,6 +27,14 @@ function mockFetch({ items = [], detail = DETAIL, workTypePatch = null } = {}) {
       const body = JSON.parse(opts.body || "{}");
       return ok({ ...detail, work_type: body.work_type === "" ? null : (body.work_type ?? detail.work_type) });
     }
+    const dc = u.match(/\/items\/(\d+)\/collection$/);
+    if (dc && m === "PATCH") {
+      const body = JSON.parse(opts.body || "{}");
+      return ok({ ...detail,
+        collection_status: body.status === "" ? null : (body.status ?? detail.collection_status),
+        favorite: body.favorite ?? detail.favorite });
+    }
+    if (u.includes("/collections")) return ok(collections);
     if (u.includes("/memories")) return ok([]);
     if (u.includes("/reviews")) return ok([]);
     if (u.includes("/items") && m === "GET") return ok({ total: items.length, items });
@@ -73,6 +82,31 @@ describe("详情页内联编辑（外部世界区）", () => {
     render(<ItemDetailPanel itemId={1} />);
     await waitFor(() => expect(screen.getByText("空之境界")).toBeTruthy());
     expect(screen.queryByTitle("作品类型（可手动修正）")).toBeNull();
+  });
+
+  it("我的记录区：收藏状态/喜欢 内联编辑（P2），修改调用 PATCH", async () => {
+    mockFetch();
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByTitle("收藏状态（可手动修正）")).toBeTruthy());
+    // 收藏时间展示
+    expect(screen.getByText(/收藏于 2026-08-01/)).toBeTruthy();
+    const sel = screen.getByTitle("收藏状态（可手动修正）");
+    expect(sel.value).toBe("看完");
+    fireEvent.change(sel, { target: { value: "搁置" } });
+    await waitFor(() => expect(sel.value).toBe("搁置"));
+    const patchCall = global.fetch.mock.calls.find((c) => String(c[0]).includes("/collection"));
+    expect(patchCall).toBeTruthy();
+    expect(JSON.parse(patchCall[1].body)).toEqual({ status: "搁置" });
+    // 喜欢 toggle
+    fireEvent.click(screen.getByTitle("是否喜欢"));
+    await waitFor(() => expect(global.fetch.mock.calls.some((c) => String(c[0]).includes("/collection") && JSON.parse(c[1].body).favorite === false)).toBeTruthy());
+  });
+
+  it("本地笔记不显示收藏编辑区", async () => {
+    mockFetch({ detail: { ...DETAIL, source: "local", collection_status: null, favorite: false, collected_at: null } });
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("空之境界")).toBeTruthy());
+    expect(screen.queryByTitle("收藏状态（可手动修正）")).toBeNull();
   });
 });
 

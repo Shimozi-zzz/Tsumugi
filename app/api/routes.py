@@ -11,15 +11,15 @@ from fastapi import (
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app import ingest, memories, provider_store, providers, rag, retrieval, reviews, stats, work_model
+from app import collections, ingest, memories, provider_store, providers, rag, retrieval, reviews, stats, work_model
 from app.connectors import persistence as connector_persistence
 from app.connectors import registry as connector_registry
 from app.connectors.base import ConnectorError, validate_proxy_url
 from app.database import get_db
 from app.embeddings import EmbeddingError
-from app.models import Item, Memory, Review, Tag, item_tag_association
+from app.models import Collection, Item, Memory, Review, Tag, item_tag_association
 from app.schemas import (
     BangumiAuthorizeOut,
     BangumiImportStartOut,
@@ -60,6 +60,7 @@ from app.schemas import (
     TagMerge,
     TagOut,
     TagRename,
+    CollectionUpdate,
     WorkUpdate,
 )
 from app.config import settings
@@ -86,6 +87,7 @@ def _strip_text_ext(filename: str) -> str:
 
 
 def _item_out(item: Item) -> ItemOut:
+    col = item.collection
     return ItemOut(
         id=item.id,
         title=item.title,
@@ -103,6 +105,9 @@ def _item_out(item: Item) -> ItemOut:
         work_type=item.work_type,
         alternative_title=item.alternative_title,
         release_date=item.release_date,
+        collection_status=col.status if col else None,
+        collected_at=col.added_at if col else None,
+        favorite=bool(col.favorite) if col else False,
     )
 
 
@@ -279,12 +284,14 @@ async def list_items(
     type: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     work_type: Optional[str] = Query(None),
+    collection_status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """列出资料条目（分页 + 结构化筛选）。
 
     - tag：可传多次（?tag=a&tag=b），默认任意命中，tag_match=all 为全部命中
     - type / source / work_type：精确匹配（work_type 为 P1 世界轴列）
+    - collection_status：追番状态筛选（P2 收藏关系）
     返回 {total, items}，total 为**筛选后**总数（不受分页影响）。
     """
     query = db.query(Item)
@@ -311,8 +318,12 @@ async def list_items(
         query = query.filter(Item.source == source)
     if work_type:
         query = query.filter(Item.work_type == work_type)
+    if collection_status:
+        query = query.join(Collection, Collection.item_id == Item.id) \
+            .filter(Collection.status == collection_status)
 
     total = query.count()
+    query = query.options(selectinload(Item.collection))  # 避免列表 N+1
     items = query.order_by(Item.id.desc()).offset(skip).limit(limit).all()
     return ItemListResponse(total=total, items=[_item_out(i) for i in items])
 
@@ -420,6 +431,30 @@ async def update_work_columns(item_id: int, body: WorkUpdate, db: Session = Depe
     db.commit()
     db.refresh(item)
     return _item_out(item)
+
+
+@router.patch("/items/{item_id}/collection", response_model=ItemOut)
+async def update_collection(item_id: int, body: CollectionUpdate, db: Session = Depends(get_db)):
+    """手动编辑收藏关系（P2 / ADR 0046）：追番状态 / 是否喜欢。
+
+    status 必须在枚举内（想看/在看/看完/搁置/弃坑），空串=清除；favorite 布尔。
+    """
+    try:
+        await run_in_threadpool(collections.set_collection, item_id, db=db,
+                                status=body.status, favorite=(1 if body.favorite else 0) if body.favorite is not None else None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    fresh = db.get(Item, item_id)
+    if fresh is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return _item_out(fresh)
+
+
+@router.get("/collections")
+async def list_collections(db: Session = Depends(get_db)):
+    """全部收藏关系（{item_id → status}，前端状态分组列表 statusMap 用，P2）。"""
+    rows = db.query(Collection.item_id, Collection.status).all()
+    return [{"item_id": i, "status": s} for i, s in rows]
 
 
 # ========== Bangumi OAuth + 批量导入 ==========
@@ -1264,6 +1299,10 @@ def _save_external_sync(req: SaveExternalRequest) -> IngestResponse:
             obj.file_path = local_thumb
             db.commit()
             db.refresh(obj)
+        # P2（ADR 0046）：收藏关系维护 + 首次收藏生成"收藏时刻"最轻 Memory
+        collections.on_collect(obj, db)
+        db.commit()
+        db.refresh(obj)
         return _ingest_response(obj)
     finally:
         db.close()
@@ -1346,6 +1385,9 @@ async def item_detail(item_id: int, db: Session = Depends(get_db)):
         work_type=item.work_type,
         alternative_title=item.alternative_title,
         release_date=item.release_date,
+        collection_status=item.collection.status if item.collection else None,
+        collected_at=item.collection.added_at if item.collection else None,
+        favorite=bool(item.collection.favorite) if item.collection else False,
     )
 
 

@@ -143,7 +143,13 @@ def _import_page(job_id: str, entries: List[dict], db) -> None:
 
 
 def _upsert_collection_review(db, item: Item, entry: dict) -> Review:
-    """追番状态 + Bangumi 个人评分 → 自动 Review（去重：同 item 同 source 一条）。"""
+    """追番状态 + Bangumi 个人评分 → 自动 Review（去重：同 item 同 source 一条）。
+
+    P2（ADR 0046）：收藏状态同时写入 collections 表（Review 保留书评/评分职责，
+    状态源改为 Collection）。
+    """
+    from app import collections as collections_mod
+
     status = BANGUMI_TYPE_TO_STATUS.get(entry.get("type"))
     rate = entry.get("rate")
     rating = rate if isinstance(rate, int) and 0 < rate <= 10 else None
@@ -156,16 +162,20 @@ def _upsert_collection_review(db, item: Item, entry: dict) -> Review:
         existing.status = status
         db.commit()
         db.refresh(existing)
-        return existing
+    else:
+        review = Review(
+            item_id=item.id, title=BANGUMI_IMPORT_TITLE, content="",
+            rating=rating, status=status, spoiler=0, source=BANGUMI_IMPORT_SOURCE,
+        )
+        db.add(review)
+        db.commit()
+        db.refresh(review)
 
-    review = Review(
-        item_id=item.id, title=BANGUMI_IMPORT_TITLE, content="",
-        rating=rating, status=status, spoiler=0, source=BANGUMI_IMPORT_SOURCE,
-    )
-    db.add(review)
+    # 收藏状态写入 collections（不为此类导入记录生成收藏时刻 Memory）
+    col = collections_mod.ensure_collection(item, db)
+    col.status = status
     db.commit()
-    db.refresh(review)
-    return review
+    return existing if existing is not None else review
 
 
 # ---------------------------------------------------------------- 角色懒加载补详情

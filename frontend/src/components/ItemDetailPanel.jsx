@@ -6,8 +6,8 @@
 // Phase B（ADR 0042）：双栏结构——"外部世界"（世界如何描述它）与"我的记录"
 // （我如何理解它，含 Memory 记忆时间轴）。
 import React, { useEffect, useState } from "react";
-import { fetchItemDetail, filePathToUrl, updateWorkColumns } from "../api.js";
-import { InfoTable, TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL } from "./ui.jsx";
+import { fetchItemDetail, filePathToUrl, updateWorkColumns, updateCollection } from "../api.js";
+import { InfoTable, TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL, COLLECTION_STATUSES } from "./ui.jsx";
 import { extractPalette } from "../ambient.js";
 import MemoryTimeline from "./MemoryTimeline.jsx";
 
@@ -71,6 +71,25 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
       .then((fresh) => setDetail((d) => (d ? { ...d, work_type: fresh.work_type } : d)))
       .catch(() => setWorkType((detail && detail.work_type) || ""))
       .finally(() => setWorkSaving(false));
+  }
+
+  // P2（ADR 0046）：我的记录区内联编辑收藏状态/是否喜欢
+  const [colStatus, setColStatus] = useState("");
+  const [favorite, setFavorite] = useState(false);
+  const [colSaving, setColSaving] = useState(false);
+  useEffect(() => {
+    if (!detail) return;
+    setColStatus(detail.collection_status || "");
+    setFavorite(!!detail.favorite);
+  }, [detail?.collection_status, detail?.favorite]);
+  function patchCollection(patch) {
+    setColSaving(true);
+    updateCollection(itemId, patch)
+      .then((fresh) => setDetail((d) => (d ? {
+        ...d, collection_status: fresh.collection_status, favorite: fresh.favorite,
+      } : d)))
+      .catch(() => { if (detail) { setColStatus(detail.collection_status || ""); setFavorite(!!detail.favorite); } })
+      .finally(() => setColSaving(false));
   }
 
   if (itemId == null) {
@@ -178,12 +197,36 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
           </div>
         )}
 
-        {/* 我的记录：我如何理解它（Phase B，ADR 0042）——Memory 记忆时间轴 */}
+        {/* 我的记录：我如何理解它（Phase B，ADR 0042）——Memory 记忆时间轴
+            P2（ADR 0046）：收藏状态/是否喜欢/收藏时间 内联编辑 */}
         <div className="mt-7 pt-5 border-t" style={{ borderColor: "var(--panel-border)" }}>
           <div className="mb-3 flex items-baseline gap-2">
             <span className="text-[11px] tracking-wider" style={{ color: "var(--accent)" }}>我的记录</span>
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>· 我如何理解它</span>
           </div>
+          {detail.source !== "local" && (
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <select value={colStatus} onChange={(e) => { setColStatus(e.target.value); patchCollection({ status: e.target.value }); }}
+                disabled={colSaving} title="收藏状态（可手动修正）"
+                className="rounded-lg px-2 py-1 text-[11px] outline-none"
+                style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }}>
+                <option value="">未标记</option>
+                {COLLECTION_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <button onClick={() => patchCollection({ favorite: !favorite })} disabled={colSaving}
+                title="是否喜欢"
+                className="px-2.5 py-1 rounded-full text-[11px] transition-colors"
+                style={{ backgroundColor: favorite ? "var(--accent)" : "var(--accent-soft)",
+                  color: favorite ? "#fff" : "var(--accent)" }}>
+                {favorite ? "♡ 喜欢" : "♡ 标记喜欢"}
+              </button>
+              {detail.collected_at && (
+                <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                  收藏于 {String(detail.collected_at).slice(0, 10)}
+                </span>
+              )}
+            </div>
+          )}
           <MemoryTimeline itemId={itemId} />
         </div>
       </div>

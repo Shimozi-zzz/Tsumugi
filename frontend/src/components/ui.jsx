@@ -59,6 +59,8 @@ const SRC_LABEL = { bangumi: "Bangumi", moegirl: "萌娘百科", vndb: "VNDB", l
 // P1 Work 模型作品类型（ADR 0045）：galgame 涵盖视觉小说
 export const WORK_TYPES = ["anime", "manga", "game", "galgame", "novel", "other"];
 export const WORK_TYPE_LABEL = { anime: "动画", manga: "漫画", game: "游戏", galgame: "Galgame", novel: "小说", other: "其它" };
+// P2 收藏状态（ADR 0046）
+export const COLLECTION_STATUSES = ["想看", "在看", "看完", "搁置", "弃坑"];
 
 export function itemInfoRows(detail) {
   if (!detail) return [];

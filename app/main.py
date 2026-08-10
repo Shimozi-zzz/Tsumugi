@@ -34,6 +34,10 @@ _memories.backfill_reviews(engine)
 import app.work_model as _work_model
 _work_model.backfill_work_columns(engine)
 
+# 存量外部条目 → Collection 行幂等回填（status 从 Bangumi 导入 Review 迁移，ADR 0046）
+import app.collections as _collections
+_collections.backfill_collections(engine)
+
 # 发现并注册内置 Connector（如 bangumi）
 connector_registry.discover()
 

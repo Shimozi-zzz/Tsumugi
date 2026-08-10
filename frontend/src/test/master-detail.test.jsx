@@ -35,6 +35,7 @@ function mockFetch() {
     const dm = u.match(/\/items\/(\d+)\/detail$/);
     if (dm) return ok(DETAILS[Number(dm[1])] || {});
     if (u.includes("/reviews") && m === "GET") return ok(REVIEWS);
+    if (u.includes("/collections") && m === "GET") return ok([{ item_id: 1, status: "看完" }, { item_id: 2, status: "在看" }]);
     if (u.includes("/items") && m === "GET") return ok({ total: ITEMS.length, items: ITEMS });
     if (u.includes("/tags")) return ok([]);
     if (u.includes("/connectors")) return ok([]);

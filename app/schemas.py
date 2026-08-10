@@ -66,6 +66,10 @@ class ItemOut(BaseModel):
     work_type: Optional[str] = None
     alternative_title: Optional[str] = None
     release_date: Optional[str] = None
+    # P2 收藏关系（ADR 0046）
+    collection_status: Optional[str] = None
+    collected_at: Optional[datetime] = None
+    favorite: bool = False
 
 
 class WorkUpdate(BaseModel):
@@ -73,6 +77,12 @@ class WorkUpdate(BaseModel):
     work_type: Optional[str] = None
     alternative_title: Optional[str] = None
     release_date: Optional[str] = None
+
+
+class CollectionUpdate(BaseModel):
+    """手动编辑收藏关系（P2，详情页"我的记录"区内联编辑）。"""
+    status: Optional[str] = None
+    favorite: Optional[bool] = None
 
 
 class IngestResponse(BaseModel):
@@ -207,6 +217,10 @@ class ItemDetailOut(BaseModel):
     work_type: Optional[str] = None
     alternative_title: Optional[str] = None
     release_date: Optional[str] = None
+    # P2 收藏关系（ADR 0046）
+    collection_status: Optional[str] = None
+    collected_at: Optional[datetime] = None
+    favorite: bool = False
 
 
 class RelatedSourceOut(BaseModel):
