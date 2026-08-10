@@ -79,3 +79,6 @@ plugins/*
 !plugins/_template/
 !plugins/_template/**
 
+# 开发提示词/agent 配置（私有，不随仓库上传）：00-03 号提示词、AGENTS.md、AGENT_UI.md 等
+prompts/
+
