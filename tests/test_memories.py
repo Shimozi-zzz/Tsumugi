@@ -258,6 +258,40 @@ class TestApiMemory:
         assert rows[0]["emotion"] == "怀念"
 
 
+class TestSearchMy:
+    """P6 / ADR 0050：个人全文检索（作品/书评/记忆）。"""
+
+    @pytest.fixture
+    def client(self, db, fake_collection, patch_embeddings):
+        app = FastAPI()
+        app.include_router(router, prefix="/api")
+        def override_get_db():
+            yield db
+        app.dependency_overrides[get_db] = override_get_db
+        return TestClient(app)
+
+    def test_search_all_groups(self, client, db, fake_collection, patch_embeddings):
+        item = _mk_item(db, title="孤独笔记", content="关于孤独的一点想法。")
+        r = reviews.create_review(item.id, "孤独是常伴的。", title="孤独有感", db=db)
+        mem = memories.create_direct_memory(item.id, "今天又想起孤独的话题", "text", db=db)
+        body = client.get("/api/search/my", params={"q": "孤独"}).json()
+        assert any(w["title"] == "孤独笔记" for w in body["works"])
+        assert any(rev["title"] == "孤独有感" for rev in body["reviews"])
+        assert any(m["id"] == mem.id for m in body["memories"])
+        # 空查询 → 全空
+        assert client.get("/api/search/my", params={"q": ""}).json() == {"works": [], "reviews": [], "memories": []}
+        # 无命中
+        assert client.get("/api/search/my", params={"q": "不存在的词xyz"}).json() == {"works": [], "reviews": [], "memories": []}
+
+    def test_memories_search_text_filter(self, client, db, fake_collection, patch_embeddings):
+        item = _mk_item(db)
+        memories.create_direct_memory(item.id, "夏天的蝉鸣", "text", db=db)
+        memories.create_direct_memory(item.id, "冬天的雪", "text", db=db)
+        rows = client.get("/api/memories", params={"search": "蝉鸣"}).json()
+        assert len(rows) == 1
+        assert rows[0]["summary"] == "夏天的蝉鸣"
+
+
 class TestBackfill:
     def test_backfills_existing_reviews_idempotent(self, db, fake_collection, patch_embeddings):
         item = _mk_item(db, content="内容A" * 20)

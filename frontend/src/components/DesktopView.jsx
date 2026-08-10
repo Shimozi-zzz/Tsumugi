@@ -3,7 +3,7 @@
 // 设置页分类：外观 / 导航栏 / 数据源（分类筛选在最上方）
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchItems, fetchTags, fetchAllReviews, fetchCollections, streamRag, federatedSearch, deleteItem, saveExternal,
+  fetchItems, fetchTags, fetchAllReviews, fetchCollections, streamRag, federatedSearch, searchMy, deleteItem, saveExternal,
   filePathToUrl, createItem, uploadItem, uploadItemCover,
   fetchConnectors, createDeclarativeConnector, deleteConnector,
   saveConnectorProxy, testConnectorProxy,
@@ -29,6 +29,7 @@ import CommandPalette from "./CommandPalette.jsx";
 import CoverAmbient from "./CoverAmbient.jsx";
 import HomeShrine from "./HomeShrine.jsx";
 import MemoryGallery from "./MemoryGallery.jsx";
+import MemoryReviewModal from "./MemoryReviewModal.jsx";
 import { WORK_TYPES, WORK_TYPE_LABEL } from "./ui.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
@@ -253,6 +254,9 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [fedResults, setFedResults] = useState([]);
   const [askError, setAskError] = useState("");
   const [answerOpen, setAnswerOpen] = useState(false);
+  // P6 检索台（ADR 0050）：个人全文检索结果 + 只读记忆弹层
+  const [mySearch, setMySearch] = useState(null); // {q, loading, works, reviews, memories}
+  const [openMem, setOpenMem] = useState(null);   // {itemId, sourceRef, memory}|null
   const askInputRef = useRef(null);
 
   // 导入状态
@@ -392,6 +396,11 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       return next;
     });
     setHistoryOpen(false);
+    // P6 检索台（ADR 0050）：个人全文检索（作品/书评/记忆）
+    setMySearch({ q, loading: true, works: [], reviews: [], memories: [] });
+    searchMy(q)
+      .then((r) => setMySearch({ q, loading: false, works: r.works || [], reviews: r.reviews || [], memories: r.memories || [] }))
+      .catch(() => setMySearch({ q, loading: false, works: [], reviews: [], memories: [] }));
     try {
       try {
         const fd = await federatedSearch(q);
@@ -430,6 +439,11 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       try { localStorage.setItem("tsumugi-search-history", JSON.stringify(next)); } catch { /* ignore */ }
       return next;
     });
+    // P6 检索台（ADR 0050）：个人全文检索
+    setMySearch({ q, loading: true, works: [], reviews: [], memories: [] });
+    searchMy(q)
+      .then((r) => setMySearch({ q, loading: false, works: r.works || [], reviews: r.reviews || [], memories: r.memories || [] }))
+      .catch(() => setMySearch({ q, loading: false, works: [], reviews: [], memories: [] }));
     try {
       try {
         const fd = await federatedSearch(q);
@@ -909,8 +923,9 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     { key: "plugins", label: "插件" },
     { key: "backup", label: "备份" },
   ];
-  // 是否已有问答内容（决定搜索框居中/置顶）
-  const hasContent = !!(answer || sources.length > 0 || fedResults.length > 0);
+  // 是否已有问答内容（决定搜索框居中/置顶；P6 检索台：只要提交过检索就切换到内容分支）
+  const hasContent = !!(answer || sources.length > 0 || fedResults.length > 0
+    || (mySearch && (mySearch.q || mySearch.works.length || mySearch.reviews.length || mySearch.memories.length)));
   // P1（ADR 0045）：图书馆按作品类型筛选（work_type）
   const [activeWorkType, setActiveWorkType] = useState(null);
   const workTypeOptions = WORK_TYPES.filter((t) => (gridItems || []).some((it) => it.work_type === t));
@@ -1562,6 +1577,51 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               <div className="text-sm mb-3 px-4 py-3 rounded-2xl"
                 style={{ backgroundColor: "rgba(248,113,113,0.14)", color: "var(--danger)" }}>{askError}</div>
             )}
+            {/* P6 检索台（ADR 0050）：个人全文检索结果（作品/书评/记忆） */}
+            {mySearch && mySearch.q && (
+              <div className="mb-3 desk-answer-card rounded-2xl p-4"
+                style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
+                <div className="text-[11px] mb-2 tracking-wider" style={{ color: "var(--accent)" }}>
+                  我的检索 · 「{mySearch.q}」
+                </div>
+                {mySearch.loading ? (
+                  <div className="text-xs py-1" style={{ color: "var(--text-secondary)" }}>正在翻找馆藏…</div>
+                ) : (mySearch.works.length + mySearch.reviews.length + mySearch.memories.length) === 0 ? (
+                  <div className="text-xs py-1" style={{ color: "var(--text-secondary)" }}>没有匹配的我的记录</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {mySearch.works.map((w) => (
+                      <button key={"w" + w.id} onClick={() => openItemDetail(w)}
+                        className="w-full flex items-center gap-2 text-left text-sm hover:opacity-80">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
+                          style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+                          {w.type === "note" ? "笔记" : "作品"}
+                        </span>
+                        <span className="truncate" style={{ color: "var(--text)" }}>{w.title}</span>
+                      </button>
+                    ))}
+                    {mySearch.reviews.map((r) => (
+                      <button key={"r" + r.id} onClick={() => setOpenMem({ itemId: r.item_id, sourceRef: r.id, memory: null })}
+                        className="w-full flex items-center gap-2 text-left text-sm hover:opacity-80">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
+                          style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>书评</span>
+                        <span className="truncate" style={{ color: "var(--text)" }}>{r.title || r.content}</span>
+                        <span className="text-[11px] shrink-0" style={{ color: "var(--text-secondary)" }}>{r.item_title}</span>
+                      </button>
+                    ))}
+                    {mySearch.memories.map((m) => (
+                      <button key={"m" + m.id} onClick={() => setOpenMem({ itemId: m.item_id, sourceRef: m.source_ref, memory: m })}
+                        className="w-full flex items-center gap-2 text-left text-sm hover:opacity-80">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
+                          style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>记忆</span>
+                        <span className="truncate" style={{ color: "var(--text)" }}>{m.summary}</span>
+                        <span className="text-[11px] shrink-0" style={{ color: "var(--text-secondary)" }}>{m.item_title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {answerOpen && (answer || sources.length > 0 || fedResults.length > 0) ? (
               <div className="flex-1 overflow-y-auto space-y-3">
                 {fedResults.length > 0 && (
@@ -2137,6 +2197,12 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       {/* 标签编辑弹层（单条 / 批量） */}
       {tagEdit && (
         <TagEditModal title={tagEdit.title} onApply={applyTags} onClose={() => setTagEdit(null)} />
+      )}
+
+      {/* P6 检索台：个人检索命中的书评/记忆 → 只读弹层 */}
+      {openMem && (
+        <MemoryReviewModal itemId={openMem.itemId} sourceRef={openMem.sourceRef}
+          memory={openMem.memory} onClose={() => setOpenMem(null)} />
       )}
 
       {/* 快捷键说明 */}

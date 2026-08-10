@@ -224,14 +224,15 @@ def query_memories(
     item_id: Optional[int] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
+    search: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
 ) -> List[Memory]:
-    """全局查询 Memory（Phase C 记忆回廊用）：按时间范围 / item 筛选。
+    """全局查询 Memory（Phase C 记忆回廊 / P6 检索台）：按时间范围 / item / 文本筛选。
 
     start/end 支持 ISO 时间、纯日期或年份；纯日期作 end 时按当日结束
     （exclusive）处理，年份作 end 时按次年 1 月 1 日处理——便于"按
-    2023/2024/2025 年份"这类筛选。
+    2023/2024/2025 年份"这类筛选。search 按 summary 子串匹配。
     """
     q = db.query(Memory)
     if item_id is not None:
@@ -247,5 +248,8 @@ def query_memories(
         else:
             end_dt = _parse_dt(e)
         q = q.filter(Memory.occurred_at < end_dt)
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(Memory.summary.ilike(like))
     return q.order_by(Memory.occurred_at.desc(), Memory.id.desc()) \
         .offset(skip).limit(limit).all()

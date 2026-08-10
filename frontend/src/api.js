@@ -134,6 +134,15 @@ export async function updateWorkColumns(itemId, payload) {
 
 // ---- Collection 收藏关系（P2 / ADR 0046）----
 
+// ---- P6 检索台（ADR 0050）：个人全文检索 ----
+
+export async function searchMy(q) {
+  const resp = await fetch(`${API_BASE}/search/my?q=${encodeURIComponent(q)}`);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || "个人检索失败");
+  return body;
+}
+
 export async function updateCollection(itemId, payload) {
   const resp = await fetch(`${API_BASE}/items/${itemId}/collection`, {
     method: "PATCH",

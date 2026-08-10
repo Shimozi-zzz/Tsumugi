@@ -328,6 +328,32 @@ async def list_items(
     return ItemListResponse(total=total, items=[_item_out(i) for i in items])
 
 
+@router.get("/search/my")
+async def search_my(q: str, limit: int = 10, db: Session = Depends(get_db)):
+    """个人全文检索（P6 / ADR 0050 检索台）：作品/笔记、书评、记忆 文本 LIKE 匹配。
+
+    SQLite LIKE 子串匹配（个人库规模足够；RAG 语义检索属 Phase G）。
+    返回 { works, reviews, memories } 三组，点击可跳转对应详情/弹层。
+    """
+    q = (q or "").strip()
+    if not q:
+        return {"works": [], "reviews": [], "memories": []}
+    like = f"%{q}%"
+    works = db.query(Item).filter(
+        (Item.title.ilike(like)) | (Item.content.ilike(like))
+    ).order_by(Item.id.desc()).limit(limit).all()
+    reviews = db.query(Review).filter(
+        (Review.title.ilike(like)) | (Review.content.ilike(like))
+    ).order_by(Review.id.desc()).limit(limit).all()
+    mems = db.query(Memory).filter(Memory.summary.ilike(like)) \
+        .order_by(Memory.id.desc()).limit(limit).all()
+    return {
+        "works": [_item_out(w) for w in works],
+        "reviews": [_review_out(r, db) for r in reviews],
+        "memories": [_memory_out(m, db) for m in mems],
+    }
+
+
 @router.get("/items/{item_id}", response_model=ItemOut)
 async def get_item(item_id: int, db: Session = Depends(get_db)):
     item = db.get(Item, item_id)
@@ -724,15 +750,17 @@ async def list_memories(
     month: Optional[int] = None,
     day: Optional[int] = None,
     max_year: Optional[int] = None,
+    search: Optional[str] = Query(None),
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
-    """全局记忆查询（Phase C 记忆回廊）：按时间范围 / item 筛选。
+    """全局记忆查询（Phase C 记忆回廊）：按时间范围 / item / 文本筛选。
 
     start/end 支持 ISO 时间或纯日期（如 2023，作 end 时按当日结束处理）。
     传 month+day 时切换为"跨年同月同日"查询（Phase E 往年今日）：
     命中历史任意年份同月同日的记忆，max_year 过滤掉当年（默认传今年）。
+    search 按 summary 子串匹配（P6 检索台）。
     """
     if month is not None and day is not None:
         rows = memories.query_on_this_day(
@@ -740,7 +768,7 @@ async def list_memories(
         )
     else:
         rows = memories.query_memories(
-            db, item_id=item_id, start=start, end=end, skip=skip, limit=limit,
+            db, item_id=item_id, start=start, end=end, search=search, skip=skip, limit=limit,
         )
     return [_memory_out(m, db) for m in rows]
 
