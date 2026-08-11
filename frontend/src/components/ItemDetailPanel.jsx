@@ -407,7 +407,7 @@ export default function ItemDetailPanel({
                 placeholder="写一句此刻的感想…（轻量记录，不写正式书评）"
                 rows={2} className="mc-write"
                 aria-label="记下一句此刻的感想" />
-              {/* 辅助操作层：情绪 + 附图（安静），主动作唯一 accent */}
+              {/* 辅助操作层（Phase 4-2）：情绪 / 附图——安静、不抢焦点 */}
               <div className="mc-aux">
                 <select value={draftEmotion} onChange={(e) => setDraftEmotion(e.target.value)}
                   title="情绪（可选）" aria-label="情绪"
@@ -421,7 +421,9 @@ export default function ItemDetailPanel({
                   aria-label="附一张图片" className="mc-attach">
                   {draftFile ? "已附图 ✓" : "附一张图"}
                 </button>
-                <span className="flex-1" />
+              </div>
+              {/* 主操作：唯一实心 accent（Phase 4-2 独立成行，视觉最明确） */}
+              <div className="mc-actions">
                 <button onClick={() => submitDirect("text", draft)} disabled={!draft.trim() || recording}
                   className="mc-submit"
                   style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: "var(--radius-control)" }}>

@@ -700,39 +700,46 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 }
 .wd-encounter-meta { margin-top: 2px; font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); }
 
-/* Memory Composer「留下这一刻」（Phase 4-1）：主书写区为第一焦点，辅助安静，主动作唯一 accent */
+/* Memory Composer「留下这一刻」（Phase 4-1/4-2）：书写区最大面积、辅助安静、主操作唯一 accent */
 .mc { margin-bottom: var(--sp-5); }
 .mc-write {
   width: 100%; min-height: 64px; resize: vertical;
-  padding: var(--sp-3);
-  font-family: var(--font-body); font-size: 14px; line-height: 1.7; color: var(--ink-0);
+  padding: var(--sp-3) var(--sp-4);
+  font-family: var(--font-body); font-size: 14px; line-height: 1.8; color: var(--ink-0);
   background-color: var(--surface-1);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-control);
   outline: none;
   transition: border-color var(--dur-enter) var(--ease-standard), box-shadow var(--dur-enter) var(--ease-standard);
 }
+.mc-write:focus { border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-border)); }
 .mc-write:focus-visible { box-shadow: var(--focus-ring); }
 .mc-write::placeholder { color: var(--ink-2); font-family: var(--font-heading); font-size: 13px; letter-spacing: 0.02em; }
-.mc-aux { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); flex-wrap: wrap; }
+.mc-aux { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); flex-wrap: wrap; }
 .mc-select {
-  padding: 6px 8px; font-size: 11px; color: var(--ink-1);
-  background-color: var(--input-bg); border: 1px solid var(--input-border);
+  padding: 8px 10px; min-height: 36px;
+  font-size: 10px; letter-spacing: 0.04em; color: var(--ink-2);
+  background-color: transparent;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 85%, transparent);
   border-radius: var(--radius-control); outline: none;
 }
 .mc-attach {
-  padding: 6px 10px; font-size: 11px; color: var(--ink-1);
+  padding: 8px 12px; min-height: 36px;
+  font-size: 11px; color: var(--ink-1);
   background-color: transparent; border: 1px solid var(--panel-border);
   border-radius: var(--radius-control);
   transition: color var(--dur-enter) var(--ease-standard), border-color var(--dur-enter) var(--ease-standard);
 }
 .mc-attach:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border)); }
-.mc-submit { padding: 8px 18px; font-size: 12px; font-weight: 500; border: none;
+.mc-attach:focus-visible { box-shadow: var(--focus-ring); }
+.mc-actions { display: flex; justify-content: flex-end; margin-top: var(--sp-3); }
+.mc-submit { padding: 8px 20px; min-height: 40px; font-size: 12px; font-weight: 500; border: none;
   transition: opacity var(--dur-enter) var(--ease-standard); }
 .mc-submit:disabled { opacity: 0.4; }
+.mc-submit:focus-visible { box-shadow: var(--focus-ring); }
 .mc-milestone { display: flex; gap: var(--sp-4); margin-top: var(--sp-3); }
 .mc-milestone-btn {
-  padding: 4px 2px; font-size: 11px; color: var(--ink-2);
+  padding: 6px 2px; min-height: 28px; font-size: 11px; color: var(--ink-2);
   background-color: transparent; border: none; border-bottom: 1px solid transparent;
   transition: color var(--dur-enter) var(--ease-standard), border-color var(--dur-enter) var(--ease-standard);
 }
