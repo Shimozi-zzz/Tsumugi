@@ -64,6 +64,34 @@ function applyAccentHue(theme, offset) {
   }
 }
 
+// 大风格主题（视觉语言层）：整体版式/材质/信息呈现，区别于色彩主题（THEMES）。
+// 通过 html[data-style-theme] 切换；后续注册其它大风格主题时，各自以
+// `html[data-style-theme="..."]` 作用域覆盖基础样式。
+export const STYLE_THEMES = [
+  {
+    key: "catalog-drawer",
+    label: "编目抽屉·索书卡",
+    description: "真实档案卡：暖纸底 + 档卡横线 + 密集元数据行",
+  },
+];
+
+const STYLE_STORAGE_KEY = "tsumugi-style-theme";
+
+export function loadStyleTheme() {
+  try {
+    const t = localStorage.getItem(STYLE_STORAGE_KEY);
+    return STYLE_THEMES.some((x) => x.key === t) ? t : STYLE_THEMES[0].key;
+  } catch {
+    return STYLE_THEMES[0].key;
+  }
+}
+
+export function applyStyleTheme(key) {
+  const k = STYLE_THEMES.some((x) => x.key === key) ? key : STYLE_THEMES[0].key;
+  document.documentElement.setAttribute("data-style-theme", k);
+  try { localStorage.setItem(STYLE_STORAGE_KEY, k); } catch { /* ignore */ }
+}
+
 export function applyTheme(theme, custom = DEFAULT_CUSTOM) {
   document.documentElement.setAttribute("data-theme", theme);
   document.documentElement.setAttribute("data-density", custom.density === "compact" ? "compact" : "comfortable");

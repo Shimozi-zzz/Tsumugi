@@ -1,9 +1,10 @@
-// 主题系统测试：3 套收敛主题 + 有约束的自定义层（强调色色相/密度/圆角）
+// 主题系统测试：收敛主题 + 大风格主题 + 有约束的自定义层（强调色色相/密度/圆角）
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  THEMES, loadTheme, applyTheme, loadCustom, saveCustom,
+  THEMES, STYLE_THEMES, loadTheme, applyTheme, loadCustom, saveCustom,
+  loadStyleTheme, applyStyleTheme,
   DEFAULT_CUSTOM, ACCENT_HUE_RANGE, RADIUS_RANGE,
 } from "../themes.js";
 
@@ -18,10 +19,28 @@ describe("theme system", () => {
     localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
     document.documentElement.removeAttribute("data-density");
+    document.documentElement.removeAttribute("data-style-theme");
   });
 
   it("THEMES 仅默认（编目抽屉，ADR 0059 起保留一套主题）", () => {
     expect(THEMES.map((t) => t.key)).toEqual(["default"]);
+  });
+
+  it("大风格主题：注册首项「编目抽屉·索书卡」，applyStyleTheme 写 data-style-theme 并持久化", () => {
+    expect(STYLE_THEMES[0].key).toBe("catalog-drawer");
+    expect(STYLE_THEMES[0].label).toBe("编目抽屉·索书卡");
+    expect(STYLE_THEMES.some((s) => s.description)).toBe(true);
+    applyStyleTheme("catalog-drawer");
+    expect(document.documentElement.getAttribute("data-style-theme")).toBe("catalog-drawer");
+    expect(localStorage.getItem("tsumugi-style-theme")).toBe("catalog-drawer");
+  });
+
+  it("loadStyleTheme：无持久化/未知值均回退首项", () => {
+    expect(loadStyleTheme()).toBe("catalog-drawer");
+    localStorage.setItem("tsumugi-style-theme", "neon-night");
+    expect(loadStyleTheme()).toBe("catalog-drawer");
+    localStorage.setItem("tsumugi-style-theme", "catalog-drawer");
+    expect(loadStyleTheme()).toBe("catalog-drawer");
   });
 
   it("applyTheme('dark') 正常切换并持久化", () => {

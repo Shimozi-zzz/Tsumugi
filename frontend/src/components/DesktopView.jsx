@@ -37,7 +37,7 @@ import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
 import BangumiPanel from "./BangumiPanel.jsx";
 import { toast } from "../toast.js";
-import { THEMES, ACCENT_HUE_RANGE, RADIUS_RANGE } from "../themes.js";
+import { THEMES, STYLE_THEMES, ACCENT_HUE_RANGE, RADIUS_RANGE } from "../themes.js";
 
 // 检索来源角标（ADR 0025）：区分用户自己写的内容与外部下载的百科资料
 function sourceTypeLabel(s) {
@@ -116,7 +116,7 @@ function loadNavOrder() {
   return [...SORTABLE_KEYS];
 }
 
-export default function DesktopView({ items, total, allTags, refresh, theme, setTheme, custom, updateCustom, textOverlays, updateTextOverlays }) {
+export default function DesktopView({ items, total, allTags, refresh, theme, setTheme, custom, updateCustom, styleTheme, setStyleTheme, textOverlays, updateTextOverlays }) {
   const [section, setSection] = useState("ask"); // 默认打开问答
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTag, setActiveTag] = useState(null);
@@ -1731,9 +1731,27 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               ))}
             </div>
 
-            {/* 外观：主题 + 有约束的自定义（强调色/密度/圆角） */}
+            {/* 外观：大风格主题 + 主题 + 有约束的自定义（强调色/密度/圆角） */}
             {settingsTab === "appearance" && (
               <div className="space-y-4">
+                <div className="desk-askbar p-5">
+                  <h3 className="text-sm font-medium mb-1">大风格主题</h3>
+                  <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
+                    整体视觉语言（版式/材质/信息呈现）。当前注册「编目抽屉·索书卡」，
+                    后续可在此与其他大风格主题切换。
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {STYLE_THEMES.map((s) => (
+                      <button key={s.key} onClick={() => setStyleTheme(s.key)}
+                        className="px-3 py-1.5 rounded-xl text-sm"
+                        style={{ backgroundColor: styleTheme === s.key ? "var(--accent)" : "var(--accent-soft)",
+                          color: styleTheme === s.key ? "#fff" : "var(--accent)" }}>
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="desk-askbar p-5">
                   <h3 className="text-sm font-medium mb-1">主题</h3>
                   <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>

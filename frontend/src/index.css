@@ -409,7 +409,9 @@ body {
 .archive-no-lg .archive-no-mark { font-size: 0.6em; }
 .archive-no-lg .archive-no-num { font-size: 30px; font-weight: 400; font-family: var(--font-heading); line-height: 1; }
 
-/* ---- 档案卡片 · 编目抽屉索书卡（ADR 0054/0056/0060）：暖纸内晕 + 档卡横线 + 密集元数据行 ---- */
+/* ---- 档案卡片 · 编目抽屉索书卡（ADR 0054/0056/0060）：暖纸内晕 + 档卡横线 + 密集元数据行
+       「编目抽屉·索书卡」大风格主题（STYLE_THEMES 首项，themes.js）的默认基础样式；
+       后续其它大风格主题以 html[data-style-theme="..."] 作用域覆盖。 ---- */
 .archive-card {
   background: var(--card-bg);
   border: 1px solid var(--panel-border);

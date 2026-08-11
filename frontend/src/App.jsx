@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { fetchItems, fetchTags } from "./api.js";
-import { loadTheme, loadCustom, applyTheme, saveCustom } from "./themes.js";
+import { loadTheme, loadCustom, applyTheme, saveCustom, loadStyleTheme, applyStyleTheme } from "./themes.js";
 import DesktopView from "./components/DesktopView.jsx";
 
 const PAGE_SIZE = 100;
@@ -19,6 +19,7 @@ function loadTextOverlays() {
 export default function App() {
   const [theme, setTheme] = useState(() => loadTheme());
   const [custom, setCustom] = useState(() => loadCustom());
+  const [styleTheme, setStyleTheme] = useState(() => loadStyleTheme());
   const [textOverlays, setTextOverlays] = useState(() => loadTextOverlays());
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -27,6 +28,10 @@ export default function App() {
   useEffect(() => {
     applyTheme(theme, custom);
   }, [theme, custom]);
+
+  useEffect(() => {
+    applyStyleTheme(styleTheme);
+  }, [styleTheme]);
 
   const updateCustom = (patch) => {
     setCustom((prev) => {
@@ -79,6 +84,8 @@ export default function App() {
         setTheme={setTheme}
         custom={custom}
         updateCustom={updateCustom}
+        styleTheme={styleTheme}
+        setStyleTheme={setStyleTheme}
         textOverlays={textOverlays}
         updateTextOverlays={updateTextOverlays}
       />
