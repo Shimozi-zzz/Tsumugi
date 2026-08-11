@@ -48,6 +48,11 @@ describe("MemoryTimeline 时间轴", () => {
     expect(items[0].textContent).toContain("2026-08-01");
     expect(items[0].textContent).toContain("神作");
     expect(items[1].textContent).toContain("2026-08-15");
+    // 档案编号：条目带 §01 / §02（正序序号）
+    const nos = [...container.querySelectorAll('[data-testid="archive-no"]')].map((e) => e.textContent);
+    expect(nos[0]).toContain("§");
+    expect(nos[0]).toContain("01");
+    expect(nos[1]).toContain("02");
     // 时间轴点用 --accent（review 可点；点在按钮外层的包裹 div 里，即按钮前一个兄弟）
     const dot = items[0].previousElementSibling;
     expect(dot.className).toContain("rounded-full");

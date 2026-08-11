@@ -7,6 +7,7 @@
 // - 本轮明确不做：意外重逢（Phase E）、轻量记录（Phase D）、标签/语义筛选（结构化筛选）。
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchMemories } from "../api.js";
+import { ArchiveNo } from "./ui.jsx";
 
 function yearOf(iso) {
   return iso ? String(iso).slice(0, 4) : "";
@@ -90,9 +91,9 @@ export default function MemoryGallery({ onOpenWork, className = "" }) {
       <div className="space-y-6">
         {groups.map((g) => (
           <section key={g.year}>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[11px] tracking-[0.25em]" style={{ color: "var(--accent)" }}>{g.year}</span>
-              <span className="h-px flex-1" style={{ backgroundColor: "var(--panel-border)" }} />
+            <div className="flex items-baseline gap-2 mb-2">
+              <ArchiveNo size="lg">{g.year}</ArchiveNo>
+              <span className="h-px flex-1 self-center" style={{ backgroundColor: "var(--panel-border)" }} />
               <span className="text-[11px] tabular-nums" style={{ color: "var(--text-secondary)" }}>{g.items.length} 条</span>
             </div>
             <div className="relative pl-5">
@@ -119,7 +120,7 @@ export default function MemoryGallery({ onOpenWork, className = "" }) {
     <div className={className}>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
-          <h2 className="text-[15px] font-medium" style={{ color: "var(--text)" }}>记忆回廊</h2>
+          <h2 className="tsm-heading leading-snug" style={{ color: "var(--text)", fontSize: 20, fontWeight: 600 }}>记忆回廊</h2>
           <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
             这座图书馆记得你做过什么（按年份 / 作品筛选）
           </div>

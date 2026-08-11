@@ -9,7 +9,7 @@ import {
 } from "../api.js";
 import { renderMarkdown } from "../markdown.js";
 import { toast } from "../toast.js";
-import { InfoTable, TagCapsule, itemInfoRows } from "./ui.jsx";
+import { InfoTable, TagCapsule, itemInfoRows, ArchiveNo } from "./ui.jsx";
 
 const STATUSES = ["想看", "在看", "看完", "搁置", "弃坑"];
 const DEFAULT_FONT = 15;
@@ -410,11 +410,12 @@ export default function ReviewStudio({ item, onClose, refreshItems }) {
                       还没有书评 · 在右侧开始书写
                     </div>
                   )}
-                  {reviews.map((r) => (
+                  {reviews.map((r, i) => (
                     <div key={r.id} className="rounded-xl p-3"
                       style={{ backgroundColor: "rgba(128,128,128,0.05)", border: "1px solid var(--panel-border)" }}>
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-2">
+                          <ArchiveNo color="muted">{String(i + 1).padStart(2, "0")}</ArchiveNo>
                           <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{r.title || "读后感"}</span>
                           {r.rating != null && <span className="text-xs" style={{ color: "var(--accent)" }}>★{r.rating}</span>}
                           {r.status && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{r.status}</span>}

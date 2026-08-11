@@ -44,6 +44,11 @@ describe("记忆回廊页面", () => {
     expect(sections.length).toBe(2);
     expect(sections[0].querySelector("span")?.textContent).toContain("2026");
     expect(sections[1].querySelector("span")?.textContent).toContain("2025");
+    // 档案编号：年份标题用 ArchiveNo（§ + 大号衬线数字）
+    const firstNo = sections[0].querySelector('[data-testid="archive-no"]');
+    expect(firstNo).toBeTruthy();
+    expect(firstNo.textContent).toContain("§");
+    expect(firstNo.className).toContain("archive-no-lg");
     // 2026 组内：最新在前（08-07 在 01-15 前）
     const first2026 = sections[0].querySelector("button");
     expect(first2026.textContent).toContain("08-07");

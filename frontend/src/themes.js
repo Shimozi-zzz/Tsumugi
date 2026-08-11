@@ -14,8 +14,10 @@ const STORAGE_KEY = "tsumugi-theme";
 const CUSTOM_KEY = "tsumugi-theme-custom";
 
 // 各主题基准强调色（自定义色相在此基准上小幅旋转）
+// default 本轮从冷蓝 #2563eb 换为暖橙调 #B25B36（Claude 赤陶土系：暖棕橙、略带灰调、
+// 不刺眼；浅底对比 ≈4.7:1 达 AA；白字按钮/正文均协调），详见 ADR 0053。
 const ACCENTS = {
-  default: "#2563eb",
+  default: "#B25B36",
   mint: "#10b981",
   sakura: "#ec4899",
   dark: "#4a9eff",

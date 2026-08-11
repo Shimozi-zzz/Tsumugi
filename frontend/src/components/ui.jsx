@@ -50,6 +50,22 @@ export function InfoTable({ rows, className = "" }) {
   );
 }
 
+/**
+ * 档案编号（本轮新增）：§ + 等宽数字的编辑档案式标签，如 §01。
+ * 用于"本质上是被编目的档案"的位置（记忆回廊年份、时间轴条目、书评记录等），
+ * 增强"被认真编目的私人档案"的感觉。size: "sm"（默认，条目级）/ "lg"（年份大标题）。
+ */
+export function ArchiveNo({ children, size = "sm", color = "accent", className = "" }) {
+  return (
+    <span className={"archive-no archive-no-" + size + " " + className}
+      data-testid="archive-no"
+      style={{ color: color === "muted" ? "var(--text-secondary)" : "var(--accent)" }}>
+      <span className="archive-no-mark">§</span>
+      <span className="archive-no-num">{children}</span>
+    </span>
+  );
+}
+
 const SRC_LABEL = { bangumi: "Bangumi", moegirl: "萌娘百科", vndb: "VNDB", local: "本地" };
 
 /**

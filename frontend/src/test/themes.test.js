@@ -1,9 +1,17 @@
 // 主题系统测试：3 套收敛主题 + 有约束的自定义层（强调色色相/密度/圆角）
+import fs from "node:fs";
+import path from "node:path";
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   THEMES, loadTheme, applyTheme, loadCustom, saveCustom,
   DEFAULT_CUSTOM, ACCENT_HUE_RANGE, RADIUS_RANGE,
 } from "../themes.js";
+
+function parseHslHue(css) {
+  const m = /hsl\(([^)]+)\)/.exec(css);
+  if (!m) return null;
+  return parseFloat(m[1].split(",")[0]);
+}
 
 describe("theme system", () => {
   beforeEach(() => {
@@ -77,5 +85,38 @@ describe("theme system", () => {
     expect(ACCENT_HUE_RANGE.min).toBeLessThan(0);
     expect(ACCENT_HUE_RANGE.max).toBeGreaterThan(0);
     expect(RADIUS_RANGE.min).toBeLessThan(RADIUS_RANGE.max);
+  });
+
+  it("默认主题 accent 已暖橙化（色相 ~18° 暖调，非冷蓝），其余三套主题保持原色相", () => {
+    applyTheme("default");
+    const dHue = parseHslHue(document.documentElement.style.getPropertyValue("--accent"));
+    expect(dHue).toBeGreaterThan(0);
+    expect(dHue).toBeLessThan(40); // 暖橙（原蓝 ~221°）
+
+    applyTheme("mint");
+    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeGreaterThan(145);
+    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeLessThan(175); // 薄荷绿
+    applyTheme("sakura");
+    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeGreaterThan(300); // 粉
+    applyTheme("dark");
+    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeGreaterThan(200);
+    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeLessThan(240); // 蓝
+  });
+
+  it("index.css：默认主题 :root accent 暖橙 hex + --font-heading 衬线 token + 氛围色 alpha 各主题保持", () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
+    expect(css).toContain("--accent: #b25b36;");
+    expect(css).toContain("--accent-hover: #9c4c2c;");
+    expect(css).toContain("--accent-soft: #f9ede5;");
+    expect(css).toContain("--font-heading:");
+    // 氛围色强度（不随 accent 变化，浅色克制/深色稍明显）
+    const root = css.slice(0, css.indexOf("html[data-theme"));
+    expect(root).toContain("--ambient-alpha: 0.16;");
+    expect(css).toContain('html[data-theme="dark"]');
+  });
+
+  it("暖橙 accent 下书脊色相基准也是暖调（hexToHsl 基准），依赖 accent 的效果协调", () => {
+    const { hexToHsl } = require("../bookshelf.js");
+    expect(Math.round(hexToHsl("#b25b36").h)).toBe(18); // 书脊色相旋转基准为暖橙
   });
 });

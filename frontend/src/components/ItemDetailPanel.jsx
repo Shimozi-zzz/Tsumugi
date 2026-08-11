@@ -153,7 +153,7 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
               onError={(e) => { e.target.style.display = "none"; }} />
           ) : null}
           <div className="min-w-0">
-            <h2 className="text-base font-semibold leading-snug" style={{ color: "var(--text)" }}>{detail.title}</h2>
+            <h2 className="tsm-heading leading-tight" style={{ color: "var(--text)", fontSize: 22, fontWeight: 600 }}>{detail.title}</h2>
             <div className="flex items-center gap-2 mt-2 flex-wrap">
               <TagCapsule text={detail.source || "本地"} />
               {detail.rating != null && (

@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from "react";
 import { fetchItemMemories, deleteMemory } from "../api.js";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
-import { MEMORY_TYPE_LABEL } from "./ui.jsx";
+import { MEMORY_TYPE_LABEL, ArchiveNo } from "./ui.jsx";
 
 function formatDate(iso) {
   if (!iso) return "";
@@ -72,9 +72,10 @@ export default function MemoryTimeline({ itemId, refreshKey = 0 }) {
         {/* 时间轴线 */}
         <div className="absolute left-[3px] top-2 bottom-2 w-px"
           style={{ backgroundColor: "var(--panel-border)" }} />
-        {ordered.map((mem) => {
+        {ordered.map((mem, idx) => {
           const clickable = mem.source_type !== "collection";
           const deletable = mem.source_type === "text" || mem.source_type === "milestone";
+          const no = String(idx + 1).padStart(2, "0");
           return (
             <div key={mem.id} className="relative mb-3 last:mb-0">
               <span className="absolute -left-5 top-1.5 w-2 h-2 rounded-full"
@@ -85,6 +86,7 @@ export default function MemoryTimeline({ itemId, refreshKey = 0 }) {
                 style={{ cursor: clickable ? "pointer" : "default" }}>
                 <span className="block text-[10px] tabular-nums tracking-wider"
                   style={{ color: "var(--text-secondary)" }}>
+                  <ArchiveNo color="muted" className="mr-1.5">{no}</ArchiveNo>
                   {formatDate(mem.occurred_at)}
                   <span className="ml-1.5 px-1 py-px rounded" style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
                     {MEMORY_TYPE_LABEL[mem.source_type] || mem.source_type}

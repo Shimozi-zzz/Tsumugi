@@ -199,8 +199,8 @@ export default function HomeShrine({
         {/* 看守猫娘台词（ADR 0040 / Phase E 往年今日）：搜索栏（祭坛）与供奉之间
             的一行轻语，随仪式渐次呈现；往年今日命中时可点击查看那段记忆 */}
         {mascotLine && (
-          <div className="shrine-item mt-5 max-w-md text-center text-[12px] leading-relaxed"
-            style={{ color: "var(--text-secondary)", transitionDelay: "0.22s" }}>
+          <div className="shrine-item tsm-heading mt-5 max-w-md text-center text-[13px] leading-relaxed"
+            style={{ color: "var(--text-secondary)", transitionDelay: "0.22s", fontWeight: 500 }}>
             {mascotScene?.scene === "on_this_day" ? (
               <>
                 <div className="text-[10px] tracking-[0.3em] mb-1" style={{ color: "var(--accent)" }}>

@@ -7,7 +7,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import React from "react";
 import DesktopView from "../components/DesktopView.jsx";
 import StatusGroupedList from "../components/StatusGroupedList.jsx";
-import { InfoTable, TagCapsule, itemInfoRows } from "../components/ui.jsx";
+import { InfoTable, TagCapsule, itemInfoRows, ArchiveNo } from "../components/ui.jsx";
 import { applyTheme, THEMES } from "../themes.js";
 
 function ok(payload, status = 200) {
@@ -153,6 +153,17 @@ describe("Playnite 式信息设计（ui 组件）", () => {
     expect(el.className).toContain("rounded-full");
     expect(el.style.backgroundColor).toBe("var(--tag-bg)");
     expect(el.style.color).toBe("var(--tag-text)");
+  });
+
+  it("ArchiveNo 档案编号：§ 标记 + 数字，颜色走 accent", () => {
+    const { container } = render(<ArchiveNo>01</ArchiveNo>);
+    const el = container.querySelector('[data-testid="archive-no"]');
+    expect(el).toBeTruthy();
+    expect(el.textContent).toContain("§");
+    expect(el.textContent).toContain("01");
+    expect(el.style.color).toBe("var(--accent)");
+    const lg = render(<ArchiveNo size="lg">2026</ArchiveNo>);
+    expect(lg.container.querySelector('[data-testid="archive-no"]').className).toContain("archive-no-lg");
   });
 });
 
