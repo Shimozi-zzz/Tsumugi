@@ -32,6 +32,7 @@ import MemoryGallery from "./MemoryGallery.jsx";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
 import ArchiveCard from "./ArchiveCard.jsx";
 import { GridConceptA, GridConceptB, GridConceptC, GridConceptSwitcher, parseConcept } from "./GridConcepts.jsx";
+import { ShellA, ShellB, ShellC, ShellSwitcher, parseShell } from "./AppShells.jsx";
 import { WORK_TYPES, WORK_TYPE_LABEL } from "./ui.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
@@ -942,6 +943,16 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     setGridConcept(k);
     try { localStorage.setItem("tsumugi-grid-concept", k); } catch { /* ignore */ }
   };
+  // 外壳空间结构探索（ADR 0057）：?shell=a|b|c|classic 或 localStorage，临时探索用
+  const [shellConcept, setShellConcept] = useState(() => parseShell(localStorage.getItem("tsumugi-shell-concept")) || "classic");
+  useEffect(() => {
+    const fromUrl = parseShell(new URLSearchParams(window.location.search).get("shell"));
+    if (fromUrl) setShellConcept(fromUrl);
+  }, []);
+  const changeShellConcept = (k) => {
+    setShellConcept(k);
+    try { localStorage.setItem("tsumugi-shell-concept", k); } catch { /* ignore */ }
+  };
   // 图书馆网格：按 work_type + libQuery 本地过滤（标题/内容）
   const libFiltered = gridItems.filter((it) => {
     if (activeWorkType && it.work_type !== activeWorkType) return false;
@@ -1068,6 +1079,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   );
 
   return (
+    <>
+      {shellConcept === "classic" ? (
     <div className="desktop-view flex relative flex-1 min-h-0 overflow-hidden"
       data-testid="app-shell">
 
@@ -2310,5 +2323,17 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         </div>
       )}
     </div>
+      ) : shellConcept === "a" ? (
+        <ShellA />
+      ) : shellConcept === "b" ? (
+        <ShellB />
+      ) : (
+        <ShellC />
+      )}
+      {/* ADR 0057：外壳空间结构探索浮动开关 */}
+      <div className="fixed bottom-3 right-3 z-50">
+        <ShellSwitcher value={shellConcept} onChange={changeShellConcept} />
+      </div>
+    </>
   );
 }
