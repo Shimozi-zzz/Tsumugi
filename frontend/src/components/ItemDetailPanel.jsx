@@ -122,6 +122,19 @@ export default function ItemDetailPanel({
   const [timelineRefresh, setTimelineRefresh] = useState(0);
   const fileInputRef = useRef(null);
 
+  // Phase 4-3：提交反馈——安静一行（ok 短暂 / error 持续到下次操作 / busy 进行中）
+  const [feedback, setFeedback] = useState(null); // { kind: "busy"|"ok"|"error", text } | null
+  const feedbackTimer = useRef(null);
+  const submittingRef = useRef(false);
+  function showFeedback(kind, text) {
+    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    setFeedback({ kind, text });
+    if (kind === "ok") {
+      feedbackTimer.current = setTimeout(() => setFeedback(null), 2500);
+    }
+  }
+  useEffect(() => () => { if (feedbackTimer.current) clearTimeout(feedbackTimer.current); }, []);
+
   // Phase 3-2-C-1（ADR 0076）：相遇纪事数据——统一在此取 reviews/memories，
   // 同一份 memories 同时供给 MemoryTimeline（避免重复请求）。
   const [reviews, setReviews] = useState([]);
@@ -135,7 +148,10 @@ export default function ItemDetailPanel({
   }, [itemId, timelineRefresh]);
 
   async function submitDirect(sourceType, text) {
+    if (submittingRef.current) return; // 防重复提交（含渲染前双击）
+    submittingRef.current = true;
     setRecording(true);
+    showFeedback("busy", "正在记录…");
     try {
       await createDirectMemory(itemId, {
         summary: text, source_type: sourceType,
@@ -143,8 +159,14 @@ export default function ItemDetailPanel({
       });
       setDraft(""); setDraftEmotion(""); setDraftFile(null);
       setTimelineRefresh((k) => k + 1);
-    } catch { /* 静默失败，保留输入便于重试 */ }
-    finally { setRecording(false); }
+      showFeedback("ok", "已留下这一刻");
+    } catch (err) {
+      // 失败：保留输入便于重试；安静可读的失败反馈
+      showFeedback("error", (err && err.message) || "记录失败，请重试");
+    } finally {
+      submittingRef.current = false;
+      setRecording(false);
+    }
   }
 
   // Phase 3-1：外部未收藏详情（externalDetail）跳过取数守卫；已收藏走 detail（自取）
@@ -429,6 +451,12 @@ export default function ItemDetailPanel({
                   style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: "var(--radius-control)" }}>
                   记录这一刻
                 </button>
+              </div>
+              {/* 提交反馈（Phase 4-3）：安静一行，aria-live polite；常驻 min-height 防布局跳动 */}
+              <div className="mc-feedback" aria-live="polite">
+                {feedback && (
+                  <span className={feedback.kind === "error" ? "mc-feedback-err" : ""}>{feedback.text}</span>
+                )}
               </div>
               {/* 完成 / 重新打开：安静文字操作（文案即 milestone summary 业务语义） */}
               <div className="mc-milestone">

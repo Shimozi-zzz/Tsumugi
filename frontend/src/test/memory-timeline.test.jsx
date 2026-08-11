@@ -216,6 +216,49 @@ describe("我的记忆章节（Phase 3-2-D）", () => {
       )
     );
   });
+
+  it("文字记录成功：显示「已留下这一刻」并清空输入", async () => {
+    mockFetch();
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
+    const input = screen.getByPlaceholderText(/写一句此刻的感想/);
+    fireEvent.change(input, { target: { value: "今天很平静" } });
+    fireEvent.click(screen.getByText("记录这一刻"));
+    await waitFor(() => expect(screen.getByText("已留下这一刻")).toBeTruthy());
+    expect(input.value).toBe(""); // 成功后清空
+  });
+
+  it("文字记录失败：安静错误反馈且输入保留", async () => {
+    global.fetch = vi.fn((url, opts = {}) => {
+      const u = String(url);
+      const m = opts.method || "GET";
+      if (u.includes("/items/1/detail")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: "X", source: "bangumi", characters: [], tags: [], description: "" }) });
+      if (u.includes("/items/1/memories") && m === "POST") return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: "记录失败" }) });
+      if (u.includes("/items/1/memories")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      if (u.includes("/items/1/reviews")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("X")).toBeTruthy());
+    const input = screen.getByPlaceholderText(/写一句此刻的感想/);
+    fireEvent.change(input, { target: { value: "要保留的文字" } });
+    fireEvent.click(screen.getByText("记录这一刻"));
+    await waitFor(() => expect(screen.getByText("记录失败")).toBeTruthy());
+    expect(input.value).toBe("要保留的文字"); // 失败不丢输入
+  });
+
+  it("完成/重新打开仍提交（POST /items/{id}/memories，milestone）", async () => {
+    mockFetch();
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
+    fireEvent.click(screen.getByText("✓ 完成了"));
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/items/1/memories"),
+        expect.objectContaining({ method: "POST" })
+      )
+    );
+  });
 });
 
 describe("默认主题渲染（ADR 0059 起仅保留编目抽屉一套）", () => {

@@ -737,6 +737,11 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
   transition: opacity var(--dur-enter) var(--ease-standard); }
 .mc-submit:disabled { opacity: 0.4; }
 .mc-submit:focus-visible { box-shadow: var(--focus-ring); }
+.mc-feedback {
+  min-height: 20px; margin-top: var(--sp-2);
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--ink-2);
+}
+.mc-feedback-err { color: var(--danger); }
 .mc-milestone { display: flex; gap: var(--sp-4); margin-top: var(--sp-3); }
 .mc-milestone-btn {
   padding: 6px 2px; min-height: 28px; font-size: 11px; color: var(--ink-2);
