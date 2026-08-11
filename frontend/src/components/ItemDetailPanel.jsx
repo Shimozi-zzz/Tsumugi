@@ -401,39 +401,39 @@ export default function ItemDetailPanel({
           </div>
           <div className="wd-chapter-rule" />
           {detail.source !== "local" && (
-            <div className="mb-5">
-              <div className="flex items-center gap-2 flex-wrap">
-                <input value={draft} onChange={(e) => setDraft(e.target.value)}
-                  placeholder="写一句此刻的感想…（轻量记录，不写正式书评）"
-                  className="flex-1 min-w-0 rounded-lg px-3 py-1.5 text-[12px] outline-none"
-                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)", borderRadius: "var(--radius-control)" }} />
+            <div className="mc mb-5">
+              {/* 主书写区：textarea 为第一视觉焦点（Phase 4-1「留下这一刻」） */}
+              <textarea value={draft} onChange={(e) => setDraft(e.target.value)}
+                placeholder="写一句此刻的感想…（轻量记录，不写正式书评）"
+                rows={2} className="mc-write"
+                aria-label="记下一句此刻的感想" />
+              {/* 辅助操作层：情绪 + 附图（安静），主动作唯一 accent */}
+              <div className="mc-aux">
                 <select value={draftEmotion} onChange={(e) => setDraftEmotion(e.target.value)}
-                  title="情绪（可选）"
-                  className="rounded-lg px-2 py-1.5 text-[11px] outline-none"
-                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)", borderRadius: "var(--radius-control)" }}>
+                  title="情绪（可选）" aria-label="情绪"
+                  className="mc-select">
                   <option value="">情绪</option>
                   {MEMORY_EMOTIONS.map((e) => <option key={e} value={e}>{e}</option>)}
                 </select>
                 <input type="file" accept="image/*" hidden ref={fileInputRef}
                   onChange={(e) => setDraftFile(e.target.files?.[0] || null)} />
                 <button onClick={() => fileInputRef.current?.click()} title="附带一张图片"
-                  className="px-2 py-1.5 rounded-lg text-[11px]"
-                  style={{ color: "var(--text-secondary)", backgroundColor: "var(--accent-soft)", borderRadius: "var(--radius-control)" }}>
-                  {draftFile ? "🖼 ✓" : "🖼"}
+                  aria-label="附一张图片" className="mc-attach">
+                  {draftFile ? "已附图 ✓" : "附一张图"}
                 </button>
+                <span className="flex-1" />
                 <button onClick={() => submitDirect("text", draft)} disabled={!draft.trim() || recording}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-medium disabled:opacity-40"
+                  className="mc-submit"
                   style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: "var(--radius-control)" }}>
-                  记录
+                  记录这一刻
                 </button>
               </div>
-              <div className="flex items-center gap-2 mt-2">
+              {/* 完成 / 重新打开：安静文字操作（文案即 milestone summary 业务语义） */}
+              <div className="mc-milestone">
                 <button onClick={() => submitDirect("milestone", "完成了这部作品。")} disabled={recording}
-                  className="px-2.5 py-1 rounded-full text-[11px]"
-                  style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>✓ 完成了</button>
+                  className="mc-milestone-btn">✓ 完成了</button>
                 <button onClick={() => submitDirect("milestone", "重新打开了这部作品。")} disabled={recording}
-                  className="px-2.5 py-1 rounded-full text-[11px]"
-                  style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>↺ 重新打开</button>
+                  className="mc-milestone-btn">↺ 重新打开</button>
               </div>
             </div>
           )}

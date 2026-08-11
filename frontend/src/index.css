@@ -700,6 +700,45 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 }
 .wd-encounter-meta { margin-top: 2px; font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); }
 
+/* Memory Composer「留下这一刻」（Phase 4-1）：主书写区为第一焦点，辅助安静，主动作唯一 accent */
+.mc { margin-bottom: var(--sp-5); }
+.mc-write {
+  width: 100%; min-height: 64px; resize: vertical;
+  padding: var(--sp-3);
+  font-family: var(--font-body); font-size: 14px; line-height: 1.7; color: var(--ink-0);
+  background-color: var(--surface-1);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-control);
+  outline: none;
+  transition: border-color var(--dur-enter) var(--ease-standard), box-shadow var(--dur-enter) var(--ease-standard);
+}
+.mc-write:focus-visible { box-shadow: var(--focus-ring); }
+.mc-write::placeholder { color: var(--ink-2); font-family: var(--font-heading); font-size: 13px; letter-spacing: 0.02em; }
+.mc-aux { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); flex-wrap: wrap; }
+.mc-select {
+  padding: 6px 8px; font-size: 11px; color: var(--ink-1);
+  background-color: var(--input-bg); border: 1px solid var(--input-border);
+  border-radius: var(--radius-control); outline: none;
+}
+.mc-attach {
+  padding: 6px 10px; font-size: 11px; color: var(--ink-1);
+  background-color: transparent; border: 1px solid var(--panel-border);
+  border-radius: var(--radius-control);
+  transition: color var(--dur-enter) var(--ease-standard), border-color var(--dur-enter) var(--ease-standard);
+}
+.mc-attach:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border)); }
+.mc-submit { padding: 8px 18px; font-size: 12px; font-weight: 500; border: none;
+  transition: opacity var(--dur-enter) var(--ease-standard); }
+.mc-submit:disabled { opacity: 0.4; }
+.mc-milestone { display: flex; gap: var(--sp-4); margin-top: var(--sp-3); }
+.mc-milestone-btn {
+  padding: 4px 2px; font-size: 11px; color: var(--ink-2);
+  background-color: transparent; border: none; border-bottom: 1px solid transparent;
+  transition: color var(--dur-enter) var(--ease-standard), border-color var(--dur-enter) var(--ease-standard);
+}
+.mc-milestone-btn:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.mc-milestone-btn:focus-visible { box-shadow: var(--focus-ring); }
+
 /* 书架分区（Phase 2-4 / ADR 0071）：状态=书架章节标题，serif + hairline + mono 册数 */
 .status-shelf-name {
   font-family: var(--font-heading); font-size: 14px; font-weight: 600;

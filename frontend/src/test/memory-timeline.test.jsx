@@ -183,13 +183,13 @@ describe("我的记忆章节（Phase 3-2-D）", () => {
     await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
     expect(screen.getByText("我的记忆")).toBeTruthy();
     expect(screen.getByText("MY MEMORY")).toBeTruthy();
-    // composer 归位（输入框 + 记录按钮）
+    // composer 归位（输入区 + 主动作按钮「记录这一刻」）
     expect(screen.getByPlaceholderText(/写一句此刻的感想/)).toBeTruthy();
-    expect(screen.getByText("记录")).toBeTruthy();
+    expect(screen.getByText("记录这一刻")).toBeTruthy();
     // MemoryTimeline 归位（记忆条目渲染）
     await waitFor(() => expect(screen.getAllByText("神作").length).toBeGreaterThan(0));
     // 没有重复 composer / 没有重复 MemoryTimeline
-    expect(screen.getAllByText("记录").length).toBe(1);
+    expect(screen.getAllByText("记录这一刻").length).toBe(1);
     expect(container.querySelectorAll(".relative.pl-5").length).toBe(1);
   });
 
@@ -208,7 +208,7 @@ describe("我的记忆章节（Phase 3-2-D）", () => {
     render(<ItemDetailPanel itemId={1} />);
     await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
     fireEvent.change(screen.getByPlaceholderText(/写一句此刻的感想/), { target: { value: "今天很平静" } });
-    fireEvent.click(screen.getByText("记录"));
+    fireEvent.click(screen.getByText("记录这一刻"));
     await waitFor(() =>
       expect(global.fetch).toHaveBeenCalledWith(
         expect.stringContaining("/items/1/memories"),
