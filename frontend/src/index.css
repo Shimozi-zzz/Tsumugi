@@ -379,6 +379,14 @@ body {
 /* 祭坛搜索栏：serif 占位（衬线 placeholder 呼应神殿编辑气质） */
 .shrine input::placeholder { font-family: var(--font-heading); opacity: 0.8; letter-spacing: 0.04em; }
 
+/* 往年今日重逢行（On This Day）：hover 细描边 + 手型光标 */
+.shrine-mascot-reunion { cursor: pointer; }
+.shrine-mascot-reunion:hover {
+  outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 6px;
+  border-radius: 2px;
+}
+
 /* P5 / ADR 0049 真书架：取书浮起（hover）+ 目录卡标签 + 层板 */
 .shelf-book { transition: transform .3s ease, box-shadow .3s ease; }
 .shelf-book:hover { transform: translateY(-6px); }

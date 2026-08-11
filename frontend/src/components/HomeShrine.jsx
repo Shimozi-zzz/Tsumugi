@@ -207,8 +207,8 @@ export default function HomeShrine({
                   ◇ 往年今日
                 </div>
                 <button type="button" onClick={() => setShowMemory(true)} title="查看这段记忆"
-                  className="inline-block hover:opacity-80 transition-opacity"
-                  style={{ color: "var(--text-secondary)" }}>
+                  className="shrine-mascot-reunion inline-block hover:opacity-80 transition-all duration-200"
+                  style={{ color: "var(--text-secondary)", letterSpacing: "0.02em" }}>
                   {mascotLine}
                 </button>
               </>
