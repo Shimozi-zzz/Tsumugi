@@ -1,6 +1,6 @@
 // 封面取色缓存复用（ADR 0034/0037）：同一封面第二次调用命中缓存、不重复计算
 import { describe, it, expect, beforeEach } from "vitest";
-import { clearPaletteCache, extractPalette } from "../ambient.js";
+import { clearPaletteCache, extractPalette, extractDominantColor } from "../ambient.js";
 
 beforeEach(() => { clearPaletteCache(); });
 
@@ -38,5 +38,13 @@ describe("extractPalette 缓存复用", () => {
 
   it("无 src 直接返回 null，不缓存", () => {
     expect(extractPalette("")).toBeNull();
+  });
+
+  it("extractDominantColor 包装：复用底层缓存，解析为 rgb 字符串或 null", async () => {
+    // jsdom 无 canvas 2d → 解析 null（不抛错）；底层 palette 仍命中同一缓存 Promise
+    const p1 = extractPalette("https://x/dom.jpg");
+    expect(extractPalette("https://x/dom.jpg")).toBe(p1); // 底层缓存复用不受影响
+    await expect(extractDominantColor("https://x/dom.jpg")).resolves.toBeNull();
+    await expect(extractDominantColor("")).resolves.toBeNull();
   });
 });

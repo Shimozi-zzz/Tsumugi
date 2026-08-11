@@ -7,7 +7,7 @@
 import { imageUrlToDataUrl } from "./shareCard.js";
 
 const cache = new Map(); // src -> Promise<palette|null>
-const CACHE_MAX = 200;
+const CACHE_MAX = 100;   // 上限 100 条（按需求；超出丢最早，防无限增长）
 
 export function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255;
@@ -115,4 +115,15 @@ export function extractPalette(src, { size = 32 } = {}) {
 /** 测试/清理用：清空取色缓存。 */
 export function clearPaletteCache() {
   cache.clear();
+}
+
+/**
+ * 便捷包装（按需求 API）：返回 Promise<"rgb(r,g,b)"> 或 null（无主色/失败）。
+ * 复用 extractPalette 的缓存与鲜明度校验；jsdom/无 canvas 环境解析为 null。
+ */
+export function extractDominantColor(src) {
+  const p = extractPalette(src);
+  if (!p) return Promise.resolve(null);
+  return p.then((pal) => (pal && pal.primary
+    ? `rgb(${pal.primary.r},${pal.primary.g},${pal.primary.b})` : null));
 }

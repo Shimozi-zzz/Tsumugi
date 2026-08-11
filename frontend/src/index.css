@@ -43,8 +43,8 @@
   --surface-1: #faf5ea;
   --surface-2: #e9dfca;
 
-  /* ---- 封面氛围色强度（ADR 0034）：浅色主题克制（~0.16-0.18），深色稍明显（0.30） ---- */
-  --ambient-alpha: 0.16;
+  /* ---- 封面氛围色强度（ADR 0034 / ADR 0060）：默认纸感主题 0.14（极柔和，保可读性） ---- */
+  --ambient-alpha: 0.14;
 
   /* ---- 字体 token（ADR 0020 / ADR 0056）：关键标题衬线、正文系统无衬线、编号等宽 ---- */
   --font-heading: Georgia, "Songti SC", "Noto Serif SC", "STSong", serif;

@@ -105,7 +105,7 @@ describe("theme system", () => {
     expect(css).not.toContain('html[data-theme="dark"]');
     // 氛围色强度保持（浅色克制）
     const root = css.slice(0, css.indexOf("html[data-theme"));
-    expect(root).toContain("--ambient-alpha: 0.16;");
+    expect(root).toContain("--ambient-alpha: 0.14;");
   });
 
   it("编目抽屉默认色板（ADR 0056）：纸感底色/分层 + --font-mono + 近直角圆角 token", () => {
