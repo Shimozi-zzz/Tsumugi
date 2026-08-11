@@ -101,6 +101,19 @@ const NAV = {
 // 可自由排序的键（settings 除外）
 const SORTABLE_KEYS = ["ask", "library", "inspector", "characters", "voice", "summary", "memories"];
 
+// 馆内导览（ADR 0066）：UI 房间 → 内部 section 映射（不重命名内部键/路由/数据结构）
+const ROOM_META = {
+  ask: { room: "检索台", en: "Desk", no: "05" },
+  library: { room: "书库", en: "Library", no: "01" },
+  memories: { room: "记忆回廊", en: "Gallery", no: "02" },
+  summary: { room: "时光轴", en: "Timeline", no: "03" },
+  characters: { room: "人物档案", en: "Archive", no: "04" },
+  settings: { room: "管理室", en: "Office", no: "06" },
+};
+const TOOL_META = { inspector: { label: "分析" }, voice: { label: "声优图谱" } };
+// 移动端底部房间导航顺序
+const ROOMS_ALL = ["ask", "library", "memories", "summary", "characters", "settings"];
+
 const NAV_ORDER_KEY = "tsumugi-nav-order";
 
 function loadNavOrder() {
@@ -127,6 +140,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [overlayEditMode, setOverlayEditMode] = useState(false);
   // 长按导航调整模式
   const [navRearrangeMode, setNavRearrangeMode] = useState(false);
+  // 平板/移动：馆内导览抽屉（ADR 0066）
+  const [navDrawer, setNavDrawer] = useState(false);
   // 设置保存提示
   const [savedToast, setSavedToast] = useState(false);
   // 书评面板：当前打开 review 面板的 item（null=关闭）
@@ -1067,6 +1082,52 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     </div>
   );
 
+  // 馆内导览导航项（ADR 0066）：馆室 serif+编号，工具 sans；保留长按/拖拽排序
+  const renderNavItem = (k, opts = {}) => {
+    const meta = ROOM_META[k];
+    const tool = TOOL_META[k];
+    const isRoom = !!meta;
+    const label = isRoom ? meta.room : (tool ? tool.label : (NAV[k]?.label || k));
+    return (
+      <button key={k}
+        onClick={() => { if (!navRearrangeMode) { handleSection(k); opts.onClick?.(); } }}
+        onMouseDown={() => { if (k !== "settings" && k !== "ask") startLongPress(); }}
+        onMouseUp={cancelLongPress}
+        onMouseLeave={cancelLongPress}
+        onDragStart={(e) => { if (navRearrangeMode) { e.dataTransfer.setData("text/navkey", k); e.dataTransfer.effectAllowed = "move"; } }}
+        onDragOver={(e) => { if (navRearrangeMode) e.preventDefault(); }}
+        onDrop={(e) => {
+          if (!navRearrangeMode) return;
+          e.preventDefault();
+          const from = e.dataTransfer.getData("text/navkey");
+          if (!from || from === k) return;
+          const next = [...navOrder];
+          const fi = next.indexOf(from), ti = next.indexOf(k);
+          next.splice(fi, 1);
+          next.splice(ti, 0, from);
+          saveNavOrder(next);
+        }}
+        title={navRearrangeMode ? "拖动调整位置" : label}
+        className="flex items-center gap-2 px-2 py-1.5 rounded text-left transition-colors shrink-0 w-full"
+        style={{
+          color: section === k ? "var(--accent)" : "var(--text-secondary)",
+          backgroundColor: section === k ? "var(--accent-soft)" : "transparent",
+          cursor: navRearrangeMode ? "grab" : "pointer",
+          outline: navRearrangeMode ? "1px dashed var(--accent)" : "none",
+          ...opts.style,
+        }}>
+        <span className="text-[9px] w-4 shrink-0 text-center"
+          style={{ fontFamily: "var(--font-mono)", color: section === k ? "var(--accent)" : "var(--ink-2)" }}>
+          {isRoom ? meta.no : "·"}
+        </span>
+        <span className="text-[12px] truncate"
+          style={{ fontFamily: isRoom ? "var(--font-heading)" : "var(--font-body)", letterSpacing: isRoom ? "0.06em" : "0", fontWeight: isRoom ? 500 : 400 }}>
+          {label}
+        </span>
+      </button>
+    );
+  };
+
   return (
     <>
       {shellConcept === "classic" ? (
@@ -1137,66 +1198,53 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         </div>
       )}
 
-      {/* 1. 图标导航栏：ask固定顶 + 可排序区 + settings固定底 */}
-      <nav className="desk-nav flex flex-col items-center py-4 gap-1.5 z-10 shrink-0"
-        style={{ width: 52, backgroundColor: "var(--rail-bg)", borderRight: "1px solid var(--panel-border)" }}
+      {/* 1. 馆内导览（ADR 0066）：纸感馆室列表，serif 馆室 + mono 编号（lg 以上显示） */}
+      <nav className="desk-nav flex-col py-4 px-2.5 gap-1 z-10 shrink-0 hidden lg:flex"
+        style={{ width: 176, backgroundColor: "var(--rail-bg)", borderRight: "1px solid var(--panel-border)" }}
         data-testid="left-nav">
-        <div className="mb-3 text-base font-semibold" style={{ color: "var(--accent)" }}>紬</div>
-        {/* ask 固定一号位 */}
-        <button onClick={() => handleSection("ask")} title="问答"
-          className="p-2 rounded-xl transition-colors"
-          style={{ color: section === "ask" ? "var(--accent)" : "var(--text-secondary)",
-            backgroundColor: section === "ask" ? "var(--accent-soft)" : "transparent" }}>
-          {NAV.ask.icon}
-        </button>
-        {/* 可排序区（不含 ask，长按进入调整模式，调整模式下可拖动） */}
-        <div className="flex-1 min-h-0 flex flex-col items-center gap-1.5 overflow-y-auto py-2">
-          {sortedNavKeys.map((k) => (
-            <button key={k}
-              onClick={() => { if (!navRearrangeMode) handleSection(k); }}
-              onMouseDown={() => { if (k !== "settings") startLongPress(); }}
-              onMouseUp={cancelLongPress}
-              onMouseLeave={cancelLongPress}
-              onDragStart={(e) => { if (navRearrangeMode) { e.dataTransfer.setData("text/navkey", k); e.dataTransfer.effectAllowed = "move"; } }}
-              onDragOver={(e) => { if (navRearrangeMode) e.preventDefault(); }}
-              onDrop={(e) => {
-                if (!navRearrangeMode) return;
-                e.preventDefault();
-                const from = e.dataTransfer.getData("text/navkey");
-                if (!from || from === k) return;
-                const next = [...navOrder];
-                const fi = next.indexOf(from), ti = next.indexOf(k);
-                next.splice(fi, 1);
-                next.splice(ti, 0, from);
-                saveNavOrder(next);
-              }}
-              title={navRearrangeMode ? "拖动调整位置" : NAV[k].label}
-              className="p-2 rounded-xl transition-colors shrink-0"
-              style={{ color: section === k ? "var(--accent)" : "var(--text-secondary)",
-                backgroundColor: section === k ? "var(--accent-soft)" : "transparent",
-                cursor: navRearrangeMode ? "grab" : "pointer",
-                outline: navRearrangeMode ? "1px dashed var(--accent)" : "none" }}>
-              {NAV[k].icon}
-            </button>
-          ))}
+        <div className="px-2 mb-4">
+          <div className="tsm-heading text-lg leading-none" style={{ color: "var(--accent)" }}>紬</div>
+          <div className="text-[9px] tracking-[0.3em] mt-1" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>TSUMUGI</div>
         </div>
-        {/* settings 固定底部 */}
-        <button onClick={() => handleSection("settings")} title="设置"
-          className="p-2 rounded-xl transition-colors mt-auto"
-          style={{ color: section === "settings" ? "var(--accent)" : "var(--text-secondary)",
-            backgroundColor: section === "settings" ? "var(--accent-soft)" : "transparent" }}>
-          {NAV.settings.icon}
-        </button>
-        {/* 快捷键帮助 */}
+        {renderNavItem("ask")}
+        <div className="px-2 mt-2 mb-1 text-[9px] tracking-[0.2em]" style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>馆室 ROOMS</div>
+        {sortedNavKeys.filter((k) => ROOM_META[k]).map((k) => renderNavItem(k))}
+        <div className="px-2 mt-3 mb-1 text-[9px] tracking-[0.2em]" style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>工具 TOOLS</div>
+        {sortedNavKeys.filter((k) => TOOL_META[k]).map((k) => renderNavItem(k))}
+        <div className="flex-1" />
+        {renderNavItem("settings")}
         <button onClick={() => setShowShortcuts(true)} title="快捷键 (?)"
-          className="p-2 rounded-xl transition-colors"
+          className="flex items-center gap-2 px-2 py-1.5 rounded text-[12px] transition-colors"
           style={{ color: "var(--text-secondary)" }}>
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.6"
-            strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="9" /><path d="M9.2 9a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2.2-2.6 3.6" /><path d="M12 17.2h.01" />
-          </svg>
+          <span className="text-[9px] w-4 shrink-0 text-center" style={{ fontFamily: "var(--font-mono)" }}>?</span>
+          <span>快捷键</span>
         </button>
       </nav>
+
+      {/* 平板/移动：馆内导览抽屉（点击汉堡呼出） */}
+      {navDrawer && (
+        <div className="desk-drawer-mask" onClick={() => setNavDrawer(false)}>
+          <div className="desk-drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 pt-4 pb-2.5 border-b"
+              style={{ borderColor: "var(--panel-border)" }}>
+              <div>
+                <div className="tsm-heading text-base leading-none" style={{ color: "var(--accent)" }}>紬</div>
+                <div className="text-[9px] tracking-[0.3em] mt-1" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>TSUMUGI</div>
+              </div>
+              <button onClick={() => setNavDrawer(false)} title="关闭" className="text-sm px-1"
+                style={{ color: "var(--text-secondary)" }}>✕</button>
+            </div>
+            <div className="p-2.5 flex flex-col gap-1 overflow-y-auto h-full">
+              {renderNavItem("ask", { onClick: () => setNavDrawer(false) })}
+              <div className="px-2 mt-2 mb-1 text-[9px] tracking-[0.2em]" style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>馆室 ROOMS</div>
+              {sortedNavKeys.filter((k) => ROOM_META[k]).map((k) => renderNavItem(k, { onClick: () => setNavDrawer(false) }))}
+              <div className="px-2 mt-3 mb-1 text-[9px] tracking-[0.2em]" style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>工具 TOOLS</div>
+              {sortedNavKeys.filter((k) => TOOL_META[k]).map((k) => renderNavItem(k, { onClick: () => setNavDrawer(false) }))}
+              {renderNavItem("settings", { onClick: () => setNavDrawer(false) })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. 半透明侧栏（可拖拽调宽 + 中心收缩按钮）；独立于主内容，不随其滚动 */}
       <aside ref={sidebarRef} className="relative flex flex-col z-10 shrink-0"
@@ -1377,7 +1425,35 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       </aside>
 
       {/* 3. 中央工作区：唯一的主内容滚动容器（ADR 0028），其余固定 */}
+      {/* 3. 主工作区 + 顶部栏（ADR 0066：面包屑 + 全局检索入口 + Ctrl+K） */}
       <div className="flex-1 min-h-0 relative overflow-y-auto p-6 z-10" data-testid="main-content">
+        {/* 顶栏：mono 面包屑（房间 / 英文） + 全局检索 + 命令面板入口；移动端含汉堡 */}
+        <div className="sticky top-0 z-20 flex items-center gap-3 mb-5 -mt-6 -mx-6 px-6 py-3 border-b"
+          style={{ backgroundColor: "var(--bg)", borderColor: "var(--panel-border)" }}>
+          <button className="lg:hidden p-1.5 rounded" onClick={() => setNavDrawer(true)} title="馆内导览"
+            style={{ color: "var(--text-secondary)" }}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+          <span className="text-[10px] tracking-[0.2em] truncate"
+            style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+            {ROOM_META[section] ? `${ROOM_META[section].room} / ${ROOM_META[section].en}` : (NAV[section]?.label || section)}
+          </span>
+          <div className="flex-1" />
+          <button onClick={() => handleSection("ask")} title="全局检索"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] transition-colors"
+            style={{ color: "var(--text-secondary)" }}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></svg>
+            检索台
+          </button>
+          <button onClick={() => setCommandOpen(true)} title="命令面板 (Ctrl+K)"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] transition-colors"
+            style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[9px] px-1 py-px rounded" style={{ backgroundColor: "var(--surface-2)" }}>Ctrl K</span>
+            命令
+          </button>
+        </div>
 
         {section === "library" && (
           <div className="h-full flex flex-col min-h-0">
@@ -2322,6 +2398,21 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           </div>
         </div>
       )}
+
+      {/* 移动端：底部房间导航（≤768px 显示，ADR 0066） */}
+      <nav className="room-bottom-bar" data-testid="room-bottom-bar">
+        {ROOMS_ALL.map((k) => {
+          const active = section === k;
+          return (
+            <button key={k} onClick={() => handleSection(k)}
+              className="flex flex-col items-center gap-0.5 py-1.5 px-1"
+              style={{ color: active ? "var(--accent)" : "var(--text-secondary)" }}>
+              {NAV[k].icon}
+              <span className="text-[9px]">{ROOM_META[k].room}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
       ) : (
         <ShellC shellValue={shellConcept} onShellChange={changeShellConcept} setTheme={setTheme} />

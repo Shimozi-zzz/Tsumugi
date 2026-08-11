@@ -202,7 +202,7 @@ describe("视图切换 + 持久化 + 筛选联动（DesktopView）", () => {
   it("默认网格，切书架后写入 localStorage 并渲染书脊", async () => {
     mockFetch();
     const { unmount } = render(<DesktopView {...props} />);
-    fireEvent.click(screen.getByTitle("图书馆"));
+    fireEvent.click(screen.getByTitle("书库"));
     await waitFor(() => expect(screen.getByTitle("书架视图")).toBeTruthy());
     fireEvent.click(screen.getByTitle("书架视图"));
     expect(localStorage.getItem("tsumugi-lib-view")).toBe("shelf");
@@ -214,20 +214,20 @@ describe("视图切换 + 持久化 + 筛选联动（DesktopView）", () => {
   it("重挂载后从 localStorage 恢复书架视图", async () => {
     mockFetch();
     const first = render(<DesktopView {...props} />);
-    fireEvent.click(screen.getByTitle("图书馆"));
+    fireEvent.click(screen.getByTitle("书库"));
     await waitFor(() => screen.getByTitle("书架视图"));
     fireEvent.click(screen.getByTitle("书架视图"));
     first.unmount();
 
     render(<DesktopView {...props} />);
-    fireEvent.click(screen.getByTitle("图书馆"));
+    fireEvent.click(screen.getByTitle("书库"));
     await waitFor(() => expect(screen.getByTitle("辉夜大小姐")).toBeTruthy()); // 书脊直接渲染
   });
 
   it("书架视图下本地查找筛选仍生效", async () => {
     mockFetch();
     render(<DesktopView {...props} />);
-    fireEvent.click(screen.getByTitle("图书馆"));
+    fireEvent.click(screen.getByTitle("书库"));
     await waitFor(() => screen.getByTitle("书架视图"));
     fireEvent.click(screen.getByTitle("书架视图"));
     await waitFor(() => expect(screen.getByTitle("辉夜大小姐")).toBeTruthy());

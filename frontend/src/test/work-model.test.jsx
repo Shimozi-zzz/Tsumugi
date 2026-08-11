@@ -123,7 +123,7 @@ describe("图书馆按类型筛选（P1）", () => {
       theme="default" setTheme={() => {}}
       custom={{ accentHue: 0, density: "comfortable", radius: 16 }} updateCustom={() => {}}
       textOverlays={[]} updateTextOverlays={() => {}} />);
-    fireEvent.click(screen.getByTitle("图书馆"));
+    fireEvent.click(screen.getByTitle("书库"));
     await waitFor(() => expect(screen.getByText("全部类型")).toBeTruthy());
     // chips：动画 / Galgame
     fireEvent.click(screen.getByText("Galgame"));

@@ -611,6 +611,38 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
    ADR 0057 · 应用外壳空间结构（ADR 0059 起仅 classic + C，沿用编目抽屉配色/字体/编号）
    ========================================================================== */
 
+/* 馆内导览抽屉（平板/移动，ADR 0066 夜书房 Shell） */
+.desk-drawer-mask {
+  position: fixed; inset: 0; z-index: 45;
+  background-color: rgba(20, 14, 8, 0.4);
+  display: flex;
+}
+.desk-drawer {
+  width: 224px; max-width: 80vw; height: 100%;
+  background-color: var(--rail-bg);
+  border-right: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-float);
+  animation: var(--motion-open);
+  animation-name: drawer-in;
+}
+@keyframes drawer-in {
+  from { transform: translateX(-100%); }
+  to { transform: none; }
+}
+
+/* 移动端底部房间导航（≤768px；桌面默认隐藏） */
+.room-bottom-bar {
+  display: none;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background-color: var(--panel);
+  border-top: 1px solid var(--panel-border);
+}
+.room-bottom-bar button { flex: 1; min-width: 0; }
+@media (max-width: 768px) {
+  .room-bottom-bar { display: flex; }
+  [data-testid="main-content"] { padding-bottom: 64px; }
+}
+
 /* 外壳开关（浮动） */
 .shell-switcher { display: inline-flex; gap: 4px; flex-wrap: wrap; padding: 4px; border-radius: 999px;
   background: var(--panel); border: 1px solid var(--panel-border); box-shadow: var(--shadow-lg); }

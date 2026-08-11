@@ -35,7 +35,7 @@ const PROPS = {
 };
 
 async function openLibrary() {
-  fireEvent.click(screen.getByTitle("图书馆"));
+  fireEvent.click(screen.getByTitle("书库"));
   await waitFor(() => expect(screen.getByTitle("网格视图")).toBeTruthy());
   await waitFor(() => expect(screen.getByText("笔记甲")).toBeTruthy());
 }
@@ -115,5 +115,41 @@ describe("应用外壳布局（ADR 0028）", () => {
     expect(header.className).toContain("shrink-0");  // 顶栏不随内容伸缩/滚动
     const shell = screen.getByTestId("app-shell");
     expect(header.nextElementSibling).toBe(shell);   // 顶栏 + 工作区平级，工作区填满剩余高度
+  });
+});
+
+describe("馆内导览 Shell（ADR 0066 夜书房）", () => {
+  it("主导航为馆室列表：serif 馆室 + mono 编号，含检索台/管理室", async () => {
+    mockFetch();
+    render(<DesktopView {...PROPS} />);
+    await waitFor(() => expect(screen.getByTestId("main-content")).toBeTruthy());
+    const nav = screen.getByTestId("left-nav");
+    // 房间按钮：书库/记忆回廊/时光轴/人物档案/检索台/管理室
+    for (const label of ["书库", "记忆回廊", "时光轴", "人物档案", "检索台", "管理室"]) {
+      expect(nav.querySelector(`[title="${label}"]`)).toBeTruthy();
+    }
+    // 移动端底部房间导航存在（默认隐藏）
+    expect(screen.getByTestId("room-bottom-bar")).toBeTruthy();
+  });
+
+  it("顶栏：当前房间面包屑（serif 房间 / mono 英文）+ 全局检索入口 + Ctrl+K", async () => {
+    mockFetch();
+    render(<DesktopView {...PROPS} />);
+    await waitFor(() => expect(screen.getByTestId("main-content")).toBeTruthy());
+    expect(screen.getByText(/检索台 \/ Desk/)).toBeTruthy(); // 默认打开问答=检索台
+    expect(screen.getByTitle("全局检索")).toBeTruthy();       // 全局检索入口
+    expect(screen.getByTitle("命令面板 (Ctrl+K)")).toBeTruthy();
+  });
+
+  it("平板：汉堡呼出馆内导览抽屉，点击房间关闭并切换", async () => {
+    mockFetch();
+    render(<DesktopView {...PROPS} />);
+    await waitFor(() => expect(screen.getByTestId("main-content")).toBeTruthy());
+    fireEvent.click(screen.getByTitle("馆内导览"));
+    const drawer = document.querySelector(".desk-drawer");
+    expect(drawer).toBeTruthy();
+    fireEvent.click(drawer.querySelector('[title="书库"]'));
+    await waitFor(() => expect(screen.getByTitle("网格视图")).toBeTruthy());
+    expect(document.querySelector(".desk-drawer")).toBeNull(); // 抽屉已关闭
   });
 });

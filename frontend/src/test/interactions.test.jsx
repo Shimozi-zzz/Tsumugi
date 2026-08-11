@@ -37,7 +37,7 @@ const PROPS = {
 };
 
 async function openLibrary() {
-  fireEvent.click(screen.getByTitle("图书馆"));
+  fireEvent.click(screen.getByTitle("书库"));
   await waitFor(() => expect(screen.getByTitle("网格视图")).toBeTruthy());
   await waitFor(() => expect(screen.getByText("笔记甲")).toBeTruthy());
 }

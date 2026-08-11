@@ -57,7 +57,7 @@ describe("主从视图（Master-Detail）", () => {
   it("列表模式：点击左侧条目，右侧详情立即更新（属性表格/标签胶囊出现）", async () => {
     mockFetch();
     render(<DesktopView {...PROPS} />);
-    fireEvent.click(screen.getByTitle("图书馆"));
+    fireEvent.click(screen.getByTitle("书库"));
     await waitFor(() => screen.getByTitle("分组列表（主从视图）"));
     fireEvent.click(screen.getByTitle("分组列表（主从视图）"));
     // 左侧状态分组出现
@@ -80,7 +80,7 @@ describe("主从视图（Master-Detail）", () => {
   it("切换条目，右侧详情随之切换", async () => {
     mockFetch();
     render(<DesktopView {...PROPS} />);
-    fireEvent.click(screen.getByTitle("图书馆"));
+    fireEvent.click(screen.getByTitle("书库"));
     await waitFor(() => screen.getByTitle("分组列表（主从视图）"));
     fireEvent.click(screen.getByTitle("分组列表（主从视图）"));
     await waitFor(() => screen.getByText("在看"));
