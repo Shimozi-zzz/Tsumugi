@@ -168,7 +168,10 @@ export default function ItemDetailPanel({
 
   const data = externalDetail || detail;
   const cover = data.image_url || filePathToUrl(data?.file_path) || "";
-  const rows = itemInfoRows(data);
+  // Phase 3-3：编目去重——数据源/大众评分/我的评分已由「作品本身」身份行与「我与它」承担，
+  // 不在此世界的 quiet catalog 中重复（信息不丢失，仅消除三处重复）。
+  const WORLD_CATALOG_EXCLUDE = new Set(["数据源", "大众评分", "我的评分"]);
+  const rows = itemInfoRows(data).filter((r) => !WORLD_CATALOG_EXCLUDE.has(r.label));
   const tags = data.tags || [];
 
   // Phase 3-2-C-1：相遇纪事事件（仅已收藏；由 buildEncounterEvents 唯一构造，不重复推导）
