@@ -1735,6 +1735,14 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
             {settingsTab === "appearance" && (
               <div className="space-y-4">
                 <div className="desk-askbar p-5">
+                  <h3 className="text-sm font-medium mb-1">应用外壳</h3>
+                  <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
+                    图书馆的空间结构（经典三栏 / C 非对称档案室）
+                  </p>
+                  <ShellSwitcher value={shellConcept} onChange={changeShellConcept} />
+                </div>
+
+                <div className="desk-askbar p-5">
                   <h3 className="text-sm font-medium mb-1">大风格主题</h3>
                   <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
                     整体视觉语言（版式/材质/信息呈现）。当前注册「编目抽屉·索书卡」，
@@ -2319,12 +2327,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       )}
     </div>
       ) : (
-        <ShellC />
+        <ShellC shellValue={shellConcept} onShellChange={changeShellConcept} />
       )}
-      {/* ADR 0057：外壳空间结构探索浮动开关 */}
-      <div className="fixed bottom-3 right-3 z-50">
-        <ShellSwitcher value={shellConcept} onChange={changeShellConcept} />
-      </div>
     </>
   );
 }

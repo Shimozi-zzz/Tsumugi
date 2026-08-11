@@ -1,13 +1,16 @@
-// 应用外壳 · 空间结构（ADR 0057/0059）
-// 本轮定案（ADR 0059）：仅保留「经典三栏」与「C 非对称档案室」两个外壳；
-// A 卡片抽屉、B 书脊索引已移除。沿用编目抽屉配色/字体/编号（ADR 0056）。
-// C：不同页面房间格局不同（宽度/偏移/错落非对称）。真实数据渲染。
+// 应用外壳 · 空间结构（ADR 0057/0059/0064）
+// 本轮定案（ADR 0059）：仅保留「经典三栏」与「C 非对称档案室」两个外壳。
+// 2026-08-11（ADR 0064）：C 非对称档案室**交互化**——书库点卡开详情弹层、
+// 检索台结果可点开书评/记忆、回廊/人物馆/关系厅接线；外壳切换入口移入
+// 设置（管理室），移除右下角浮动开关。沿用编目抽屉配色/字体/编号（ADR 0056）。
 import React, { useEffect, useState } from "react";
 import { fetchItems, searchMy, filePathToUrl } from "../api.js";
 import ArchiveCard from "./ArchiveCard.jsx";
 import MemoryGallery from "./MemoryGallery.jsx";
 import CharacterWall from "./CharacterWall.jsx";
 import VoiceGraphView from "./VoiceGraphView.jsx";
+import ItemDetailPanel from "./ItemDetailPanel.jsx";
+import MemoryReviewModal from "./MemoryReviewModal.jsx";
 
 export const SHELL_CONCEPTS = [
   { key: "classic", label: "经典三栏" },
@@ -31,8 +34,8 @@ function coverOf(it) {
   return it.image_url || null;
 }
 
-/* ---------- 真实内容渲染器（三外壳共用） ---------- */
-function ShellContent({ section }) {
+/* ---------- 房间内容渲染器（ShellC 共用；交互经回调上抛给 ShellC） ---------- */
+function ShellContent({ section, onOpenWork, onOpenReview, voiceFocus, onOpenVoice, shellValue, onShellChange }) {
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
   const [my, setMy] = useState(null);
@@ -48,7 +51,7 @@ function ShellContent({ section }) {
     return (
       <div className="shell-grid">
         {items.map((it) => (
-          <ArchiveCard key={it.id} it={it} cover={coverOf(it)} onOpen={() => {}} />
+          <ArchiveCard key={it.id} it={it} cover={coverOf(it)} onOpen={() => onOpenWork(it.id)} />
         ))}
       </div>
     );
@@ -63,28 +66,57 @@ function ShellContent({ section }) {
         {my && (
           <div className="shell-ask-results">
             <p className="catalog-no">{my.works.length} 作品 · {my.reviews.length} 书评 · {my.memories.length} 记忆</p>
-            {my.works.slice(0, 12).map((w) => <div key={w.id} className="shell-ask-row">{w.title}</div>)}
-            {my.memories.slice(0, 6).map((m) => <div key={m.id} className="shell-ask-row muted">{m.summary}</div>)}
+            {my.works.slice(0, 12).map((w) => (
+              <button key={w.id} className="shell-ask-row" title="打开这部作品"
+                onClick={() => onOpenWork(w.id)}>{w.title}</button>
+            ))}
+            {my.reviews.slice(0, 6).map((r) => (
+              <button key={r.id} className="shell-ask-row" title="打开这篇书评"
+                onClick={() => onOpenReview(r.item_id, r.id, null)}>{r.title || r.content}</button>
+            ))}
+            {my.memories.slice(0, 6).map((m) => (
+              <button key={m.id} className="shell-ask-row muted" title="打开这条记忆"
+                onClick={() => onOpenReview(m.item_id, m.source_ref, m.source_type === "review" ? null : m)}>{m.summary}</button>
+            ))}
           </div>
         )}
       </div>
     );
   }
-  if (section === "gallery") return <MemoryGallery />;
-  if (section === "characters") return <CharacterWall />;
-  if (section === "voice") return <VoiceGraphView />;
+  if (section === "gallery") return <MemoryGallery onOpenWork={onOpenWork} />;
+  if (section === "characters") return <CharacterWall onOpenWork={onOpenWork} onOpenVoice={onOpenVoice} />;
+  if (section === "voice") return <VoiceGraphView focusActor={voiceFocus} onOpenWork={onOpenWork} />;
+  // 管理室：真实设置入口（ADR 0064：外壳切换入设置）
   return (
     <div className="shell-settings">
       <h2 className="tsm-heading" style={{ fontSize: 20 }}>管理室</h2>
       <p className="catalog-no">设置 · 数据 · 备份</p>
-      <p>（探索版仅示意，完整设置见经典三栏）</p>
+      <div className="mt-4 space-y-4">
+        <div className="desk-askbar p-5">
+          <h3 className="text-sm font-medium mb-1">应用外壳</h3>
+          <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
+            图书馆的空间结构（经典三栏 / C 非对称档案室）
+          </p>
+          <ShellSwitcher value={shellValue} onChange={onShellChange} />
+        </div>
+        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          数据管理（导入 / 导出 / 备份）请在「经典三栏」外壳的管理室完成。
+        </p>
+      </div>
     </div>
   );
 }
 
 /* ================= C：非对称档案室 ================= */
-export function ShellC() {
+export function ShellC({ shellValue = "c", onShellChange = () => {} }) {
   const [section, setSection] = useState("library");
+  const [detailId, setDetailId] = useState(null);   // 详情弹层
+  const [voiceFocus, setVoiceFocus] = useState(null);
+  const [reviewModal, setReviewModal] = useState(null); // { itemId, sourceRef, memory }
+
+  const openWork = (id) => setDetailId(id);
+  const openReview = (itemId, sourceRef, memory) => setReviewModal({ itemId, sourceRef, memory });
+
   return (
     <div className="shell-c" data-shell="c">
       <nav className="shell-c-rail">
@@ -98,8 +130,40 @@ export function ShellC() {
         ))}
       </nav>
       <div className="shell-c-room" data-room={section}>
-        <ShellContent section={section} />
+        <ShellContent section={section}
+          onOpenWork={openWork} onOpenReview={openReview}
+          voiceFocus={voiceFocus}
+          onOpenVoice={(a) => { setVoiceFocus(a); setSection("voice"); }}
+          shellValue={shellValue} onShellChange={onShellChange} />
       </div>
+
+      {/* 作品详情弹层（点书库卡片 / 回廊 / 人物馆 / 关系厅 → 打开作品档案） */}
+      {detailId != null && (
+        <div className="fixed inset-0 z-50 overflow-y-auto"
+          style={{ backgroundColor: "rgba(20, 14, 8, 0.45)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setDetailId(null); }}>
+          <div className="min-h-full flex justify-center p-4 sm:p-8">
+            <div className="w-full max-w-4xl my-auto"
+              style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-lg)" }}>
+              <div className="flex items-center justify-between px-5 py-3 border-b"
+                style={{ borderColor: "var(--panel-border)" }}>
+                <span className="tsm-heading text-sm" style={{ color: "var(--text)" }}>作品档案</span>
+                <button onClick={() => setDetailId(null)} title="关闭" className="text-sm px-1"
+                  style={{ color: "var(--text-secondary)" }}>✕</button>
+              </div>
+              <div className="p-5">
+                <ItemDetailPanel itemId={detailId} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 书评 / 记忆只读弹层（检索台命中点开） */}
+      {reviewModal && (
+        <MemoryReviewModal itemId={reviewModal.itemId} sourceRef={reviewModal.sourceRef}
+          memory={reviewModal.memory} onClose={() => setReviewModal(null)} />
+      )}
     </div>
   );
 }
