@@ -84,6 +84,57 @@ class TestSetCollection:
             collections.set_collection(it.id, db=db, status="不存在的状态")
 
 
+class TestCompletionMilestone:
+    """Phase D（ADR 0062）：状态迁移到"看完"自动生成 milestone Memory。"""
+
+    def _milestones(self, db):
+        return db.query(Memory).filter(Memory.source_type == "milestone").all()
+
+    def test_transition_to_finished_creates_milestone(self, db):
+        it = _ext_item(db, title="魔法少女小圆")
+        col = collections.set_collection(it.id, db=db, status="看完")
+        assert col.status == "看完"
+        mems = self._milestones(db)
+        assert len(mems) == 1
+        m = mems[0]
+        assert m.source_type == "milestone"
+        assert m.source_ref is None
+        assert m.item_id == it.id
+        assert m.summary == "这一天，我把《魔法少女小圆》看完了"
+        assert m.occurred_at is not None  # 实际完成时间
+
+    def test_same_finished_ressave_is_idempotent(self, db):
+        it = _ext_item(db)
+        collections.set_collection(it.id, db=db, status="看完")
+        # 同一次"看完"再保存：不重复生成
+        collections.set_collection(it.id, db=db, status="看完", favorite=True)
+        assert len(self._milestones(db)) == 1
+
+    def test_finished_undone_finished_again_is_new_completion(self, db):
+        it = _ext_item(db)
+        collections.set_collection(it.id, db=db, status="看完")
+        collections.set_collection(it.id, db=db, status="搁置")   # 取消完成，无新记忆
+        collections.set_collection(it.id, db=db, status="看完")   # 再次看完 = 新完成
+        assert len(self._milestones(db)) == 2
+
+    def test_non_finished_status_does_not_create(self, db):
+        it = _ext_item(db)
+        collections.set_collection(it.id, db=db, status="在看")
+        collections.set_collection(it.id, db=db, status="", favorite=True)  # 清空/仅喜欢
+        assert self._milestones(db) == []
+
+    def test_backfill_does_not_create_milestone(self, db):
+        it = _ext_item(db)
+        rev = Review(item_id=it.id, title="从 Bangumi 导入", content="",
+                     status="看完", source="bangumi_collection")
+        db.add(rev)
+        db.commit()
+        collections.backfill_collections(db.bind)
+        # 历史回填迁移状态，但不为历史"看完"批量造完成时刻 Memory
+        assert db.get(Collection, it.id).status == "看完"
+        assert self._milestones(db) == []
+
+
 class TestApi:
     @pytest.fixture
     def client(self, db):
@@ -110,6 +161,14 @@ class TestApi:
         d = client.get(f"/api/items/{it.id}/detail").json()
         assert d["collection_status"] == "看完"
         assert d["collected_at"] is not None
+
+    def test_patch_finished_creates_milestone_via_api(self, client, db):
+        it = _ext_item(db)
+        r = client.patch(f"/api/items/{it.id}/collection", json={"status": "看完"})
+        assert r.status_code == 200
+        mems = db.query(Memory).filter(Memory.source_type == "milestone").all()
+        assert len(mems) == 1
+        assert mems[0].summary == f"这一天，我把《{it.title}》看完了"
 
     def test_list_collections_map(self, client, db):
         a = _ext_item(db, title="A")

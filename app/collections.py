@@ -33,7 +33,12 @@ def set_collection(
     status: Optional[str] = None,
     favorite: Optional[int] = None,
 ) -> Collection:
-    """更新收藏状态/是否喜欢（status 需在枚举内；None 表示不变，空串表示清除）。"""
+    """更新收藏状态/是否喜欢（status 需在枚举内；None 表示不变，空串表示清除）。
+
+    Phase D（ADR 0062）：状态**迁移到"看完"**时自动生成 milestone Memory——
+    真实完成事件（未看完 → 看完）才会触发，同一次"看完"重复保存幂等（不重复）；
+    看完 → 其他 → 再次看完视为新的完成事件，可再生成。
+    """
     item = db.get(Item, item_id)
     if item is None:
         raise ValueError(f"item {item_id} 不存在")
@@ -42,12 +47,37 @@ def set_collection(
         s = status.strip() if isinstance(status, str) else status
         if s and s not in COLLECTION_STATUSES:
             raise ValueError(f"status 必须是 {COLLECTION_STATUSES} 之一")
+        old_status = col.status
         col.status = s or None
+        if s == "看完" and old_status != "看完":
+            create_completion_memory(item, db)
     if favorite is not None:
         col.favorite = 1 if favorite else 0
     db.commit()
     db.refresh(col)
     return col
+
+
+def create_completion_memory(item: Item, db: Session) -> Memory:
+    """完成时刻 → milestone Memory（"这一天，我把《{title}》看完了"）。
+
+    Phase D（ADR 0062）：用户把作品状态改为"看完"时自动生成，无需写任何文字。
+    - 与收藏时刻（collection Memory）同款轻量模式：**不写向量**——完成时刻
+      不被可选 embedding 阻塞（Core 无 AI 也完整）；若需参与个人语义检索，
+      由启动时 backfill_memory_vectors 幂等补向量（source_type=memory，ADR 0051）；
+    - source_ref=NULL（无主记录，同 text/milestone 直接记忆）；
+    - 允许被删除（delete_direct_memory 允许 milestone 类型）。
+    """
+    mem = Memory(
+        item_id=item.id,
+        source_type="milestone",
+        source_ref=None,
+        occurred_at=datetime.now(),
+        summary=f"这一天，我把《{item.title}》看完了",
+    )
+    db.add(mem)
+    db.flush()
+    return mem
 
 
 def ensure_collection_memory(item: Item, db: Session) -> Memory:
