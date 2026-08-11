@@ -465,7 +465,7 @@ body {
 .shrine.shrine-skip .shrine-item { transition: none !important; }
 
 /* P5 / ADR 0049 真书架：取书浮起（hover）*/
-.shelf-book { transition: transform .18s ease, box-shadow .18s ease; }
+.shelf-book { transition: transform .3s ease, box-shadow .3s ease; }
 .shelf-book:hover { transform: translateY(-5px); }
 
 /* 本轮（ADR 0053）：关键标题用衬线（排版自信升级）；字号/字重在具体组件 inline 控制 */
@@ -484,7 +484,7 @@ body {
 .archive-card {
   background: var(--card-bg);
   border: 1px solid var(--panel-border);
-  border-radius: 4px;                       /* 容器近直角（封面在内部保留稍圆角） */
+  border-radius: 6px;                       /* 主表面近直角（目录卡规格：6px） */
   box-shadow: var(--shadow-sm);
   padding: 6px;
   cursor: pointer;
@@ -498,7 +498,7 @@ body {
 .archive-card-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .archive-card-cover {
   position: relative;
-  border-radius: 6px;          /* 封面=馆藏实物，比容器稍圆 */
+  border-radius: 4px;          /* 内容对象（封面）保留柔和 4px */
   overflow: hidden;
   background: var(--card-thumb);
 }
