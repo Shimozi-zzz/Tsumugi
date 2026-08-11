@@ -24,6 +24,7 @@ export default function MemoryGallery({ onOpenWork, className = "" }) {
   const [error, setError] = useState("");
   const [year, setYear] = useState(null);   // null = 全部年份
   const [itemId, setItemId] = useState(null); // null = 全部作品
+  const [q, setQ] = useState("");            // 文本筛（summary 子串，与后端 ?search= 字段一致）
 
   useEffect(() => {
     let cancelled = false;
@@ -55,8 +56,11 @@ export default function MemoryGallery({ onOpenWork, className = "" }) {
   const filtered = useMemo(() => sorted.filter((m) => {
     if (year && yearOf(m.occurred_at) !== year) return false;
     if (itemId != null && m.item_id !== itemId) return false;
+    // Phase D（ADR 0063）：文本筛复用后端 /memories?search= 的字段（summary 子串，大小写不敏感）
+    const kw = q.trim().toLowerCase();
+    if (kw && !(m.summary || "").toLowerCase().includes(kw)) return false;
     return true;
-  }), [sorted, year, itemId]);
+  }), [sorted, year, itemId, q]);
 
   // 按年份分组（年过滤激活时不再重复展示年头）
   const groups = useMemo(() => {
@@ -81,9 +85,12 @@ export default function MemoryGallery({ onOpenWork, className = "" }) {
       </div>
     );
   } else if (filtered.length === 0) {
+    const kw = q.trim();
     body = (
       <div className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-        {year ? `还没有 ${year} 年的记忆。` : "这个作品还没有留下记忆。"}
+        {kw
+          ? `没有找到包含「${kw}」的记忆。`
+          : (year ? `还没有 ${year} 年的记忆。` : "这个作品还没有留下记忆。")}
       </div>
     );
   } else {
@@ -126,18 +133,29 @@ export default function MemoryGallery({ onOpenWork, className = "" }) {
         <div>
           <h2 className="tsm-heading leading-snug" style={{ color: "var(--text)", fontSize: 20, fontWeight: 600 }}>记忆回廊</h2>
           <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-            这座图书馆记得你做过什么（按年份 / 作品筛选）
+            这座图书馆记得你做过什么（按年份 / 作品 / 文本筛选）
           </div>
         </div>
-        {/* 作品筛选 */}
-        {works.length > 0 && (
-          <select value={itemId ?? ""} onChange={(e) => setItemId(e.target.value ? Number(e.target.value) : null)}
-            className="rounded-xl px-3 py-1.5 text-xs outline-none max-w-[240px]"
-            style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }}>
-            <option value="">全部作品</option>
-            {works.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
-          </select>
-        )}
+        {/* 文本筛 + 作品筛选 */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <input value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder="搜索记忆内容…"
+            aria-label="搜索记忆"
+            className="rounded-xl px-3 py-1.5 text-xs outline-none w-44"
+            style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }} />
+          {q && (
+            <button onClick={() => setQ("")} title="清除搜索"
+              className="text-[11px] px-1" style={{ color: "var(--text-secondary)" }}>✕</button>
+          )}
+          {works.length > 0 && (
+            <select value={itemId ?? ""} onChange={(e) => setItemId(e.target.value ? Number(e.target.value) : null)}
+              className="rounded-xl px-3 py-1.5 text-xs outline-none max-w-[240px]"
+              style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }}>
+              <option value="">全部作品</option>
+              {works.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* 年份筛选 */}

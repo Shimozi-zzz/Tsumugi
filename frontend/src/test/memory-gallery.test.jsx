@@ -88,6 +88,27 @@ describe("记忆回廊页面", () => {
     expect(screen.queryByText("从 Bangumi 导入")).toBeNull();
   });
 
+  it("Phase D：文本筛（summary 子串，与后端 ?search= 字段一致）；清除恢复", async () => {
+    mockFetch();
+    render(<MemoryGallery onOpenWork={() => {}} />);
+    await waitFor(() => expect(screen.getByText("神作")).toBeTruthy());
+    const input = screen.getByLabelText("搜索记忆");
+    fireEvent.change(input, { target: { value: "神作" } });
+    await waitFor(() => expect(screen.getByText("神作")).toBeTruthy());
+    expect(screen.queryByText("第一次看就哭")).toBeNull();
+    // 清除 → 恢复全部
+    fireEvent.click(screen.getByTitle("清除搜索"));
+    await waitFor(() => expect(screen.getByText("第一次看就哭")).toBeTruthy());
+  });
+
+  it("Phase D：文本筛无命中 → 提示没有找到包含", async () => {
+    mockFetch();
+    render(<MemoryGallery onOpenWork={() => {}} />);
+    await waitFor(() => expect(screen.getByText("神作")).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("搜索记忆"), { target: { value: "不存在的词" } });
+    await waitFor(() => expect(screen.getByText(/没有找到包含「不存在的词」的记忆/)).toBeTruthy());
+  });
+
   it("空状态：无任何记忆时给引导", async () => {
     mockFetch([]);
     render(<MemoryGallery onOpenWork={() => {}} />);
