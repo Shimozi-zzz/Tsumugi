@@ -18,7 +18,7 @@ function md(iso) {
   return m ? `${m[2]}-${m[3]}` : s.slice(5, 10);
 }
 
-export default function MemoryGallery({ onOpenWork, className = "" }) {
+export default function MemoryGallery({ onOpenWork, className = "", showHeader = true }) {
   const [memories, setMemories] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -131,10 +131,14 @@ export default function MemoryGallery({ onOpenWork, className = "" }) {
     <div className={className}>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
-          <h2 className="tsm-heading leading-snug" style={{ color: "var(--text)", fontSize: 20, fontWeight: 600 }}>记忆回廊</h2>
-          <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-            这座图书馆记得你做过什么（按年份 / 作品 / 文本筛选）
-          </div>
+          {showHeader && (
+            <>
+              <h2 className="tsm-heading leading-snug" style={{ color: "var(--text)", fontSize: 20, fontWeight: 600 }}>记忆回廊</h2>
+              <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
+                这座图书馆记得你做过什么（按年份 / 作品 / 文本筛选）
+              </div>
+            </>
+          )}
         </div>
         {/* 文本筛 + 作品筛选 */}
         <div className="flex items-center gap-2 flex-wrap">

@@ -164,6 +164,6 @@ describe("主导航入口", () => {
     const navBtn = screen.getByTitle("记忆回廊");
     expect(navBtn).toBeTruthy();
     fireEvent.click(navBtn);
-    await waitFor(() => expect(screen.getByText(/这座图书馆记得你做过什么/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("GALLERY")).toBeTruthy()); // 统一页面头 mono 路径
   });
 });

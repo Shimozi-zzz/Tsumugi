@@ -32,7 +32,7 @@ import MemoryGallery from "./MemoryGallery.jsx";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
 import ArchiveCard from "./ArchiveCard.jsx";
 import { ShellC, ShellSwitcher, parseShell } from "./AppShells.jsx";
-import { WORK_TYPES, WORK_TYPE_LABEL } from "./ui.jsx";
+import { WORK_TYPES, WORK_TYPE_LABEL, PageHeader } from "./ui.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
 import BangumiPanel from "./BangumiPanel.jsx";
@@ -1457,6 +1457,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
 
         {section === "library" && (
           <div className="h-full flex flex-col min-h-0">
+            <PageHeader room="书库" path="LIBRARY" />
             <div className="flex items-center justify-between gap-3 mb-5 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="text-[15px] font-medium tracking-wide" style={{ color: "var(--text)" }}>
@@ -1728,19 +1729,14 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
 
         {section === "inspector" && (
           <div className="max-w-3xl mx-auto mt-6">
+            <PageHeader room="分析" path="INSPECTOR" />
             <InspectorPanel />
           </div>
         )}
 
         {section === "characters" && (
           <div className="max-w-4xl mx-auto mt-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-[15px] font-medium" style={{ color: "var(--text)" }}>角色墙</h2>
-                <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                  已收藏作品里登场的角色（点击角色看关联作品，点作品回详情）
-                </div>
-              </div>
+            <PageHeader room="人物档案" path="ARCHIVE">
               <div className="flex items-center gap-2">
                 <button onClick={() => { setVoiceFocus(null); setSection("voice"); }}
                   className="px-3 py-1.5 rounded-xl text-xs"
@@ -1751,7 +1747,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   className="px-3 py-1.5 rounded-xl text-xs"
                   style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>刷新</button>
               </div>
-            </div>
+            </PageHeader>
             <CharacterWall refreshKey={charRefreshKey} onOpenWork={openWorkDetail}
               onOpenVoice={(a) => { setVoiceFocus(a); setSection("voice"); }} />
           </div>
@@ -1759,14 +1755,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
 
         {section === "voice" && (
           <div className="max-w-5xl mx-auto mt-6">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="text-[15px] font-medium" style={{ color: "var(--text)" }}>声优关系图谱</h2>
-                <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                  作品 · 角色 · 声优 关系网络（点声优看完整配音列表，点作品/角色回详情）
-                </div>
-              </div>
-            </div>
+            <PageHeader room="声优关系图谱" path="人物档案 ▸ 声优图谱" />
             <VoiceGraphView focusActor={voiceFocus}
               onOpenWork={(itemId) => { setSection("library"); setLibView("list"); setDetailBrowseId(itemId); }} />
           </div>
@@ -1774,26 +1763,22 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
 
         {section === "summary" && (
           <div className="max-w-4xl mx-auto mt-6">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="text-[15px] font-medium" style={{ color: "var(--text)" }}>年度总结</h2>
-                <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                  书评 × 收藏 的活跃度热力图（GitHub 贡献图风格）
-                </div>
-              </div>
-            </div>
+            <PageHeader room="时光轴" path="TIMELINE · 年度总结" />
             <YearlySummary />
           </div>
         )}
 
         {section === "memories" && (
           <div className="max-w-3xl mx-auto mt-6">
-            <MemoryGallery onOpenWork={(itemId) => { setSection("library"); setLibView("list"); setDetailBrowseId(itemId); }} />
+            <PageHeader room="记忆回廊" path="GALLERY" />
+            <MemoryGallery showHeader={false}
+              onOpenWork={(itemId) => { setSection("library"); setLibView("list"); setDetailBrowseId(itemId); }} />
           </div>
         )}
 
         {section === "settings" && (
           <div className="max-w-2xl mx-auto mt-6">
+            <PageHeader room="管理室" path="OFFICE" />
             {/* 分类 tab 在最上方 */}
             <div className="flex gap-1 mb-4 p-1 rounded-2xl"
               style={{ backgroundColor: "rgba(255,255,255,0.06)", border: "1px solid var(--panel-border)" }}>
