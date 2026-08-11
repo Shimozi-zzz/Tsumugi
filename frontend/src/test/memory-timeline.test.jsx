@@ -129,18 +129,19 @@ describe("MemoryTimeline 时间轴", () => {
 });
 
 describe("ItemDetailPanel 双栏结构（Phase B / ADR 0042）", () => {
-  it("渲染「这个世界」与「我的记录」两个区域", async () => {
+  it("渲染「这个世界」与「我与它」两个区域", async () => {
     mockFetch();
     render(<ItemDetailPanel itemId={1} />);
     await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
     expect(screen.getByText("这个世界")).toBeTruthy();
-    expect(screen.getByText("我的记录")).toBeTruthy();
+    expect(screen.getByText("我与它")).toBeTruthy();
     // 详情标题带编目号（ADR 0056）
     expect(screen.getByText("NO. 0001")).toBeTruthy();
     // 这个世界内容仍在（简介段落 + 标签）
     expect(screen.getAllByText(/简介/).length).toBeGreaterThan(0);
     expect(screen.getByText("科幻")).toBeTruthy();
-    // 我的记录区包含时间轴（记忆条目渲染）
+    // 我与它包含 书评入口 + 我的记忆区包含时间轴（记忆条目渲染）
+    expect(screen.getByTitle("打开书评工作室")).toBeTruthy();
     await waitFor(() => expect(screen.getByText("神作")).toBeTruthy());
   });
 
@@ -153,24 +154,24 @@ describe("ItemDetailPanel 双栏结构（Phase B / ADR 0042）", () => {
 });
 
 describe("Phase 3-1 统一 Work Detail（外部未收藏模式）", () => {
-  it("外部详情：收藏入库 + 这个世界，无我的记录/composer/时间轴", () => {
+  it("外部详情：收藏入库 + 这个世界，无我与它/composer/时间轴", () => {
     const ext = { source: "bangumi", title: "外部作品", external_id: "x1", description: "外部简介", rating: 8, tags: ["热血"], characters: [] };
     render(<ItemDetailPanel externalDetail={ext} onSaveDetail={() => {}} />);
     expect(screen.getByText("外部作品")).toBeTruthy();
     expect(screen.getByText("收藏入库")).toBeTruthy();
     expect(screen.getByText("这个世界")).toBeTruthy();
-    expect(screen.queryByText("我的记录")).toBeNull();
+    expect(screen.queryByText("我与它")).toBeNull();
     expect(screen.queryByText("✓ 完成了")).toBeNull();
     expect(screen.queryByText("书评")).toBeNull();
   });
 
-  it("已收藏模式：传安利卡/刷新回调时渲染对应按钮 + 我的记录", async () => {
+  it("已收藏模式：传安利卡/刷新回调时渲染对应按钮 + 我与它", async () => {
     mockFetch();
     render(<ItemDetailPanel itemId={1} onShareDetail={() => {}} onRefreshDetail={() => {}} />);
     await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
     expect(screen.getByText("生成安利卡")).toBeTruthy();
     expect(screen.getByText("刷新资料")).toBeTruthy();
-    expect(screen.getByText("我的记录")).toBeTruthy();
+    expect(screen.getByText("我与它")).toBeTruthy();
   });
 });
 

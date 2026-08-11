@@ -71,7 +71,7 @@ describe("ItemDetailPanel 统一 Work Detail（Phase 3-1 迁移自 ItemDetailMod
     expect(screen.getByText("收藏入库")).toBeTruthy();
   });
 
-  it("已收藏（saved）模式：进入我的记录，不显示收藏入库", async () => {
+  it("已收藏（saved）模式：进入我与它，不显示收藏入库", async () => {
     global.fetch = vi.fn((url) => {
       const u = String(url);
       if (u.includes("/detail")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: "X", source: "bangumi", characters: [], tags: [], description: "" }) });
@@ -80,7 +80,7 @@ describe("ItemDetailPanel 统一 Work Detail（Phase 3-1 迁移自 ItemDetailMod
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
     });
     render(<ItemDetailPanel itemId={1} />);
-    await waitFor(() => expect(screen.getByText("我的记录")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("我与它")).toBeTruthy());
     expect(screen.queryByText("收藏入库")).toBeNull();
   });
 

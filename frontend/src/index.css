@@ -668,6 +668,20 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 }
 .wd-actions { margin-top: var(--sp-5); display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* Work Detail 我与它（Phase 3-2-B）：关系信息层，数据优先、操作最后，非后台表单 */
+.wd-relation { margin-top: var(--sp-2); }
+.wd-relation-row {
+  display: flex; align-items: baseline; gap: 12px; padding: 7px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 45%, transparent);
+}
+.wd-relation-row .wd-catalog-label { width: 76px; }
+.wd-relation-value { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; flex-wrap: wrap; }
+.wd-status {
+  font-family: var(--font-heading); font-size: 14px; font-weight: 500;
+  letter-spacing: 0.02em; color: var(--ink-0);
+}
+.wd-hint { font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); }
+
 /* 书架分区（Phase 2-4 / ADR 0071）：状态=书架章节标题，serif + hairline + mono 册数 */
 .status-shelf-name {
   font-family: var(--font-heading); font-size: 14px; font-weight: 600;

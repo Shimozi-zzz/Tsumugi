@@ -37,7 +37,7 @@ function ambientAlpha() {
 export default function ItemDetailPanel({
   itemId, className = "",
   externalDetail = null, refreshKey = 0,
-  onSaveDetail, onShareDetail, onRefreshDetail,
+  onSaveDetail, onShareDetail, onRefreshDetail, onOpenReview,
 }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -257,48 +257,91 @@ export default function ItemDetailPanel({
           </div>
         )}
 
-        {/* 我的记录：我如何理解它（仅已收藏；外部未收藏无我的记录） */}
+        {/* 我与它（Phase 3-2-B）：我与这部作品的关系——当前状态/态度/评价/书评/带回书架。
+            数据优先、关系其次、操作最后；不构成后台表单。 */}
         {detail && (
-        <div className="mt-7 pt-5 border-t" style={{ borderColor: "var(--panel-border)" }}>
-          <div className="mb-3 flex items-baseline gap-2">
-            <span className="text-[11px] tracking-wider" style={{ color: "var(--accent)" }}>我的记录</span>
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>· 我如何理解它</span>
+        <>
+        <section className="mt-8 pt-6 border-t" style={{ borderColor: "var(--panel-border)" }}>
+          <div className="flex items-baseline gap-3">
+            <h3 className="wd-chapter-title">我与它</h3>
+            <span className="wd-meta" style={{ fontSize: 10, letterSpacing: "0.2em" }}>MY RELATION</span>
           </div>
-          {detail.source !== "local" && (
-            <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <select value={colStatus} onChange={(e) => { setColStatus(e.target.value); patchCollection({ status: e.target.value }); }}
-                disabled={colSaving} title="收藏状态（可手动修正）"
-                className="rounded-lg px-2 py-1 text-[11px] outline-none"
-                style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }}>
-                <option value="">未标记</option>
-                {COLLECTION_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <button onClick={() => patchCollection({ favorite: !favorite })} disabled={colSaving}
-                title="是否喜欢"
-                className="px-2.5 py-1 rounded-full text-[11px] transition-colors"
-                style={{ backgroundColor: favorite ? "var(--accent)" : "var(--accent-soft)",
-                  color: favorite ? "#fff" : "var(--accent)" }}>
-                {favorite ? "♡ 喜欢" : "♡ 标记喜欢"}
-              </button>
+          <div className="wd-chapter-rule" />
+          {detail.source !== "local" ? (
+            <div className="wd-relation">
+              <div className="wd-relation-row">
+                <span className="wd-catalog-label">当前状态</span>
+                <div className="wd-relation-value">
+                  <span className="wd-status">{colStatus || "未收藏"}</span>
+                  <select value={colStatus} onChange={(e) => { setColStatus(e.target.value); patchCollection({ status: e.target.value }); }}
+                    disabled={colSaving} title="收藏状态（可手动修正）"
+                    className="px-2 py-1 text-[11px] outline-none"
+                    style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)", borderRadius: "var(--radius-control)" }}>
+                    <option value="">未收藏</option>
+                    {COLLECTION_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="wd-relation-row">
+                <span className="wd-catalog-label">我的态度</span>
+                <div className="wd-relation-value">
+                  <button onClick={() => patchCollection({ favorite: !favorite })} disabled={colSaving}
+                    title="是否喜欢"
+                    className="px-2.5 py-1 text-[11px]"
+                    style={{ color: favorite ? "var(--accent)" : "var(--text-secondary)",
+                      backgroundColor: favorite ? "var(--accent-soft)" : "transparent",
+                      borderRadius: "var(--radius-control)" }}>
+                    {favorite ? "♡ 喜欢" : "♡ 标记喜欢"}
+                  </button>
+                </div>
+              </div>
+              {detail.my_rating != null && (
+                <div className="wd-relation-row">
+                  <span className="wd-catalog-label">我的评价</span>
+                  <div className="wd-relation-value">
+                    <span className="wd-status">我的平均 ★{detail.my_rating}</span>
+                    <span className="wd-hint">（来自书评）</span>
+                  </div>
+                </div>
+              )}
+              <div className="wd-relation-row">
+                <span className="wd-catalog-label">我的书评</span>
+                <div className="wd-relation-value">
+                  <button onClick={() => onOpenReview && onOpenReview({ id: detail.id, title: detail.title })}
+                    title="打开书评工作室"
+                    className="px-2.5 py-1 text-[11px]"
+                    style={{ color: "var(--accent)", backgroundColor: "var(--accent-soft)", borderRadius: "var(--radius-control)" }}>
+                    书评
+                  </button>
+                </div>
+              </div>
               {detail.collected_at && (
-                <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                  收藏于 {String(detail.collected_at).slice(0, 10)}
-                </span>
+                <div className="wd-relation-row">
+                  <span className="wd-catalog-label">带回书架</span>
+                  <div className="wd-relation-value">
+                    <span className="wd-status">收藏于 {String(detail.collected_at).slice(0, 10)}</span>
+                  </div>
+                </div>
               )}
             </div>
+          ) : (
+            <div className="wd-hint">本地笔记没有收藏关系。</div>
           )}
-          {/* P3（ADR 0047）：轻量记录 composer + 里程碑 */}
+        </section>
+
+        {/* 我的记忆（P3 composer + MemoryTimeline：3-2-D 归位叙事标题，本阶段保持功能与位置） */}
+        <div className="mt-8">
           {detail.source !== "local" && (
             <div className="mb-3">
               <div className="flex items-center gap-2 flex-wrap">
                 <input value={draft} onChange={(e) => setDraft(e.target.value)}
                   placeholder="写一句此刻的感想…（轻量记录，不写正式书评）"
                   className="flex-1 min-w-0 rounded-lg px-3 py-1.5 text-[12px] outline-none"
-                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }} />
+                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)", borderRadius: "var(--radius-control)" }} />
                 <select value={draftEmotion} onChange={(e) => setDraftEmotion(e.target.value)}
                   title="情绪（可选）"
                   className="rounded-lg px-2 py-1.5 text-[11px] outline-none"
-                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }}>
+                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)", borderRadius: "var(--radius-control)" }}>
                   <option value="">情绪</option>
                   {MEMORY_EMOTIONS.map((e) => <option key={e} value={e}>{e}</option>)}
                 </select>
@@ -306,12 +349,12 @@ export default function ItemDetailPanel({
                   onChange={(e) => setDraftFile(e.target.files?.[0] || null)} />
                 <button onClick={() => fileInputRef.current?.click()} title="附带一张图片"
                   className="px-2 py-1.5 rounded-lg text-[11px]"
-                  style={{ color: "var(--text-secondary)", backgroundColor: "var(--accent-soft)" }}>
+                  style={{ color: "var(--text-secondary)", backgroundColor: "var(--accent-soft)", borderRadius: "var(--radius-control)" }}>
                   {draftFile ? "🖼 ✓" : "🖼"}
                 </button>
                 <button onClick={() => submitDirect("text", draft)} disabled={!draft.trim() || recording}
                   className="px-3 py-1.5 rounded-lg text-[11px] font-medium disabled:opacity-40"
-                  style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                  style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: "var(--radius-control)" }}>
                   记录
                 </button>
               </div>
@@ -327,6 +370,7 @@ export default function ItemDetailPanel({
           )}
           <MemoryTimeline itemId={itemId} refreshKey={timelineRefresh} />
         </div>
+        </>
         )}
       </div>
     </div>

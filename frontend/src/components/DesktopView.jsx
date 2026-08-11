@@ -1567,7 +1567,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 <div className="flex-1 min-h-0 border overflow-hidden hidden lg:flex"
                   style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)", borderRadius: "var(--radius-surface)" }}>
                   <div className="h-full overflow-y-auto p-5">
-                    <ItemDetailPanel itemId={detailBrowseId} />
+                    <ItemDetailPanel itemId={detailBrowseId} onOpenReview={(it) => setReviewItem(it)} />
                   </div>
                 </div>
               </div>
@@ -1584,7 +1584,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                       className="px-2 py-1 text-sm" style={{ color: "var(--text-secondary)", borderRadius: "var(--radius-control)" }}>✕</button>
                   </div>
                   <div className="p-5">
-                    <ItemDetailPanel itemId={detailBrowseId} />
+                    <ItemDetailPanel itemId={detailBrowseId} onOpenReview={(it) => setReviewItem(it)} />
                   </div>
                 </div>
               )}
@@ -2286,6 +2286,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               onSaveDetail={detailView.saved ? null : detailSave}
               onShareDetail={detailView.saved ? () => setShareItem(detailView.itemId) : null}
               onRefreshDetail={detailView.saved ? handleRefreshExternal : null}
+              onOpenReview={(it) => { setDetailView(null); setReviewItem(it); }}
             />
           </div>
         </div>
