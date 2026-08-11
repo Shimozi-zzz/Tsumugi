@@ -60,8 +60,8 @@ export default function MemoryReviewModal({ itemId, sourceRef, memory, onClose }
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ backgroundColor: "rgba(8,10,18,0.55)" }}
       onClick={onClose}>
-      <div className="w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-2xl p-5"
-        style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", boxShadow: "var(--shadow-md)" }}
+      <div className="w-full max-w-lg max-h-[80vh] overflow-y-auto p-5"
+        style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", boxShadow: "var(--shadow-md)", borderRadius: "var(--radius-floating)" }}
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">

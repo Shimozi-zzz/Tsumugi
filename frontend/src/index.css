@@ -25,6 +25,16 @@
   --radius-lg: 10px;
   --radius-xl: 14px;
 
+  /* ---- 圆角语义（Phase 2-5 / ADR 0072）：纸面层级，非统一值 ----
+     Surface 最克制 → Card 略圆 → Cover 轻微 → Control 温和 → Chip 胶囊 → Floating 最大。
+     数值沿用既有语言（4/6/4/8/999/14），只为"为什么不同圆角"建立语义与单一来源。 ---- */
+  --radius-surface: 4px;
+  --radius-card: 6px;
+  --radius-cover: 4px;
+  --radius-control: 8px;
+  --radius-chip: 999px;
+  --radius-floating: 14px;
+
   /* ---- 阴影（克制：分隔用边框，阴影仅用于浮起/浮层） ---- */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.06);
@@ -514,7 +524,7 @@ body {
 html[data-style-theme="catalog-drawer"] .archive-card {
   background: var(--card-bg);
   border: 1px solid var(--panel-border);
-  border-radius: 6px;                       /* Surface：主表面近直角 */
+  border-radius: var(--radius-card);        /* Card：独立内容对象 */
   box-shadow: 0 1px 2px rgba(43, 36, 26, 0.05);  /* 轻微环境层次，不浮起 */
   padding: 6px;
   cursor: pointer;
@@ -529,7 +539,7 @@ html[data-style-theme="catalog-drawer"] .archive-card-selected { border-color: v
 html[data-style-theme="catalog-drawer"] .archive-card-body { padding: 8px 5px 5px; }
 html[data-style-theme="catalog-drawer"] .archive-card-cover {
   position: relative;
-  border-radius: 4px;                       /* Cover：内容对象柔和 4px */
+  border-radius: var(--radius-cover);       /* Cover：封面极轻微圆角 */
   overflow: hidden;
   background: var(--card-thumb);
 }

@@ -129,9 +129,10 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
       {hover && (
         <div className="fixed z-40" style={{ left: hover.x, top: hover.y, width: 132, pointerEvents: "none" }}
           data-testid="shelf-preview">
-          <div className="rounded-2xl overflow-hidden"
+          <div className="overflow-hidden"
             style={{
               backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)",
+              borderRadius: "var(--radius-floating)",
               boxShadow: "0 14px 34px rgba(0,0,0,0.34)",
             }}>
             {coverOf(hover.it) ? (

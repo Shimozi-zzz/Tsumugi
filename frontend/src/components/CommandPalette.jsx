@@ -72,7 +72,7 @@ export default function CommandPalette({ open, onClose, ctx, commands }) {
         style={{
           backgroundColor: "var(--card-bg)",
           border: "1px solid var(--panel-border)",
-          borderRadius: "var(--radius-lg)",
+          borderRadius: "var(--radius-floating)",   /* Floating Layer（Phase 2-5 / ADR 0072） */
           boxShadow: "var(--shadow-float), inset 0 0 46px color-mix(in srgb, var(--accent) 4%, transparent)",
           animation: "var(--motion-open)",
           animationName: "cp-enter",

@@ -18,9 +18,9 @@ export default function ItemDetailModal({ detail, saved, onClose, onSave, onShar
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ backgroundColor: "rgba(10,12,20,0.5)" }} onClick={onClose}>
-      <div className="desk-askbar rounded-2xl p-5 w-full max-w-2xl max-h-[86vh] overflow-y-auto"
+      <div className="desk-askbar p-5 w-full max-w-2xl max-h-[86vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
-        style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
+        style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", borderRadius: "var(--radius-floating)" }}>
         {/* 头部：来源 / 评分 / 收藏态 */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2 flex-wrap">

@@ -1462,8 +1462,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
             {/* 工具栏（Phase 2-3 / ADR 0070）：「整理书架」三级层级——
                 Level1 搜索（主入口）/ Level2 视图切换 / Level3 批量选择（默认安静） */}
             <div className="flex items-center justify-between gap-3 mb-4 shrink-0 flex-wrap">
-              <div className="flex items-center gap-2 rounded-full px-3.5 py-2 w-full sm:w-72"
-                style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
+              <div className="flex items-center gap-2 px-3.5 py-2 w-full sm:w-72"
+                style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", borderRadius: "var(--radius-control)" }}>
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5"
                   strokeLinecap="round" className="shrink-0" style={{ color: "var(--text-secondary)" }}>
                   <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
@@ -1479,27 +1479,27 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 )}
               </div>
               <div className="flex items-center gap-2">
-                {/* 视图切换：紧凑安静 */}
-                <div className="flex items-center gap-0.5 rounded-full px-1 py-0.5"
-                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
+                {/* 视图切换：紧凑安静（Control 圆角，非胶囊） */}
+                <div className="flex items-center gap-0.5 px-1 py-0.5"
+                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", borderRadius: "var(--radius-control)" }}>
                   <button onClick={() => setLibView("grid")} title="网格视图"
-                    className="px-2 py-1 rounded-full text-[11px]"
-                    style={{ backgroundColor: libView === "grid" ? "var(--accent-soft)" : "transparent",
+                    className="px-2 py-1 text-[11px]"
+                    style={{ borderRadius: "var(--radius-control)", backgroundColor: libView === "grid" ? "var(--accent-soft)" : "transparent",
                       color: libView === "grid" ? "var(--accent)" : "var(--text-secondary)" }}>▦</button>
                   <button onClick={() => setLibView("shelf")} title="书架视图"
-                    className="px-2 py-1 rounded-full text-[11px]"
-                    style={{ backgroundColor: libView === "shelf" ? "var(--accent-soft)" : "transparent",
+                    className="px-2 py-1 text-[11px]"
+                    style={{ borderRadius: "var(--radius-control)", backgroundColor: libView === "shelf" ? "var(--accent-soft)" : "transparent",
                       color: libView === "shelf" ? "var(--accent)" : "var(--text-secondary)" }}>▤</button>
                   <button onClick={() => setLibView("list")} title="分组列表（主从视图）"
-                    className="px-2 py-1 rounded-full text-[11px]"
-                    style={{ backgroundColor: libView === "list" ? "var(--accent-soft)" : "transparent",
+                    className="px-2 py-1 text-[11px]"
+                    style={{ borderRadius: "var(--radius-control)", backgroundColor: libView === "list" ? "var(--accent-soft)" : "transparent",
                       color: libView === "list" ? "var(--accent)" : "var(--text-secondary)" }}>☰</button>
                 </div>
                 {/* 批量选择入口（Level3：默认安静，进入 Selection Mode 才获得权重） */}
                 <button onClick={() => { setSelectMode((v) => !v); setSelectedIds(new Set()); }}
                   title="批量选择"
-                  className="px-2.5 py-1.5 rounded text-[11px]"
-                  style={{ color: selectMode ? "var(--accent)" : "var(--text-secondary)",
+                  className="px-2.5 py-1.5 text-[11px]"
+                  style={{ borderRadius: "var(--radius-control)", color: selectMode ? "var(--accent)" : "var(--text-secondary)",
                     backgroundColor: selectMode ? "var(--accent-soft)" : "transparent" }}>
                   选择
                 </button>
@@ -1559,16 +1559,16 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                  左右各套 --surface-1 面板背景（深色下与最外层 --surface-0 拉开层次），
                  各自独立滚动 */
               <div className="flex-1 min-h-0 flex gap-4">
-                <div className="w-[300px] shrink-0 min-h-0 flex flex-col rounded-2xl border overflow-hidden"
-                  style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)" }}>
+                <div className="w-[300px] shrink-0 min-h-0 flex flex-col border overflow-hidden"
+                  style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)", borderRadius: "var(--radius-surface)" }}>
                   <StatusGroupedList
                     className="flex-1 min-h-0 overflow-y-auto p-2"
                     items={libFiltered} statusOf={statusMap}
                     selectedId={detailBrowseId} onSelect={setDetailBrowseId}
                   />
                 </div>
-                <div className="flex-1 min-h-0 rounded-2xl border overflow-hidden"
-                  style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)" }}>
+                <div className="flex-1 min-h-0 border overflow-hidden"
+                  style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)", borderRadius: "var(--radius-surface)" }}>
                   <div className="h-full overflow-y-auto p-5">
                     <ItemDetailPanel itemId={detailBrowseId} />
                   </div>

@@ -53,9 +53,9 @@ export default function ShareCardModal({ item, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ backgroundColor: "rgba(10,12,20,0.55)" }} onClick={onClose}>
-      <div className="desk-askbar rounded-2xl p-5 w-full max-w-xl flex flex-col items-center"
+      <div className="desk-askbar p-5 w-full max-w-xl flex flex-col items-center"
         onClick={(e) => e.stopPropagation()}
-        style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
+        style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", borderRadius: "var(--radius-floating)" }}>
         <div className="flex items-center justify-between w-full mb-3">
           <h3 className="text-sm font-medium" style={{ color: "var(--text)" }}>安利卡预览</h3>
           <button onClick={onClose} className="text-sm px-2 py-0.5 rounded-lg"
