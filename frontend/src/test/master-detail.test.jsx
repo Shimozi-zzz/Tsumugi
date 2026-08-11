@@ -8,7 +8,6 @@ import React from "react";
 import DesktopView from "../components/DesktopView.jsx";
 import StatusGroupedList from "../components/StatusGroupedList.jsx";
 import { InfoTable, TagCapsule, itemInfoRows, ArchiveNo } from "../components/ui.jsx";
-import { applyTheme, THEMES } from "../themes.js";
 
 function ok(payload, status = 200) {
   return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(payload) });
@@ -167,36 +166,6 @@ describe("Playnite 式信息设计（ui 组件）", () => {
   });
 });
 
-describe("深色主题（第4套，token 兼容）", () => {
-  it("THEMES 含深色主题", () => {
-    expect(THEMES.some((t) => t.key === "dark")).toBe(true);
-  });
-
-  it("applyTheme('dark')：data-theme + 深色强调派生（soft 深色染、accent 中亮）", () => {
-    applyTheme("dark");
-    const el = document.documentElement;
-    expect(el.getAttribute("data-theme")).toBe("dark");
-    const soft = el.style.getPropertyValue("--accent-soft");
-    const accent = el.style.getPropertyValue("--accent");
-    expect(soft).toContain("hsl(");
-    expect(accent).toContain("hsl(");
-    // 深色主题下：soft 明度低（深色染，不是近白），accent 明度中高（深底对比）
-    expect(parseHslLightness(soft)).toBeLessThan(20);
-    expect(parseHslLightness(accent)).toBeGreaterThan(50);
-  });
-
-  it("与浅色主题对比：soft 派生逻辑不同，但都走同一套 token 结构", () => {
-    applyTheme("dark");
-    const darkSoft = parseHslLightness(document.documentElement.style.getPropertyValue("--accent-soft"));
-    applyTheme("default");
-    const el = document.documentElement;
-    expect(el.getAttribute("data-theme")).toBe("default");
-    const lightSoft = parseHslLightness(el.style.getPropertyValue("--accent-soft"));
-    expect(lightSoft).toBeGreaterThan(90);
-    expect(darkSoft).toBeLessThan(lightSoft);
-  });
-});
-
 describe("ADR 0030 视觉缺陷修复", () => {
   it("来源标签完整渲染：不截断、与标题有间距（徽标 nowrap + 行 gap + 标题 truncate 隔离）", () => {
     const items = [{ id: 1, title: "钢之炼金术师", type: "external_ref", source: "bangumi", tags: [], chunks_count: null }];
@@ -233,26 +202,16 @@ describe("ADR 0030 视觉缺陷修复", () => {
     expect(normalRow.className).not.toContain("rs-list-row-active");
   });
 
-  it("表面层级 token 存在（--surface-0/1/2，含深色主题；行 hover/选中 CSS 已定义）", () => {
+  it("表面层级 token 存在（--surface-0/1/2 纸感分层；行 hover/选中 CSS 已定义）", () => {
     const css = fs.readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
-    expect(css).toContain("--surface-0:");
-    expect(css).toContain("--surface-1:");
-    expect(css).toContain("--surface-2:");
-    // 深色主题块内定义了三档表面色（层级分明）
-    const darkBlock = css.slice(css.indexOf('data-theme="dark"'));
-    expect(darkBlock).toContain("--surface-0:");
-    expect(darkBlock).toContain("--surface-1:");
-    expect(darkBlock).toContain("--surface-2:");
+    // 默认主题 :root 定义了三档纸感表面色（层级分明）
+    const root = css.slice(0, css.indexOf("html[data-theme"));
+    expect(root).toContain("--surface-0:");
+    expect(root).toContain("--surface-1:");
+    expect(root).toContain("--surface-2:");
     // 列表行 hover（surface-2）与选中（accent 低透明度填充）规则存在
     expect(css).toContain(".rs-list-row:hover");
     expect(css).toContain(".rs-list-row-active");
     expect(css).toContain("color-mix(in srgb, var(--accent) 18%, transparent)");
   });
 });
-
-function parseHslLightness(css) {
-  const m = /hsl\(([^)]+)\)/.exec(css);
-  if (!m) return null;
-  const parts = m[1].split(",");
-  return parseFloat(parts[2]);
-}

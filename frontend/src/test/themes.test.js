@@ -20,8 +20,8 @@ describe("theme system", () => {
     document.documentElement.removeAttribute("data-density");
   });
 
-  it("THEMES 四套（经典白/薄荷/樱花/深夜深蓝，ADR 0029 深色第4套）", () => {
-    expect(THEMES.map((t) => t.key)).toEqual(["default", "mint", "sakura", "dark"]);
+  it("THEMES 仅默认（编目抽屉，ADR 0059 起保留一套主题）", () => {
+    expect(THEMES.map((t) => t.key)).toEqual(["default"]);
   });
 
   it("applyTheme('dark') 正常切换并持久化", () => {
@@ -87,32 +87,25 @@ describe("theme system", () => {
     expect(RADIUS_RANGE.min).toBeLessThan(RADIUS_RANGE.max);
   });
 
-  it("默认主题 accent 已暖橙化（色相 ~18° 暖调，非冷蓝），其余三套主题保持原色相", () => {
+  it("默认主题 accent 已暖橙化（色相 ~18° 暖调）", () => {
     applyTheme("default");
     const dHue = parseHslHue(document.documentElement.style.getPropertyValue("--accent"));
     expect(dHue).toBeGreaterThan(0);
     expect(dHue).toBeLessThan(40); // 暖橙（原蓝 ~221°）
-
-    applyTheme("mint");
-    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeGreaterThan(145);
-    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeLessThan(175); // 薄荷绿
-    applyTheme("sakura");
-    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeGreaterThan(300); // 粉
-    applyTheme("dark");
-    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeGreaterThan(200);
-    expect(parseHslHue(document.documentElement.style.getPropertyValue("--accent"))).toBeLessThan(240); // 蓝
   });
 
-  it("index.css：默认主题 :root accent 暖橙 hex + --font-heading 衬线 token + 氛围色 alpha 各主题保持", () => {
+  it("index.css：仅保留默认主题块，mint/sakura/dark 已移除", () => {
     const css = fs.readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
     expect(css).toContain("--accent: #b25b36;");
     expect(css).toContain("--accent-hover: #9c4c2c;");
     expect(css).toContain("--accent-soft: #f9ede5;");
     expect(css).toContain("--font-heading:");
-    // 氛围色强度（不随 accent 变化，浅色克制/深色稍明显）
+    expect(css).not.toContain('html[data-theme="mint"]');
+    expect(css).not.toContain('html[data-theme="sakura"]');
+    expect(css).not.toContain('html[data-theme="dark"]');
+    // 氛围色强度保持（浅色克制）
     const root = css.slice(0, css.indexOf("html[data-theme"));
     expect(root).toContain("--ambient-alpha: 0.16;");
-    expect(css).toContain('html[data-theme="dark"]');
   });
 
   it("编目抽屉默认色板（ADR 0056）：纸感底色/分层 + --font-mono + 近直角圆角 token", () => {

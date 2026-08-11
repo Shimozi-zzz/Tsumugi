@@ -1,8 +1,8 @@
-// ADR 0057：应用外壳三个空间结构方向（A 卡片抽屉 / B 书脊索引 / C 非对称档案室）+ 开关
+// ADR 0057/0059：保留的外壳（经典三栏 + C 非对称档案室）+ 开关
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import React from "react";
-import { ShellA, ShellB, ShellC, ShellSwitcher, SHELL_CONCEPTS, parseShell } from "../components/AppShells.jsx";
+import { ShellC, ShellSwitcher, SHELL_CONCEPTS, parseShell } from "../components/AppShells.jsx";
 
 function ok(payload, status = 200) {
   return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(payload) });
@@ -27,31 +27,7 @@ const ITEMS = [
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-describe("三个外壳结构", () => {
-  it("A 卡片抽屉：data-shell=a，含抽屉式导航与抽屉索引", async () => {
-    mockFetch(ITEMS);
-    const { container } = render(<ShellA />);
-    expect(container.querySelector('[data-shell="a"]')).toBeTruthy();
-    expect(container.querySelector(".shell-a-cabinet")).toBeTruthy();
-    expect(container.querySelector(".shell-a-drawer")).toBeTruthy();
-    // 书库真实数据渲染
-    await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
-    // 抽屉可切换
-    fireEvent.click(screen.getByText("检索台"));
-    await waitFor(() => expect(screen.getByPlaceholderText(/检索台/)).toBeTruthy());
-  });
-
-  it("B 书脊索引：data-shell=b，导航是一排书脊（竖排文字）", async () => {
-    mockFetch(ITEMS);
-    const { container } = render(<ShellB />);
-    expect(container.querySelector('[data-shell="b"]')).toBeTruthy();
-    const spines = container.querySelectorAll(".shell-b-spine");
-    expect(spines.length).toBeGreaterThanOrEqual(6);
-    const text = container.querySelector(".shell-b-text");
-    expect(text).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
-  });
-
+describe("保留的外壳结构", () => {
   it("C 非对称档案室：data-shell=c，不同房间布局参数不同", async () => {
     mockFetch(ITEMS);
     const { container } = render(<ShellC />);
@@ -61,25 +37,17 @@ describe("三个外壳结构", () => {
     fireEvent.click(screen.getByText("记忆回廊"));
     await waitFor(() => expect(container.querySelector('.shell-c-room[data-room="gallery"]')).toBeTruthy());
   });
-
-  it("三外壳 data-shell 标注不同（互相不同结构）", () => {
-    mockFetch(ITEMS);
-    const a = render(<ShellA />);
-    expect(a.container.querySelector('[data-shell="a"]')).toBeTruthy();
-    cleanup();
-    const b = render(<ShellB />);
-    expect(b.container.querySelector('[data-shell="b"]')).toBeTruthy();
-  });
 });
 
 describe("外壳开关", () => {
-  it("渲染 4 项 + onChange；parseShell 校验", () => {
+  it("渲染 2 项（经典三栏 + C）+ onChange；parseShell 校验", () => {
     const onChange = vi.fn();
     render(<ShellSwitcher value="classic" onChange={onChange} />);
-    expect(SHELL_CONCEPTS.length).toBe(4);
-    fireEvent.click(screen.getByText("B 书脊索引"));
-    expect(onChange).toHaveBeenCalledWith("b");
-    expect(parseShell("a")).toBe("a");
-    expect(parseShell("x")).toBeNull();
+    expect(SHELL_CONCEPTS.length).toBe(2);
+    fireEvent.click(screen.getByText("C 非对称档案室"));
+    expect(onChange).toHaveBeenCalledWith("c");
+    expect(parseShell("c")).toBe("c");
+    expect(parseShell("a")).toBeNull(); // A/B 已移除
+    expect(parseShell("b")).toBeNull();
   });
 });

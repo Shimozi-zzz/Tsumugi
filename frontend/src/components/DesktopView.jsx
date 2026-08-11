@@ -32,7 +32,7 @@ import MemoryGallery from "./MemoryGallery.jsx";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
 import ArchiveCard from "./ArchiveCard.jsx";
 import { GridConceptA, GridConceptB, GridConceptC, GridConceptSwitcher, parseConcept } from "./GridConcepts.jsx";
-import { ShellA, ShellB, ShellC, ShellSwitcher, parseShell } from "./AppShells.jsx";
+import { ShellC, ShellSwitcher, parseShell } from "./AppShells.jsx";
 import { WORK_TYPES, WORK_TYPE_LABEL } from "./ui.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
@@ -2323,10 +2323,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         </div>
       )}
     </div>
-      ) : shellConcept === "a" ? (
-        <ShellA />
-      ) : shellConcept === "b" ? (
-        <ShellB />
       ) : (
         <ShellC />
       )}

@@ -4,27 +4,21 @@
 import { hexToHsl, hslCss } from "./bookshelf.js";
 
 export const THEMES = [
-  { key: "default", label: "经典白" },
-  { key: "mint", label: "薄荷 × 浅蓝" },
-  { key: "sakura", label: "樱花粉" },
-  { key: "dark", label: "深夜深蓝" },
+  { key: "default", label: "编目抽屉" },
 ];
 
 const STORAGE_KEY = "tsumugi-theme";
 const CUSTOM_KEY = "tsumugi-theme-custom";
 
-// 各主题基准强调色（自定义色相在此基准上小幅旋转）
-// default 本轮从冷蓝 #2563eb 换为暖橙调 #B25B36（Claude 赤陶土系：暖棕橙、略带灰调、
-// 不刺眼；浅底对比 ≈4.7:1 达 AA；白字按钮/正文均协调），详见 ADR 0053。
+// 各主题基准强调色（自定义色相在此基准上小幅旋转）。
+// 本轮定案（ADR 0059）：仅保留默认"编目抽屉"纸感主题（#b25b36 暖橙）；
+// mint/sakura/dark 已移除。
 const ACCENTS = {
-  default: "#B25B36",
-  mint: "#10b981",
-  sakura: "#ec4899",
-  dark: "#4a9eff",
+  default: "#b25b36",
 };
 
-// 深色主题（ADR 0029）：强调色的派生逻辑不同——hover 更亮、soft 用深色染而非近白
-const DARK_THEMES = new Set(["dark"]);
+// 深色主题派生逻辑（本轮无深色主题，保留分支为将来扩展）
+const DARK_THEMES = new Set();
 
 // 自定义默认值：色相偏移 0、舒适密度、圆角 16px
 export const DEFAULT_CUSTOM = { accentHue: 0, density: "comfortable", radius: 16 };

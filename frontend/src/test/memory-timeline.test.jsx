@@ -142,17 +142,15 @@ describe("ItemDetailPanel 双栏结构（Phase B / ADR 0042）", () => {
   });
 });
 
-describe("四套主题兼容", () => {
-  it("时间轴与双栏结构在 default/mint/sakura/dark 下均正常渲染", async () => {
-    for (const theme of ["default", "mint", "sakura", "dark"]) {
-      applyTheme(theme);
-      mockFetch();
-      const { container } = render(<ItemDetailPanel itemId={1} />);
-      await waitFor(() => expect(screen.getByText("神作")).toBeTruthy());
-      // 时间轴点使用 token 值（--accent 在不同主题派生不同，但结构一致）
-      const dot = container.querySelector(".relative.pl-5 span.rounded-full");
-      expect(dot.style.backgroundColor).toBe("var(--accent)");
-      cleanup();
-    }
+describe("默认主题渲染（ADR 0059 起仅保留编目抽屉一套）", () => {
+  it("时间轴与双栏结构在默认主题下正常渲染", async () => {
+    applyTheme("default");
+    mockFetch();
+    const { container } = render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("神作")).toBeTruthy());
+    // 时间轴点使用 token 值（--accent）
+    const dot = container.querySelector(".relative.pl-5 span.rounded-full");
+    expect(dot.style.backgroundColor).toBe("var(--accent)");
+    cleanup();
   });
 });

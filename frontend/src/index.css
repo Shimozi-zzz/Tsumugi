@@ -82,95 +82,7 @@ html[data-density="compact"] {
 }
 
 /* ============================================================
-   薄荷绿 × 浅蓝（清醒）：强调=薄荷绿，次级信息=浅蓝
-   ============================================================ */
-html[data-theme="mint"] {
-  --bg: #f4faf7;
-  --panel: #ffffff;
-  --panel-border: #e0ece6;
-  --text: #12463f;
-  --text-secondary: #54707f;  /* WCAG AA：在 #f4faf7 上对比度 ≥4.5:1 */
-  --accent: #10b981;
-  --accent-hover: #059669;
-  --accent-soft: #ecfdf5;
-  --danger: #dc2626;
-  --ok: #059669;
-  --tag-bg: #e0f2fe;
-  --tag-text: #0369a1;
-  --input-bg: #ffffff;
-  --input-border: #d3e4dc;
-  --rail-bg: #f2f9f6;
-  --card-bg: #ffffff;
-  --card-thumb: linear-gradient(150deg, #d1fae5, #e0f2fe);
-  --card-text: #12463f;
-  --surface-0: #f2f9f6;
-  --surface-1: #ffffff;
-  --surface-2: #e9f4ef;
-  --ambient-alpha: 0.18;
-}
-
-/* ============================================================
-   樱花粉（ACG 向）：淡粉为主，克制，避免装饰堆砌
-   ============================================================ */
-html[data-theme="sakura"] {
-  --bg: #fdf6f7;
-  --panel: #ffffff;
-  --panel-border: #f2dfe3;
-  --text: #451f2f;
-  --text-secondary: #8a5a6e;  /* WCAG AA：在 #fdf6f7 上对比度 ≥4.5:1 */
-  --accent: #ec4899;
-  --accent-hover: #db2777;
-  --accent-soft: #fdf2f6;
-  --danger: #be185d;
-  --ok: #059669;
-  --tag-bg: #fce7f0;
-  --tag-text: #be185d;
-  --input-bg: #ffffff;
-  --input-border: #f0d8df;
-  --rail-bg: #fdf3f5;
-  --card-bg: #ffffff;
-  --card-thumb: linear-gradient(150deg, #fde7ef, #f5e6f5);
-  --card-text: #451f2f;
-  --surface-0: #fdf3f5;
-  --surface-1: #ffffff;
-  --surface-2: #f9edf1;
-  --ambient-alpha: 0.18;
-}
-
-/* ============================================================
-   深夜深蓝（第4套，ADR 0020 token 兼容——只换配色，不引入独立规则）
-   学习 Playnite"深色背景下保持克制而不发灰/不过曝"的原则：
-   背景深蓝灰、面板略亮一档、边框细分割、文字高对比、强调色取克制的中亮蓝。
-   强调色/强调色柔和/强调色悬浮由 themes.js 在深色下用更低明度派生（非近白）。
-   ============================================================ */
-html[data-theme="dark"] {
-  --bg: #0b0f14;
-  --panel: #161d26;
-  --panel-border: #26303e;
-  --text: #e3eaf2;
-  --text-secondary: #93a1b5;  /* 在 #0b0f14 上对比度 ~7:1 */
-  --accent: #4a9eff;
-  --accent-hover: #6bb1ff;
-  --accent-soft: #16283f;
-  --danger: #f87070;
-  --ok: #3ddc97;
-  --tag-bg: #1e2a3c;
-  --tag-text: #8fc3ff;
-  --input-bg: #10151d;
-  --input-border: #2b3648;
-  --rail-bg: #0b0f14;
-  --card-bg: #161d26;
-  --card-thumb: linear-gradient(150deg, #1b2432, #121722);
-  --card-text: #e3eaf2;
-  /* 表面层级（ADR 0030）：深色下明确拉开三档，避免扁平 */
-  --surface-0: #0b0f14;
-  --surface-1: #161d26;
-  --surface-2: #202a37;
-  --ambient-alpha: 0.30;
-}
-
-/* ============================================================
-   共享组件样式（所有主题统一，用 token）
+   共享组件样式（默认"编目抽屉"纸感主题，ADR 0059 起仅保留此主题）
    ============================================================ */
 
 body {
@@ -645,47 +557,6 @@ body {
 
 /* 通用：书库网格内容（探索用） */
 .shell-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-
-/* ---------- A 卡片抽屉导航：左侧=卡片目录柜 ---------- */
-.shell-a { display: flex; height: 100%; background: var(--bg); font-family: var(--font-body); }
-.shell-a-cabinet { width: 120px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px;
-  padding: 18px 12px; border-right: 2px solid var(--panel-border); background: var(--surface-1); }
-.shell-a-drawer { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px;
-  height: 52px; border: 1px solid var(--panel-border); border-top: 3px solid var(--panel-border);
-  background: var(--surface-2); cursor: pointer; font-family: var(--font-body); font-size: 13px; color: var(--text);
-  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
-.shell-a-drawer:hover { transform: translateX(-4px); }
-.shell-a-open { transform: translateX(-6px); border-color: var(--accent); border-top-color: var(--accent);
-  box-shadow: 6px 4px 12px rgba(0,0,0,0.12); background: var(--panel); color: var(--accent); font-weight: 600; }
-.shell-a-tab { position: absolute; top: -3px; left: 10px; font-family: var(--font-mono); font-size: 9px;
-  letter-spacing: 0.15em; color: var(--text-secondary); background: var(--panel); padding: 0 3px; }
-.shell-a-label { font-family: Georgia, "Songti SC", serif; }
-.shell-a-drawer-index { width: 190px; flex-shrink: 0; padding: 28px 18px; border-right: 1px solid var(--panel-border);
-  background: var(--surface-0); }
-.shell-a-drawer-index h3 { margin: 6px 0 10px; font-size: 18px; color: var(--text); }
-.shell-a-rule { height: 1px; background: var(--panel-border); margin: 10px 0; }
-.shell-a-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
-.shell-a-main { flex: 1; min-width: 0; padding: 26px 30px; overflow-y: auto; }
-
-/* ---------- B 书脊索引栏：左侧=一排立着的书脊 ---------- */
-.shell-b { display: flex; height: 100%; background: var(--bg); font-family: var(--font-body); }
-.shell-b-spines { width: 76px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center;
-  gap: 8px; padding: 22px 0 0; background: var(--surface-1); border-right: 1px solid var(--panel-border); position: relative; }
-.shell-b-spine { position: relative; width: 34px; height: 150px; border-radius: 4px; border: 1px solid var(--panel-border);
-  background: linear-gradient(180deg, var(--surface-2), var(--surface-0)); cursor: pointer; display: flex;
-  align-items: center; justify-content: center; transition: transform .18s ease, box-shadow .18s ease; }
-.shell-b-spine:hover { transform: translateX(-3px); }
-.shell-b-active { transform: translateX(-4px); background: linear-gradient(180deg, var(--accent), var(--accent-hover));
-  box-shadow: 4px 3px 10px rgba(0,0,0,0.16); }
-.shell-b-text { writing-mode: vertical-rl; text-orientation: mixed; font-family: Georgia, "Songti SC", serif;
-  font-size: 13px; letter-spacing: 0.1em; color: var(--text); }
-.shell-b-active .shell-b-text { color: #fff; }
-.shell-b-no { position: absolute; bottom: 6px; font-family: var(--font-mono); font-size: 9px;
-  letter-spacing: 0.12em; color: var(--text-secondary); }
-.shell-b-active .shell-b-no { color: rgba(255,255,255,0.75); }
-.shell-b-board { position: absolute; left: 4px; right: 4px; bottom: 0; height: 8px; border-radius: 3px;
-  background: linear-gradient(180deg, var(--surface-2), var(--surface-1)); border-bottom: 1px solid var(--panel-border); }
-.shell-b-main { flex: 1; min-width: 0; padding: 26px 32px; overflow-y: auto; }
 
 /* ---------- C 非对称档案室：不同房间格局不同 ---------- */
 .shell-c { display: flex; height: 100%; background: var(--bg); font-family: var(--font-body); }

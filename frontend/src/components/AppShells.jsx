@@ -1,8 +1,7 @@
-// 应用外壳 · 三个空间结构探索方向（ADR 0057，沿用编目抽屉配色/字体/编号，探索空间结构）
-// A 卡片抽屉导航：侧栏=真实卡片目录柜（一排带标签的抽屉，抽屉拉开式展开）
-// B 书脊索引栏：左导航=一排立着的书脊，文字竖排，整条是馆藏索引书脊
-// C 非对称档案室：不同页面房间格局不同（宽度/偏移/错落非对称）
-// 真实数据渲染：书库(ArchiveCard)/检索台(searchMy)/回廊/人物馆/关系厅复用现有组件。
+// 应用外壳 · 空间结构（ADR 0057/0059）
+// 本轮定案（ADR 0059）：仅保留「经典三栏」与「C 非对称档案室」两个外壳；
+// A 卡片抽屉、B 书脊索引已移除。沿用编目抽屉配色/字体/编号（ADR 0056）。
+// C：不同页面房间格局不同（宽度/偏移/错落非对称）。真实数据渲染。
 import React, { useEffect, useState } from "react";
 import { fetchItems, searchMy, filePathToUrl } from "../api.js";
 import ArchiveCard from "./ArchiveCard.jsx";
@@ -12,8 +11,6 @@ import VoiceGraphView from "./VoiceGraphView.jsx";
 
 export const SHELL_CONCEPTS = [
   { key: "classic", label: "经典三栏" },
-  { key: "a", label: "A 卡片抽屉" },
-  { key: "b", label: "B 书脊索引" },
   { key: "c", label: "C 非对称档案室" },
 ];
 export function parseShell(raw) {
@@ -81,53 +78,6 @@ function ShellContent({ section }) {
       <h2 className="tsm-heading" style={{ fontSize: 20 }}>管理室</h2>
       <p className="catalog-no">设置 · 数据 · 备份</p>
       <p>（探索版仅示意，完整设置见经典三栏）</p>
-    </div>
-  );
-}
-
-/* ================= A：卡片抽屉导航 ================= */
-export function ShellA() {
-  const [section, setSection] = useState("library");
-  return (
-    <div className="shell-a" data-shell="a">
-      <nav className="shell-a-cabinet">
-        {SECTIONS.map((s, i) => (
-          <button key={s.key}
-            className={"shell-a-drawer" + (section === s.key ? " shell-a-open" : "")}
-            onClick={() => setSection(s.key)} title={s.label}>
-            <span className="shell-a-tab">{String(i + 1).padStart(2, "0")}</span>
-            <span className="shell-a-label">{s.label}</span>
-          </button>
-        ))}
-      </nav>
-      <aside className="shell-a-drawer-index">
-        <span className="catalog-no">抽屉 · {String(SECTIONS.findIndex((x) => x.key === section) + 1).padStart(2, "0")}</span>
-        <h3 className="tsm-heading">{SECTIONS.find((x) => x.key === section).label}</h3>
-        <div className="shell-a-rule" />
-        <p className="shell-a-desc">此抽屉收藏着{section === "library" ? "已入库作品索引" : section === "gallery" ? "按年份排列的记忆" : "相关馆藏"}</p>
-      </aside>
-      <main className="shell-a-main"><ShellContent section={section} /></main>
-    </div>
-  );
-}
-
-/* ================= B：书脊索引栏 ================= */
-export function ShellB() {
-  const [section, setSection] = useState("library");
-  return (
-    <div className="shell-b" data-shell="b">
-      <nav className="shell-b-spines">
-        {SECTIONS.map((s) => (
-          <button key={s.key}
-            className={"shell-b-spine" + (section === s.key ? " shell-b-active" : "")}
-            onClick={() => setSection(s.key)} title={s.label}>
-            <span className="shell-b-text">{s.label}</span>
-            <span className="shell-b-no">{String(SECTIONS.findIndex((x) => x.key === s.key) + 1).padStart(2, "0")}</span>
-          </button>
-        ))}
-        <span className="shell-b-board" />
-      </nav>
-      <main className="shell-b-main"><ShellContent section={section} /></main>
     </div>
   );
 }

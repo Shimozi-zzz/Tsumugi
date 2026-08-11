@@ -58,20 +58,20 @@ beforeEach(() => { localStorage.clear(); document.documentElement.removeAttribut
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("命令注册表（ADR 0031）", () => {
-  it("buildCommands 覆盖四组：条目/动作/主题/标签", () => {
+  it("buildCommands 覆盖四组：条目/动作/主题/标签（主题仅默认一套）", () => {
     const cmds = buildCommands(CTX);
     const groups = new Set(cmds.map((c) => c.group));
     expect(groups).toEqual(new Set(["条目", "动作", "主题", "标签"]));
-    expect(cmds.filter((c) => c.group === "主题").length).toBe(4); // 四套主题
-    expect(cmds.some((c) => c.title === "切换主题：深夜深蓝")).toBe(true);
+    expect(cmds.filter((c) => c.group === "主题").length).toBe(1); // 仅默认（编目抽屉）
+    expect(cmds.some((c) => c.title === "切换主题：编目抽屉")).toBe(true);
     expect(cmds.some((c) => c.title === "新建笔记")).toBe(true);
   });
 
   it("matchCommand：去空格小写子串匹配", () => {
-    const cmd = { title: "切换主题：深夜深蓝", keywords: ["主题", "theme", "dark"] };
-    expect(matchCommand(cmd, "深夜深蓝")).toBe(true);
+    const cmd = { title: "切换主题：编目抽屉", keywords: ["主题", "theme", "default"] };
+    expect(matchCommand(cmd, "编目抽屉")).toBe(true);
     expect(matchCommand(cmd, "主题")).toBe(true);
-    expect(matchCommand(cmd, " 深 夜 ")).toBe(true); // 去空格
+    expect(matchCommand(cmd, " 编 目 ")).toBe(true); // 去空格
     expect(matchCommand(cmd, "不存在")).toBe(false);
     expect(matchCommand(cmd, "")).toBe(true);
   });
@@ -120,12 +120,12 @@ describe("CommandPalette 组件", () => {
     expect(ctx.openItem).toHaveBeenCalledWith(expect.objectContaining({ id: 1, title: "命运石之门" }));
   });
 
-  it("动作执行：切换深色主题 → data-theme=dark", () => {
+  it("动作执行：切换主题 → data-theme=default（仅默认）", () => {
     render(<CommandPalette open onClose={() => {}} ctx={CTX} />);
     const input = document.querySelector("input");
-    fireEvent.change(input, { target: { value: "深夜深蓝" } });
+    fireEvent.change(input, { target: { value: "编目抽屉" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("default");
   });
 
   it("无匹配 → 空状态提示", () => {
