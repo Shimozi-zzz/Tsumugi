@@ -357,9 +357,9 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: rgba(8, 10, 18, 0.55);
+  background: rgba(30, 20, 15, 0.55);   /* 暖暗帷幕（贴合纸感主题） */
   opacity: 0;
-  transition: opacity 1s ease;
+  transition: opacity 1.2s cubic-bezier(0.22, 1, 0.36, 1);
   z-index: 2;
 }
 .shrine.shrine-ritual:not(.shrine-revealed) .shrine-veil { opacity: 0.55; }
@@ -375,6 +375,9 @@ body {
 }
 .shrine.shrine-skip .shrine-veil,
 .shrine.shrine-skip .shrine-item { transition: none !important; }
+
+/* 祭坛搜索栏：serif 占位（衬线 placeholder 呼应神殿编辑气质） */
+.shrine input::placeholder { font-family: var(--font-heading); opacity: 0.8; letter-spacing: 0.04em; }
 
 /* P5 / ADR 0049 真书架：取书浮起（hover）+ 目录卡标签 + 层板 */
 .shelf-book { transition: transform .3s ease, box-shadow .3s ease; }

@@ -47,12 +47,12 @@ function coverOf(it) {
   return it.image_url || null;
 }
 
-// 极简鸟居轮廓线（几何符号，点到为止，非写实场景）
+// 极简鸟居轮廓线（几何符号，点到为止，非写实场景；低对比贴合纸感底色）
 function ToriiOutline() {
   return (
     <svg viewBox="0 0 200 160" width={150} height={120} className="shrine-item"
       aria-hidden fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-      style={{ color: "var(--accent)", opacity: 0.4 }}>
+      style={{ color: "var(--text-secondary)", opacity: 0.3 }}>
       <path d="M38 50 Q100 38 162 50" />   {/* 笠木（微翘） */}
       <path d="M34 76 H166" />              {/* 贯 */}
       <path d="M54 50 V146 M146 50 V146" /> {/* 柱 */}
@@ -78,7 +78,7 @@ function RecentOfferings({ items, recentReviews, onOpenWork }) {
               className="transition-transform duration-300"
               style={{
                 transform: `translateY(${dist * 12}px) scale(${1 - dist * 0.07})`,
-                opacity: 1 - dist * 0.16,
+                opacity: 1 - dist * 0.25,
               }}>
               {cover ? (
                 <img src={cover} alt="" loading="lazy"
