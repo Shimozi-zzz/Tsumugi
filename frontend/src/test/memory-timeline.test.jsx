@@ -125,6 +125,8 @@ describe("ItemDetailPanel 双栏结构（Phase B / ADR 0042）", () => {
     await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
     expect(screen.getByText("外部世界")).toBeTruthy();
     expect(screen.getByText("我的记录")).toBeTruthy();
+    // 详情标题带编目号（ADR 0056）
+    expect(screen.getByText("NO. 0001")).toBeTruthy();
     // 外部世界内容仍在（简介段落 + 标签）
     expect(screen.getAllByText(/简介/).length).toBeGreaterThan(0);
     expect(screen.getByText("科幻")).toBeTruthy();

@@ -115,6 +115,18 @@ describe("theme system", () => {
     expect(css).toContain('html[data-theme="dark"]');
   });
 
+  it("编目抽屉默认色板（ADR 0056）：纸感底色/分层 + --font-mono + 近直角圆角 token", () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
+    const root = css.slice(0, css.indexOf("html[data-theme"));
+    expect(root).toContain("--bg: #f4efe3;");          // 米黄纸底
+    expect(root).toContain("--surface-0: #efe8d8;");   // 纸感分层
+    expect(root).toContain("--surface-1: #faf5ea;");
+    expect(root).toContain("--surface-2: #e9dfca;");
+    expect(root).toContain("--font-mono:");            // 等宽编号字体 token
+    expect(root).toContain("--radius-lg: 10px;");      // 近直角（原 16px）
+    expect(root).toContain("--radius-sm: 4px;");
+  });
+
   it("暖橙 accent 下书脊色相基准也是暖调（hexToHsl 基准），依赖 accent 的效果协调", () => {
     const { hexToHsl } = require("../bookshelf.js");
     expect(Math.round(hexToHsl("#b25b36").h)).toBe(18); // 书脊色相旋转基准为暖橙

@@ -137,6 +137,7 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
               </div>
             )}
             <div className="p-2">
+              <div className="catalog-no mb-0.5">NO. {String(hover.it.id != null ? hover.it.id : 0).padStart(4, "0")}</div>
               <div className="text-xs font-medium leading-snug line-clamp-2"
                 style={{ color: "var(--text)" }}>{hover.it.title}</div>
               {hover.loading ? (

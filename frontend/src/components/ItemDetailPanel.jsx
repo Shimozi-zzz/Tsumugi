@@ -154,6 +154,9 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
           ) : null}
           <div className="min-w-0">
             <h2 className="tsm-heading leading-tight" style={{ color: "var(--text)", fontSize: 22, fontWeight: 600 }}>{detail.title}</h2>
+            {detail.id != null && (
+              <div className="catalog-no mt-1">NO. {String(detail.id).padStart(4, "0")}</div>
+            )}
             <div className="flex items-center gap-2 mt-2 flex-wrap">
               <TagCapsule text={detail.source || "本地"} />
               {detail.rating != null && (

@@ -19,11 +19,11 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  /* ---- 圆角（--radius-lg 为主表面圆角，自定义可 inline 覆盖） ---- */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  /* ---- 圆角（编目抽屉版式：近直角为主；--radius-lg 为主表面，自定义可 inline 覆盖） ---- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
 
   /* ---- 阴影（克制：分隔用边框，阴影仅用于浮起/浮层） ---- */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -37,38 +37,39 @@
   --d-grid-min: 160px;
   --d-font: 14px;
 
-  /* ---- 表面层级（ADR 0030）：--surface-0 最暗最外层 / --surface-1 面板卡片 /
-        --surface-2 悬浮与选中态更亮一档。浅色主题默认在下方各主题块微调，深色尤其拉开。 ---- */
-  --surface-0: #fafafa;
-  --surface-1: #ffffff;
-  --surface-2: #f2f2f4;
+  /* ---- 表面层级（ADR 0030 / ADR 0056 纸感）：--surface-0 最暗最外层 / --surface-1 面板卡片 /
+        --surface-2 悬浮与选中态更亮一档。默认主题为米黄纸分层，其余主题在下方各块定义。 ---- */
+  --surface-0: #efe8d8;
+  --surface-1: #faf5ea;
+  --surface-2: #e9dfca;
 
   /* ---- 封面氛围色强度（ADR 0034）：浅色主题克制（~0.16-0.18），深色稍明显（0.30） ---- */
   --ambient-alpha: 0.16;
 
-  /* ---- 字体 token（ADR 0020 / AGENT_UI v2.2 ⑥）：关键标题用衬线，正文用系统无衬线 ---- */
+  /* ---- 字体 token（ADR 0020 / ADR 0056）：关键标题衬线、正文系统无衬线、编号等宽 ---- */
   --font-heading: Georgia, "Songti SC", "Noto Serif SC", "STSong", serif;
   --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Courier New", monospace;
 
-  /* ---- 经典白（默认主题，最克制；accent 本轮暖橙化 ADR 0053） ---- */
-  --bg: #fafafa;
-  --panel: #ffffff;
-  --panel-border: #e8e8e8;
-  --text: #18181b;
-  --text-secondary: #71717a;
+  /* ---- 编目抽屉（默认主题，ADR 0056 纸感档案色板）：米黄纸底 + 暖橙强调 ---- */
+  --bg: #f4efe3;
+  --panel: #faf5ea;
+  --panel-border: #dcd0b6;
+  --text: #2b241a;
+  --text-secondary: #7a6d57;
   --accent: #b25b36;
   --accent-hover: #9c4c2c;
   --accent-soft: #f9ede5;
-  --danger: #dc2626;
-  --ok: #059669;
-  --tag-bg: #f4f4f5;
-  --tag-text: #3f3f46;
-  --input-bg: #ffffff;
-  --input-border: #e4e4e7;
-  --rail-bg: #fafafa;
-  --card-bg: #ffffff;
-  --card-thumb: linear-gradient(150deg, #f0f0f0, #e6e6e6);
-  --card-text: #18181b;
+  --danger: #c0392b;
+  --ok: #3d7a4f;
+  --tag-bg: #eae1cd;
+  --tag-text: #5a4a30;
+  --input-bg: #faf5ea;
+  --input-border: #d8c9ab;
+  --rail-bg: #efe8d8;
+  --card-bg: #faf5ea;
+  --card-thumb: linear-gradient(150deg, #ece3cf, #e1d4b8);
+  --card-text: #2b241a;
 }
 
 /* ---- 信息密度：紧凑档 ---- */
@@ -479,11 +480,11 @@ body {
 .archive-no-lg .archive-no-mark { font-size: 0.6em; }
 .archive-no-lg .archive-no-num { font-size: 30px; font-weight: 400; font-family: var(--font-heading); line-height: 1; }
 
-/* ---- 档案卡片（ADR 0054 Archive Grid 范本）：近直角容器 + 编目行 + 衬线标题 ---- */
+/* ---- 档案卡片（ADR 0054/0056 Archive Grid）：近直角容器 + 编目行 + 衬线标题 ---- */
 .archive-card {
   background: var(--card-bg);
   border: 1px solid var(--panel-border);
-  border-radius: 6px;                       /* 容器近直角（封面在内部保留中等圆角） */
+  border-radius: 4px;                       /* 容器近直角（封面在内部保留稍圆角） */
   box-shadow: var(--shadow-sm);
   padding: 6px;
   cursor: pointer;
@@ -497,7 +498,7 @@ body {
 .archive-card-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .archive-card-cover {
   position: relative;
-  border-radius: var(--radius-sm);          /* 封面=馆藏实物，保留中等圆角 */
+  border-radius: 6px;          /* 封面=馆藏实物，比容器稍圆 */
   overflow: hidden;
   background: var(--card-thumb);
 }
@@ -522,6 +523,11 @@ body {
 .archive-card-no {
   font-variant-numeric: tabular-nums; font-size: 11px; letter-spacing: 0.12em;
   color: var(--accent); font-weight: 600;
+}
+/* 通用编目号（ADR 0056）：全站"藏品编号"标签（详情页/书架预览等） */
+.catalog-no {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 11px; letter-spacing: 0.14em; color: var(--accent); font-weight: 600;
 }
 .archive-card-title {
   font-size: 15px; font-weight: 600; line-height: 1.35;

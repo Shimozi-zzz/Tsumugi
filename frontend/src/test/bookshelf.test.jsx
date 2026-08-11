@@ -140,6 +140,14 @@ describe("Bookshelf 组件", () => {
     await waitFor(() => expect(screen.getByTestId("shelf-preview")).toBeTruthy());
     expect(screen.queryByText(/★/)).toBeNull();
   });
+
+  it("抽书预览显示编目号（ADR 0056）", async () => {
+    global.fetch = vi.fn((url) => ok({ id: 1, my_rating: null, title: "辉夜大小姐", source: "bangumi" }));
+    renderShelf([ITEM_A]);
+    fireEvent.mouseEnter(screen.getByTitle("辉夜大小姐"));
+    await waitFor(() => expect(screen.getByTestId("shelf-preview")).toBeTruthy());
+    expect(screen.getByText("NO. 0001")).toBeTruthy();
+  });
 });
 
 describe("视图切换 + 持久化 + 筛选联动（DesktopView）", () => {
