@@ -1456,7 +1456,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         </div>
 
         {section === "library" && (
-          <div className="h-full flex flex-col min-h-0">
+          <div className="lib-space h-full flex flex-col min-h-0">
             <PageHeader room="书库" path="LIBRARY" />
             <div className="flex items-center justify-between gap-3 mb-5 shrink-0">
               <div className="flex items-center gap-2">

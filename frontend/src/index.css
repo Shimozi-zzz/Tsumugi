@@ -641,6 +641,8 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 @media (max-width: 768px) {
   .room-bottom-bar { display: flex; }
   [data-testid="main-content"] { padding-bottom: 64px; }
+  /* Phase 2-1（ADR 0068）：移动端基础结构——隐藏左侧侧栏，书库/内容获得全宽 */
+  [data-testid="left-sidebar"] { display: none !important; }
 }
 
 /* 外壳开关（浮动） */
@@ -650,6 +652,15 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 
 /* 通用：书库网格内容（探索用） */
 .shell-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+
+/* 书库空间（Phase 2-1 / ADR 0068）：私人书架的列宽与留白——内容约束到舒适宽度并居中，
+   避免超宽屏把书架拉成一片；只做空间，不涉及 ArchiveCard/工具栏/分组重设计。 */
+.lib-space {
+  width: 100%;
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+}
 
 /* ---------- C 非对称档案室：不同房间格局不同 ----------
    Phase 2-0（ADR 0067）：rail 视觉语言统一到「馆内导览」Design System——
