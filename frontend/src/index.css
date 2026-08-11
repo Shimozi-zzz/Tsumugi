@@ -478,3 +478,90 @@ body {
 .archive-no-lg { gap: 6px; }
 .archive-no-lg .archive-no-mark { font-size: 0.6em; }
 .archive-no-lg .archive-no-num { font-size: 30px; font-weight: 400; font-family: var(--font-heading); line-height: 1; }
+
+/* ---- 档案卡片（ADR 0054 Archive Grid 范本）：近直角容器 + 编目行 + 衬线标题 ---- */
+.archive-card {
+  background: var(--card-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;                       /* 容器近直角（封面在内部保留中等圆角） */
+  box-shadow: var(--shadow-sm);
+  padding: 6px;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.archive-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border));
+}
+.archive-card-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.archive-card-cover {
+  position: relative;
+  border-radius: var(--radius-sm);          /* 封面=馆藏实物，保留中等圆角 */
+  overflow: hidden;
+  background: var(--card-thumb);
+}
+.archive-card-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.archive-card-cover-btn {
+  position: absolute; top: 6px; right: 6px; z-index: 5;
+  font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  background: rgba(8,10,18,0.65); color: #fff; opacity: 0;
+  transition: opacity .15s ease;
+}
+.archive-card:hover .archive-card-cover-btn { opacity: 1; }
+.archive-card-info { padding: 8px 4px 2px; }
+.archive-card-meta {
+  display: flex; align-items: baseline; gap: 8px;
+  padding-bottom: 6px; margin-bottom: 6px;
+  border-bottom: 1px solid var(--panel-border);   /* 编目行细分隔，档案排布 */
+}
+.archive-card-source {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.archive-card-no {
+  font-variant-numeric: tabular-nums; font-size: 11px; letter-spacing: 0.12em;
+  color: var(--accent); font-weight: 600;
+}
+.archive-card-title {
+  font-size: 15px; font-weight: 600; line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  min-height: 40px;
+}
+.archive-card-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 6px; min-height: 18px;
+}
+.archive-card-type { font-size: 11px; color: var(--text-secondary); }
+.archive-card-action { font-size: 11px; opacity: 0; transition: opacity .15s ease; }
+.archive-card:hover .archive-card-action { opacity: 1; }
+.archive-card-action.ac { color: var(--accent); }
+.archive-card-action.dn { color: var(--danger); }
+
+/* ---- 档案占位（无封面）：书脊轮廓 + 编目号，不再是无内容灰块 ---- */
+.archive-ph {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: var(--card-thumb);
+  position: relative;
+}
+.archive-ph::after {
+  content: ""; position: absolute; inset: 6px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 28%, var(--panel-border));
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+.archive-ph-spine {
+  width: 16px; height: 44px; position: relative;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 50%, var(--panel-border));
+  border-radius: 2px;
+}
+.archive-ph-spine-rule {
+  position: absolute; left: 6px; top: 5px; bottom: 5px; width: 1.5px;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.archive-ph-no {
+  font-variant-numeric: tabular-nums; font-size: 11px; letter-spacing: 0.18em;
+  color: var(--text-secondary);
+}

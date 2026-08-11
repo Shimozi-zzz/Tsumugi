@@ -30,6 +30,7 @@ import CoverAmbient from "./CoverAmbient.jsx";
 import HomeShrine from "./HomeShrine.jsx";
 import MemoryGallery from "./MemoryGallery.jsx";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
+import ArchiveCard from "./ArchiveCard.jsx";
 import { WORK_TYPES, WORK_TYPE_LABEL } from "./ui.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
@@ -1477,57 +1478,15 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   const selected = selectedIds.has(it.id);
                   return (
                   <CoverAmbient key={it.id} src={cardCover(it)} alphaFactor={0.6}>
-                  <div className="desk-card group cursor-pointer"
-                    onClick={() => { if (selectMode) toggleSelect(it.id); else if (it.source !== "local") openItemDetail(it); }}
+                  <ArchiveCard
+                    it={it} cover={cardCover(it)}
+                    onOpen={() => { if (it.source !== "local") openItemDetail(it); }}
                     onContextMenu={(e) => openCtxMenu(e, it)}
-                    style={selected ? { borderColor: "var(--accent)", boxShadow: "0 0 0 2px var(--accent-soft)" } : undefined}>
-                    <div className="relative" style={{ aspectRatio: "3/4", background: "var(--card-thumb)" }}>
-                      {cardCover(it) ? (
-                        <img src={cardCover(it)} alt={it.title} loading="lazy"
-                          className="w-full h-full object-cover"
-                          onError={(e) => { e.target.style.display = "none"; }} />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-2xl"
-                          style={{ color: "var(--accent)" }}>{coverLabel(it)}</div>
-                      )}
-                      {it.source !== "local" && !selectMode && (
-                        <span className="absolute top-1.5 left-1.5 text-[10px] px-1.5 py-0.5 rounded-full"
-                          style={{ backgroundColor: "var(--accent)", color: "#fff" }}>{it.source}</span>
-                      )}
-                      {selectMode && (
-                        <span className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[11px]"
-                          style={{ backgroundColor: selected ? "var(--accent)" : "rgba(255,255,255,0.9)",
-                            color: selected ? "#fff" : "var(--text-secondary)",
-                            border: "1px solid var(--accent)" }}>
-                          {selected ? "✓" : ""}
-                        </span>
-                      )}
-                      {/* 更换封面（hover 显示） */}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); coverTargetRef.current = it.id; coverFileRef.current?.click(); }}
-                        className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ backgroundColor: "rgba(8,10,18,0.65)", color: "#fff" }}>
-                        换封面
-                      </button>
-                    </div>
-                    <div className="p-2" style={{ padding: "var(--d-card-pad)" }}>
-                      <div className="font-medium leading-snug line-clamp-2"
-                        style={{ color: "var(--card-text)", fontSize: "var(--d-card-title)", minHeight: 34 }}>{it.title}</div>
-                      <div className="flex items-center justify-between mt-0.5">
-                        <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                          {it.type === "external_ref" ? it.source : it.type === "image" ? "图片" : `${it.chunks_count} 块`}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <button onClick={(e) => { e.stopPropagation(); setReviewItem(it); }}
-                            className="text-[11px] opacity-0 group-hover:opacity-100 transition-opacity"
-                            style={{ color: "var(--accent)" }}>书评</button>
-                          <button onClick={async (e) => { e.stopPropagation(); if (window.confirm(`确认删除「${it.title}」？`)) { try { await deleteItem(it.id); toast.success("已删除"); refresh(); } catch (err) { toast.error(err.message); } } }}
-                            className="text-[11px] opacity-0 group-hover:opacity-100 transition-opacity"
-                            style={{ color: "var(--danger)" }}>删除</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                    onReview={() => setReviewItem(it)}
+                    onDelete={async () => { if (window.confirm(`确认删除「${it.title}」？`)) { try { await deleteItem(it.id); toast.success("已删除"); refresh(); } catch (err) { toast.error(err.message); } } }}
+                    selected={selected} selectMode={selectMode}
+                    onToggleSelect={() => toggleSelect(it.id)}
+                    onReplaceCover={() => { coverTargetRef.current = it.id; coverFileRef.current?.click(); }} />
                   </CoverAmbient>
                   );
                 })}
