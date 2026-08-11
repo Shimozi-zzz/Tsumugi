@@ -2211,9 +2211,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       {/* 命令面板（ADR 0031：Ctrl/Cmd+K） */}
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} ctx={cmdCtx} />
 
-      {/* 全局 toast */}
-      <ToastHost />
-
       {/* 新建分组浮层 */}
       {showGroupModal && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4"
@@ -2327,8 +2324,10 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       )}
     </div>
       ) : (
-        <ShellC shellValue={shellConcept} onShellChange={changeShellConcept} />
+        <ShellC shellValue={shellConcept} onShellChange={changeShellConcept} setTheme={setTheme} />
       )}
+      {/* 全局 toast（两外壳共用） */}
+      <ToastHost />
     </>
   );
 }

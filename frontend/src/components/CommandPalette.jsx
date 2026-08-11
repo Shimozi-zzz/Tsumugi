@@ -7,13 +7,17 @@ import { buildCommands, matchCommand, GROUP_ORDER } from "../commands.js";
 
 const GROUP_CAP = { 条目: 8, 动作: 100, 主题: 100, 标签: 8 };
 
-export default function CommandPalette({ open, onClose, ctx }) {
+export default function CommandPalette({ open, onClose, ctx, commands }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
 
-  // 全部命令（构建一次；内容搜索的 items 由 ctx 提供）
-  const allCommands = useMemo(() => (ctx ? buildCommands(ctx) : []), [ctx]);
+  // 全部命令（构建一次；内容搜索的 items 由 ctx 提供）。
+  // 传入 commands 时直接用（ShellC 作用域命令集，ADR 0064），否则用 buildCommands(ctx)。
+  const allCommands = useMemo(
+    () => (commands ? commands : (ctx ? buildCommands(ctx) : [])),
+    [ctx, commands]
+  );
 
   // 过滤 + 分组 + 打平（键盘导航用扁平索引）
   const { groups, flat } = useMemo(() => {

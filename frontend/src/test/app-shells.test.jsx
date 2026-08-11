@@ -12,6 +12,9 @@ function mockFetch(items = [], search = { works: [], reviews: [], memories: [] }
   global.fetch = vi.fn((url) => {
     const u = String(url);
     if (u.includes("/search/my")) return ok(search);
+    if (u.includes("/llm/ollama-status")) return ok({ available: false, models: [], reason: "" });
+    if (u.includes("/llm/providers")) return ok({ providers: [], enabled_name: null });
+    if (u.includes("/collections")) return ok([]);
     if (u.includes("/memories")) return ok([]);
     if (u.includes("/reviews")) return ok([]);
     if (u.includes("/detail")) return ok({ id: items[0]?.id, title: items[0]?.title || "", source: "bangumi", description: "简介", rating: 8.9, tags: [], characters: [], image_url: null, file_path: null, raw_metadata: null, social: {} });
@@ -74,6 +77,40 @@ describe("保留的外壳结构", () => {
     await waitFor(() => expect(screen.getByText("应用外壳")).toBeTruthy());
     fireEvent.click(screen.getByText("经典三栏"));
     expect(onChange).toHaveBeenCalledWith("classic");
+  });
+
+  it("C 外壳：书库三种浏览（网格 / 书架 / 分组列表）+ 类型筛选", async () => {
+    mockFetch(ITEMS);
+    const { container } = render(<ShellC />);
+    await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
+    expect(container.querySelector(".shell-grid")).toBeTruthy(); // 默认网格
+    fireEvent.click(screen.getByTitle("书架视图"));
+    await waitFor(() => expect(container.querySelector('[data-testid="shelf-group"]')).toBeTruthy());
+    fireEvent.click(screen.getByTitle("分组列表"));
+    await waitFor(() => expect(screen.getByText("未收藏")).toBeTruthy());
+    fireEvent.click(screen.getByTitle("网格视图"));
+    await waitFor(() => expect(container.querySelector(".shell-grid")).toBeTruthy());
+  });
+
+  it("C 外壳：管理室真实化（AI Provider + 数据备份 + 外壳切换）", async () => {
+    mockFetch(ITEMS);
+    render(<ShellC shellValue="c" />);
+    fireEvent.click(screen.getByText("管理室"));
+    await waitFor(() => expect(screen.getByText("应用外壳")).toBeTruthy());
+    expect(screen.getByText("AI Provider")).toBeTruthy();
+    expect(screen.getByText("数据备份")).toBeTruthy();
+    expect(screen.getByText("导出备份")).toBeTruthy();
+    expect(screen.getByText("导入备份")).toBeTruthy();
+  });
+
+  it("C 外壳：Ctrl+K 命令面板（ADR 0065，命令可切换房间）", async () => {
+    mockFetch(ITEMS);
+    const { container } = render(<ShellC shellValue="c" />);
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const input = await screen.findByPlaceholderText(/搜索资料/);
+    fireEvent.change(input, { target: { value: "管理室" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(container.querySelector('.shell-c-room[data-room="settings"]')).toBeTruthy());
   });
 });
 
