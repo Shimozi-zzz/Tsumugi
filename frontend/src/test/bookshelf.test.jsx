@@ -46,6 +46,20 @@ describe("bookshelf 纯函数", () => {
     expect(c1).toMatch(/^hsl\(/);
   });
 
+  it("spineColor（ADR 0058 暖粉彩）：饱和度 30-40%、明度 55-65%", () => {
+    const accent = "#b25b36";
+    for (let seed = 0; seed < 30; seed++) {
+      const m = /hsl\(([^)]+)\)/.exec(spineColor(accent, seed));
+      const [h, s, l] = m[1].split(",").map((x) => parseFloat(x));
+      expect(s).toBeGreaterThanOrEqual(30);
+      expect(s).toBeLessThanOrEqual(40);
+      expect(l).toBeGreaterThanOrEqual(55);
+      expect(l).toBeLessThanOrEqual(65);
+      expect(h).toBeGreaterThanOrEqual(0);
+      expect(h).toBeLessThan(360);
+    }
+  });
+
   it("spineThickness（P5）：正文越长书脊越厚，带钳制；无正文用 chunk 兜底", () => {
     expect(spineThickness({ content: "" })).toBeGreaterThanOrEqual(9);
     const thin = spineThickness({ content: "短" });
@@ -89,17 +103,30 @@ describe("Bookshelf 组件", () => {
       { id: 1, title: "辉夜大小姐", tags: ["恋爱"], content: "" },
       { id: 2, title: "命运石之门", tags: ["科幻"], content: "" },
     ]);
-    // 两层书架（恋爱/科幻），每层有标签
+    // 两层书架（恋爱/科幻），每层左侧有目录卡标签
     const groups = [...container.querySelectorAll('[data-testid="shelf-group"]')];
     expect(groups.length).toBe(2);
-    expect(groups[0].textContent).toContain("恋爱");
-    expect(groups[1].textContent).toContain("科幻");
+    const labels = [...container.querySelectorAll('[data-testid="shelf-label"]')].map((l) => l.textContent);
+    expect(labels[0]).toContain("恋爱");
+    expect(labels[1]).toContain("科幻");
     // 层板线存在
     expect(container.querySelector(".shelf-board")).toBeTruthy();
     // 书脊带取书浮起类
     const book = container.querySelector("button.shelf-book");
     expect(book).toBeTruthy();
     expect(book.className).toContain("shelf-book");
+  });
+
+  it("抽书预览含书评摘录（ADR 0058）", async () => {
+    global.fetch = vi.fn((url) => {
+      const u = String(url);
+      if (u.includes("/detail")) return ok({ id: 1, my_rating: 8.5, title: "辉夜大小姐", source: "bangumi" });
+      if (u.includes("/reviews")) return ok([{ id: 10, content: "这是一段关于辉夜大小姐的感想，写得很长很长。", spoiler: false }]);
+      return ok({});
+    });
+    renderShelf();
+    fireEvent.mouseEnter(screen.getByTitle("辉夜大小姐"));
+    await waitFor(() => expect(screen.getByText(/这是一段关于辉夜大小姐/)).toBeTruthy());
   });
 
   it("点击书脊 → onOpenItem 携带该条目", () => {

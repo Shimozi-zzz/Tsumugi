@@ -63,16 +63,17 @@ export function hslCss(h, s, l) {
 }
 
 /**
- * 由主题 accent 派生书脊色：seed 决定色相偏移，饱和度/明度向"书脊质感的
- * 低饱和中明度"收敛（不引入取色库，不脱离主题色系）。
+ * 由主题 accent 派生书脊色：seed 决定色相偏移，饱和度/明度收敛为**暖粉彩**
+ * （饱和 30-40%、明度 55-65%）——同标签同色相（相近和谐），整体低饱和柔和、
+ * 贴合纸感主题（ADR 0056/0058）。
  */
 export function spineColor(accentHex, seed) {
   const { h, s, l } = hexToHsl(accentHex);
   const hue = (Math.round(h) + ((seed * 47) % 360) + 360) % 360;
   return hslCss(
     hue,
-    Math.min(Math.max(s * 0.72, 0.32), 0.5),
-    Math.min(Math.max(l * 0.72, 0.4), 0.58),
+    Math.min(Math.max(s * 0.72, 0.30), 0.40),
+    Math.min(Math.max(l * 1.3, 0.55), 0.65),
   );
 }
 

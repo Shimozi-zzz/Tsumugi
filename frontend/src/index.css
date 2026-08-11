@@ -464,9 +464,15 @@ body {
 .shrine.shrine-skip .shrine-veil,
 .shrine.shrine-skip .shrine-item { transition: none !important; }
 
-/* P5 / ADR 0049 真书架：取书浮起（hover）*/
+/* P5 / ADR 0049 真书架：取书浮起（hover）+ 目录卡标签 + 层板 */
 .shelf-book { transition: transform .3s ease, box-shadow .3s ease; }
-.shelf-book:hover { transform: translateY(-5px); }
+.shelf-book:hover { transform: translateY(-6px); }
+/* 分类架目录卡标签（左侧边） */
+.shelf-label { display: inline-flex; align-items: baseline; gap: 8px; margin: 0 0 6px 2px;
+  padding: 3px 10px 3px 8px; border: 1px solid var(--panel-border); border-left: 3px solid var(--accent);
+  background: var(--surface-1); border-radius: 2px; }
+.shelf-label-tag { font-family: Georgia, "Songti SC", serif; font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: 0.05em; }
+.shelf-label-count { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; color: var(--text-secondary); }
 
 /* 本轮（ADR 0053）：关键标题用衬线（排版自信升级）；字号/字重在具体组件 inline 控制 */
 .tsm-heading { font-family: var(--font-heading); letter-spacing: 0.01em; }
