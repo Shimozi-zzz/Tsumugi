@@ -176,6 +176,48 @@ describe("Phase 3-1 统一 Work Detail（外部未收藏模式）", () => {
   });
 });
 
+describe("我的记忆章节（Phase 3-2-D）", () => {
+  it("章节存在：我的记忆 · MY MEMORY；composer 与 MemoryTimeline 归位", async () => {
+    mockFetch();
+    const { container } = render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
+    expect(screen.getByText("我的记忆")).toBeTruthy();
+    expect(screen.getByText("MY MEMORY")).toBeTruthy();
+    // composer 归位（输入框 + 记录按钮）
+    expect(screen.getByPlaceholderText(/写一句此刻的感想/)).toBeTruthy();
+    expect(screen.getByText("记录")).toBeTruthy();
+    // MemoryTimeline 归位（记忆条目渲染）
+    await waitFor(() => expect(screen.getAllByText("神作").length).toBeGreaterThan(0));
+    // 没有重复 composer / 没有重复 MemoryTimeline
+    expect(screen.getAllByText("记录").length).toBe(1);
+    expect(container.querySelectorAll(".relative.pl-5").length).toBe(1);
+  });
+
+  it("章节顺序：这个世界 → 我与它 → 相遇纪事 → 我的记忆", async () => {
+    mockFetch();
+    const { container } = render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
+    const hs = Array.from(container.querySelectorAll(".wd-chapter-title")).map((h) => h.textContent);
+    const order = ["这个世界", "我与它", "相遇纪事", "我的记忆"];
+    const idx = order.map((t) => hs.indexOf(t));
+    expect(idx.every((v, i) => v !== -1 && (i === 0 || v > idx[i - 1]))).toBe(true);
+  });
+
+  it("composer 提交仍调用 createDirectMemory（POST /items/{id}/memories）", async () => {
+    mockFetch();
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText(/写一句此刻的感想/), { target: { value: "今天很平静" } });
+    fireEvent.click(screen.getByText("记录"));
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/items/1/memories"),
+        expect.objectContaining({ method: "POST" })
+      )
+    );
+  });
+});
+
 describe("默认主题渲染（ADR 0059 起仅保留编目抽屉一套）", () => {
   it("时间轴与双栏结构在默认主题下正常渲染", async () => {
     applyTheme("default");

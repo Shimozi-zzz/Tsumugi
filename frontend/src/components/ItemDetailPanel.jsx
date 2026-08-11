@@ -390,10 +390,15 @@ export default function ItemDetailPanel({
           </section>
         )}
 
-        {/* 我的记忆（P3 composer + MemoryTimeline：3-2-D 归位叙事标题，本阶段保持功能与位置） */}
-        <div className="mt-8">
+        {/* 我的记忆（Phase 3-2-D）：我主动留下的 Memory——composer + MemoryTimeline */}
+        <section className="mt-8 pt-6 border-t" style={{ borderColor: "var(--panel-border)" }}>
+          <div className="flex items-baseline gap-3">
+            <h3 className="wd-chapter-title">我的记忆</h3>
+            <span className="wd-meta" style={{ fontSize: 10, letterSpacing: "0.2em" }}>MY MEMORY</span>
+          </div>
+          <div className="wd-chapter-rule" />
           {detail.source !== "local" && (
-            <div className="mb-3">
+            <div className="mb-5">
               <div className="flex items-center gap-2 flex-wrap">
                 <input value={draft} onChange={(e) => setDraft(e.target.value)}
                   placeholder="写一句此刻的感想…（轻量记录，不写正式书评）"
@@ -430,7 +435,7 @@ export default function ItemDetailPanel({
             </div>
           )}
           <MemoryTimeline itemId={itemId} refreshKey={timelineRefresh} memories={memories} />
-        </div>
+        </section>
         </>
         )}
       </div>
