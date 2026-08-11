@@ -65,31 +65,49 @@ export default function CommandPalette({ open, onClose, ctx, commands }) {
   let cursor = 0;
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center"
-      style={{ backgroundColor: "rgba(8,10,18,0.45)", paddingTop: "18vh" }}
+      style={{ backgroundColor: "rgba(20, 14, 8, 0.5)", paddingTop: "16vh" }}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-xl rounded-2xl border overflow-hidden"
-        style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)", boxShadow: "var(--shadow-lg)" }}>
-        {/* 输入框 */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: "var(--panel-border)" }}>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2"
-            className="shrink-0" style={{ color: "var(--text-secondary)" }}>
-            <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
-          </svg>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setActiveIndex(0); }}
-            onKeyDown={onKeyDown}
-            placeholder="搜索资料 / 输入命令…（↑↓ 选择 · Enter 执行 · Esc 关闭）"
-            className="flex-1 bg-transparent outline-none text-sm min-w-0"
-            style={{ color: "var(--text)" }}
-          />
-          <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0"
-            style={{ color: "var(--text-secondary)", backgroundColor: "var(--surface-2)" }}>Ctrl K</span>
+      {/* 索书卡式检索浮层（ADR 0066）：纸卡 + serif 标题 + hairline + mono 提示 */}
+      <div className="w-full max-w-xl overflow-hidden"
+        style={{
+          backgroundColor: "var(--card-bg)",
+          border: "1px solid var(--panel-border)",
+          borderRadius: "var(--radius-lg)",
+          boxShadow: "var(--shadow-float), inset 0 0 46px color-mix(in srgb, var(--accent) 4%, transparent)",
+          animation: "var(--motion-open)",
+          animationName: "cp-enter",
+        }}>
+        {/* 卡头：馆藏检索 */}
+        <div className="px-5 pt-4 pb-3 border-b" style={{ borderColor: "var(--panel-border)" }}>
+          <div className="flex items-baseline gap-3">
+            <span className="tsm-heading" style={{ color: "var(--text)", fontSize: 16, fontWeight: 600, letterSpacing: "0.04em" }}>
+              馆藏检索
+            </span>
+            <span className="text-[10px] tracking-[0.14em]" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+              LIBRARY INDEX
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5"
+              className="shrink-0" style={{ color: "var(--text-secondary)" }}>
+              <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
+            </svg>
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setActiveIndex(0); }}
+              onKeyDown={onKeyDown}
+              placeholder="搜索资料 / 输入命令…（↑↓ 选择 · Enter 执行 · Esc 关闭）"
+              className="flex-1 bg-transparent outline-none text-sm min-w-0"
+              style={{ color: "var(--text)" }}
+            />
+            <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0"
+              style={{ color: "var(--text-secondary)", backgroundColor: "var(--surface-2)" }}>Ctrl K</span>
+          </div>
         </div>
 
         {/* 结果列表（独立滚动，不引入页面滚动，ADR 0028/0031） */}
-        <div className="max-h-[46vh] overflow-y-auto p-2" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="max-h-[46vh] overflow-y-auto px-3 py-2" onMouseDown={(e) => e.stopPropagation()}>
           {flat.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm" style={{ color: "var(--text-secondary)" }}>
               {query.trim() ? "没有匹配的命令或资料。" : "输入内容搜索或命令…"}
@@ -97,7 +115,8 @@ export default function CommandPalette({ open, onClose, ctx, commands }) {
           ) : (
             groups.map(({ group, items }) => (
               <div key={group} className="mb-1.5">
-                <div className="px-2 py-1 text-[11px] tracking-wider" style={{ color: "var(--text-secondary)" }}>
+                <div className="px-2 py-1 text-[10px] tracking-[0.14em]"
+                  style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
                   {group}
                 </div>
                 {items.map((c) => {
@@ -109,10 +128,12 @@ export default function CommandPalette({ open, onClose, ctx, commands }) {
                       type="button"
                       onMouseEnter={() => setActiveIndex(idx)}
                       onClick={() => run(c)}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-[13px]"
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left text-[13px]"
                       style={{
                         color: "var(--text)",
                         backgroundColor: active ? "var(--surface-2)" : "transparent",
+                        boxShadow: active ? "var(--focus-ring)" : "none",
+                        borderRadius: 4,
                       }}>
                       <span className="w-5 shrink-0 text-center text-[12px]" style={{ color: active ? "var(--accent)" : "var(--text-secondary)" }}>
                         {c.icon || ""}
