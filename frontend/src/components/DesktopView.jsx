@@ -1280,7 +1280,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                       style={{ color: activeGroup === k ? "var(--accent)" : "var(--text)",
                         backgroundColor: activeGroup === k ? "var(--accent-soft)" : "transparent" }}>
                       <span>{label}</span>
-                      <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{c}</span>
+                      {/* Phase 2-4（ADR 0071）：数量降权为 mono 微字 */}
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.08em", color: "var(--ink-2)" }}>{c}</span>
                     </button>
                   ))}
 
@@ -1342,7 +1343,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                           style={{ color: activeTag === t.name ? "var(--tag-text)" : "var(--text)",
                             backgroundColor: activeTag === t.name ? "var(--tag-bg)" : "transparent" }}>
                           <span className="truncate"># {t.name}</span>
-                          <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{t.count}</span>
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.08em", color: "var(--ink-2)" }}>{t.count}</span>
                         </button>
                       ))}
                     </>

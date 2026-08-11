@@ -613,6 +613,21 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
   color: var(--text-secondary);
 }
 
+/* 书架分区（Phase 2-4 / ADR 0071）：状态=书架章节标题，serif + hairline + mono 册数 */
+.status-shelf-name {
+  font-family: var(--font-heading); font-size: 14px; font-weight: 600;
+  letter-spacing: var(--tracking-serif); color: var(--ink-0);
+  white-space: nowrap;
+}
+.status-shelf-rule {
+  flex: 1; min-width: 12px; height: 1px; align-self: center;
+  background: linear-gradient(to right, var(--panel-border), transparent);
+}
+.status-shelf-count {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
+  color: var(--ink-2); white-space: nowrap;
+}
+
 /* ==========================================================================
    ADR 0057 · 应用外壳空间结构（ADR 0059 起仅 classic + C，沿用编目抽屉配色/字体/编号）
    ========================================================================== */
