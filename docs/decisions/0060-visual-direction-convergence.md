@@ -10,18 +10,28 @@
 - 移除 `GridConcepts.jsx`（A 深夜书房 / B 编目卡片抽屉 / C 展览橱窗 三个探索组件 +
   `GridConceptSwitcher` + `parseConcept`）及对应测试 `grid-concepts.test.jsx`。
 - `DesktopView`：移除工具栏「视觉方向」开关、`gridConcept` 状态、`?concept=` URL 直通与
-  localStorage `tsumugi-grid-concept`；网格分支仅保留经典档案卡（ArchiveCard 编目行
-  `NO.xxxx · 来源`，ADR 0054/0056）即编目抽屉正式形态。
+  localStorage `tsumugi-grid-concept`；网格分支仅保留编目抽屉**索书卡**（ArchiveCard 升级
+  为真实档案卡版式：顶行等宽编目 NO.xxxx · 来源 + 档卡横线 + 衬线标题 + 封面 + 密集元数据行
+  `─ 编目号/─ 来源/─ 记录 N 条`）。
 - `index.css`：移除 ADR 0055 探索块（`.grid-concept-switch`、`.concept-a/b/c*` 全部规则）。
 - 理由：编目抽屉已转正为唯一设计系统（0056）；A/C 主张经对比未采纳，开关徒增维护面。
+  探索版 B 索书卡（0055）的关键签名元素（档卡横线、密集元数据行、暖纸内晕）正式并入
+  ArchiveCard，网格不再是"经典档案卡"初始风格。
 
 ## 二、两个外壳均为编目抽屉风格
 
-- 经典三栏：书库网格即编目抽屉档案卡（编目号/来源徽标/衬线标题/近直角/纸感 token）。
+- 经典三栏：书库网格即编目抽屉索书卡（顶行等宽编目 + 档卡横线 + 衬线标题 + 密集元数据行）。
 - C 非对称档案室（ShellC，ADR 0057/0059）：导航 rail 与房间内容均沿用编目抽屉 token
   （--accent/--accent-soft/--panel-border/--font-mono 等），书库房间直接渲染 ArchiveCard
-  编目抽屉卡片。两个外壳同一视觉方向，无第二套视觉语言。
+  索书卡。两个外壳同一视觉方向，无第二套视觉语言。
 
 ## 三、测试与实测
 
-- vitest **229 passed**（删 6 例 grid-concepts；其余外壳/卡片测试不依赖概念开关）。build 通过。
+- vitest **230 passed**（删 6 例 grid-concepts、+1 索书卡元数据行断言；其余外壳/卡片测试不
+  依赖概念开关）。build 通过。
+
+## 四、勘误（同日）
+
+- ADR 0060 初稿称网格为"经典档案卡（初始风格）"，与用户定案不符——用户选定的编目抽屉
+  是 0055 探索版 B「索书卡」（档卡横线 + 密集元数据行）。已更正：索书卡签名元素正式并入
+  ArchiveCard，两外壳（经典三栏 / ShellC）同用。

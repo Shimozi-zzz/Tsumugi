@@ -1,8 +1,7 @@
-// 档案卡片（本轮 Archive Grid 结构性重设计的范本，ADR 0054）
-// - 藏品编目号（NO.xxxx 等宽）+ 来源**文字标注**（不再盖在封面上的色块徽章）
-// - 容器近直角（6px），封面作为"馆藏实物"在内部保留中等圆角（--radius-sm）
-// - 标题用衬线加大字重（排版自信）；编目行细分隔，档案排布感
-// - 无封面 → 档案占位（书脊轮廓 + 编目号，不再是无内容的灰色方块）
+// 档案卡片 · 编目抽屉索书卡（ADR 0054/0056/0060）
+// - 真实档案卡版式：顶行等宽编目（NO.xxxx + 来源文字标注，非封面色块）+ 档卡横线
+// - 衬线标题（排版自信）；无封面 → 档案占位（书脊轮廓 + 编目号）
+// - 密集元数据行（─ 编目号 / ─ 来源 / ─ 记录 N 条），"被认真编目的私人档案"签名
 import React from "react";
 
 /** 藏品编目号：条目入库序号（id）补零，如 NO. 0003。 */
@@ -34,6 +33,13 @@ export default function ArchiveCard({
       onClick={handleClick}
       onContextMenu={onContextMenu}
       data-testid="archive-card">
+      <div className="archive-card-meta">
+        <span className="archive-card-no" title={`藏品号 ${no}`}>NO. {no}</span>
+        {it.source !== "local" && (
+          <span className="archive-card-source">{it.source}</span>
+        )}
+      </div>
+      <h3 className="archive-card-title tsm-heading">{it.title}</h3>
       <div className="archive-card-cover" style={{ aspectRatio: "3/4" }}>
         {cover ? (
           <img src={cover} alt={it.title} loading="lazy" className="archive-card-img"
@@ -53,27 +59,22 @@ export default function ArchiveCard({
             className="archive-card-cover-btn">换封面</button>
         )}
       </div>
-      <div className="archive-card-info">
-        {/* 编目行：藏品号 + 来源（文字标注，非封面色块） */}
-        <div className="archive-card-meta">
-          <span className="archive-card-no" title={`藏品号 ${no}`}>NO. {no}</span>
-          {it.source !== "local" && (
-            <span className="archive-card-source" title={`来源：${it.source}`}>{it.source}</span>
+      <div className="archive-card-lines" data-testid="archive-card-lines">
+        <span>─ 编目号 {no}</span>
+        <span>─ 来源 {it.source === "local" ? "本地笔记" : it.source}</span>
+        {it.chunks_count != null && <span>─ 记录 {it.chunks_count} 条</span>}
+      </div>
+      <div className="archive-card-actions">
+        <span className="archive-card-type">
+          {it.type === "image" ? "图片" : it.type === "note" ? `${it.chunks_count || 0} 块` : ""}
+        </span>
+        <div className="flex items-center gap-2">
+          {onReview && (
+            <button className="archive-card-action ac" onClick={(e) => { e.stopPropagation(); onReview(); }}>书评</button>
           )}
-        </div>
-        <h3 className="archive-card-title tsm-heading">{it.title}</h3>
-        <div className="archive-card-actions">
-          <span className="archive-card-type">
-            {it.type === "image" ? "图片" : it.type === "note" ? `${it.chunks_count || 0} 块` : ""}
-          </span>
-          <div className="flex items-center gap-2">
-            {onReview && (
-              <button className="archive-card-action ac" onClick={(e) => { e.stopPropagation(); onReview(); }}>书评</button>
-            )}
-            {onDelete && (
-              <button className="archive-card-action dn" onClick={(e) => { e.stopPropagation(); onDelete(); }}>删除</button>
-            )}
-          </div>
+          {onDelete && (
+            <button className="archive-card-action dn" onClick={(e) => { e.stopPropagation(); onDelete(); }}>删除</button>
+          )}
         </div>
       </div>
     </div>

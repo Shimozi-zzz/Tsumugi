@@ -74,6 +74,15 @@ describe("ArchiveCard", () => {
     expect(container.querySelector(".archive-card").className).toContain("archive-card-selected");
   });
 
+  it("索书卡密集元数据行（编目抽屉签名）：─ 编目号 / ─ 来源 / ─ 记录", () => {
+    const { container } = render(<ArchiveCard it={ITEM} cover={null} onOpen={() => {}} />);
+    const lines = container.querySelector('[data-testid="archive-card-lines"]');
+    expect(lines).toBeTruthy();
+    expect(lines.textContent).toContain("─ 编目号 0003");
+    expect(lines.textContent).toContain("─ 来源 bangumi");
+    expect(lines.textContent).toContain("─ 记录 1 条");
+  });
+
   it("本地笔记不显示来源标注", () => {
     render(<ArchiveCard it={{ id: 1, title: "笔记", type: "note", source: "local" }} cover={null} onOpen={() => {}} />);
     expect(screen.queryByText("local")).toBeNull();
