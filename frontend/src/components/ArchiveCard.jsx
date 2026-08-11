@@ -1,7 +1,7 @@
-// 档案卡片 · 编目抽屉索书卡（ADR 0054/0056/0060）
-// - 真实档案卡版式：顶行等宽编目（NO.xxxx + 来源文字标注，非封面色块）+ 档卡横线
-// - 衬线标题（排版自信）；无封面 → 档案占位（书脊轮廓 + 编目号）
-// - 密集元数据行（─ 编目号 / ─ 来源 / ─ 记录 N 条），"被认真编目的私人档案"签名
+// 档案卡片 · 编目抽屉索书卡（ADR 0054/0056/0060/0061/0069）
+// Phase 2-2（ADR 0069）：ArchiveCard 视觉层级改为「书」——封面是第一视觉锚点，
+// 之下依次：衬线标题 → 编目行（NO. + 来源）→ 索书卡元数据行（─ 编目号/来源/记录）→
+// 次级操作。保留全部信息与交互；新增键盘焦点（Enter/Space 打开，--focus-ring）。
 import React from "react";
 
 /** 藏品编目号：条目入库序号（id）补零，如 NO. 0003。 */
@@ -28,18 +28,18 @@ export default function ArchiveCard({
 }) {
   const no = catalogNo(it);
   const handleClick = () => { if (selectMode) onToggleSelect?.(); else onOpen?.(); };
+  const handleKey = (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(); }
+  };
   return (
     <div className={"archive-card group" + (selected ? " archive-card-selected" : "")}
       onClick={handleClick}
+      onKeyDown={handleKey}
+      role="button"
+      tabIndex={0}
+      aria-label={it.title}
       onContextMenu={onContextMenu}
       data-testid="archive-card">
-      <div className="archive-card-meta">
-        <span className="archive-card-no" title={`藏品号 ${no}`}>NO. {no}</span>
-        {it.source !== "local" && (
-          <span className="archive-card-source">{it.source}</span>
-        )}
-      </div>
-      <h3 className="archive-card-title tsm-heading">{it.title}</h3>
       <div className="archive-card-cover" style={{ aspectRatio: "3/4" }}>
         {cover ? (
           <img src={cover} alt={it.title} loading="lazy" className="archive-card-img"
@@ -59,22 +59,31 @@ export default function ArchiveCard({
             className="archive-card-cover-btn">换封面</button>
         )}
       </div>
-      <div className="archive-card-lines" data-testid="archive-card-lines">
-        <span>─ 编目号 {no}</span>
-        <span>─ 来源 {it.source === "local" ? "本地笔记" : it.source}</span>
-        {it.chunks_count != null && <span>─ 记录 {it.chunks_count} 条</span>}
-      </div>
-      <div className="archive-card-actions">
-        <span className="archive-card-type">
-          {it.type === "image" ? "图片" : it.type === "note" ? `${it.chunks_count || 0} 块` : ""}
-        </span>
-        <div className="flex items-center gap-2">
-          {onReview && (
-            <button className="archive-card-action ac" onClick={(e) => { e.stopPropagation(); onReview(); }}>书评</button>
+      <div className="archive-card-body">
+        <h3 className="archive-card-title tsm-heading">{it.title}</h3>
+        <div className="archive-card-meta">
+          <span className="archive-card-no" title={`藏品号 ${no}`}>NO. {no}</span>
+          {it.source !== "local" && (
+            <span className="archive-card-source">{it.source}</span>
           )}
-          {onDelete && (
-            <button className="archive-card-action dn" onClick={(e) => { e.stopPropagation(); onDelete(); }}>删除</button>
-          )}
+        </div>
+        <div className="archive-card-lines" data-testid="archive-card-lines">
+          <span>─ 编目号 {no}</span>
+          <span>─ 来源 {it.source === "local" ? "本地笔记" : it.source}</span>
+          {it.chunks_count != null && <span>─ 记录 {it.chunks_count} 条</span>}
+        </div>
+        <div className="archive-card-actions">
+          <span className="archive-card-type">
+            {it.type === "image" ? "图片" : it.type === "note" ? `${it.chunks_count || 0} 块` : ""}
+          </span>
+          <div className="flex items-center gap-2">
+            {onReview && (
+              <button className="archive-card-action ac" onClick={(e) => { e.stopPropagation(); onReview(); }}>书评</button>
+            )}
+            {onDelete && (
+              <button className="archive-card-action dn" onClick={(e) => { e.stopPropagation(); onDelete(); }}>删除</button>
+            )}
+          </div>
         </div>
       </div>
     </div>

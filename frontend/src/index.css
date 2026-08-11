@@ -506,29 +506,54 @@ body {
 .archive-no-lg .archive-no-mark { font-size: 0.6em; }
 .archive-no-lg .archive-no-num { font-size: 30px; font-weight: 400; font-family: var(--font-heading); line-height: 1; }
 
-/* ---- 档案卡片 · 编目抽屉索书卡（ADR 0054/0056/0060/0061）
-       索书卡样式正式收进大风格主题作用域 html[data-style-theme="catalog-drawer"]，
-       成为真正可切换的大风格主题；其它大风格主题注册后以各自作用域覆盖。
-       main.jsx 在首屏渲染前同步 applyStyleTheme，避免作用域未命中的闪样。 ---- */
+/* ---- 档案卡片 · 编目抽屉索书卡（ADR 0054/0056/0060/0061/0069）
+       索书卡样式正式收进大风格主题作用域 html[data-style-theme="catalog-drawer"]。
+       Phase 2-2（ADR 0069）：视觉层级改为「书」——封面为第一锚点，纸面 + hairline +
+       克制阴影（无浮起/内晕/渐变）；Hover 安静（边框微染 + 封面 1.02 + 次级操作出现）；
+       Focus 用 --focus-ring 支持键盘（Enter/Space）。 ---- */
 html[data-style-theme="catalog-drawer"] .archive-card {
   background: var(--card-bg);
   border: 1px solid var(--panel-border);
-  border-radius: 6px;                       /* 主表面近直角（目录卡规格：6px） */
-  box-shadow: var(--shadow-sm), inset 0 0 46px color-mix(in srgb, var(--accent) 4%, transparent);
-  padding: 10px 12px 12px;
+  border-radius: 6px;                       /* Surface：主表面近直角 */
+  box-shadow: 0 1px 2px rgba(43, 36, 26, 0.05);  /* 轻微环境层次，不浮起 */
+  padding: 6px;
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition: border-color var(--dur-enter) var(--ease-standard), box-shadow var(--dur-enter) var(--ease-standard);
 }
 html[data-style-theme="catalog-drawer"] .archive-card:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md), inset 0 0 46px color-mix(in srgb, var(--accent) 4%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-border));
+  box-shadow: 0 2px 8px rgba(43, 36, 26, 0.08);
 }
+html[data-style-theme="catalog-drawer"] .archive-card:focus-visible { box-shadow: var(--focus-ring); }
 html[data-style-theme="catalog-drawer"] .archive-card-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+html[data-style-theme="catalog-drawer"] .archive-card-body { padding: 8px 5px 5px; }
+html[data-style-theme="catalog-drawer"] .archive-card-cover {
+  position: relative;
+  border-radius: 4px;                       /* Cover：内容对象柔和 4px */
+  overflow: hidden;
+  background: var(--card-thumb);
+}
+html[data-style-theme="catalog-drawer"] .archive-card-img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  transition: transform var(--dur-enter) var(--ease-standard);
+}
+html[data-style-theme="catalog-drawer"] .archive-card:hover .archive-card-img { transform: scale(1.02); }
+html[data-style-theme="catalog-drawer"] .archive-card-cover-btn {
+  position: absolute; top: 6px; right: 6px; z-index: 5;
+  font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  background: rgba(8,10,18,0.65); color: #fff; opacity: 0;
+  transition: opacity var(--dur-enter) var(--ease-standard);
+}
+html[data-style-theme="catalog-drawer"] .archive-card:hover .archive-card-cover-btn { opacity: 1; }
+html[data-style-theme="catalog-drawer"] .archive-card-title {
+  font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--text);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  min-height: 40px;
+}
 html[data-style-theme="catalog-drawer"] .archive-card-meta {
   display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
-  padding-bottom: 7px; margin-bottom: 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, var(--panel-border));  /* 档卡横线 */
+  margin-top: 8px; padding-bottom: 6px; margin-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, var(--panel-border));  /* 档卡横线（细） */
 }
 html[data-style-theme="catalog-drawer"] .archive-card-source {
   font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
@@ -543,40 +568,21 @@ html[data-style-theme="catalog-drawer"] .catalog-no {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   font-size: 11px; letter-spacing: 0.14em; color: var(--accent); font-weight: 600;
 }
-html[data-style-theme="catalog-drawer"] .archive-card-title {
-  font-size: 15px; font-weight: 600; line-height: 1.35;
-  color: var(--text);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  min-height: 40px;
-}
-html[data-style-theme="catalog-drawer"] .archive-card-cover {
-  position: relative;
-  border-radius: 4px;          /* 内容对象（封面）保留柔和 4px */
-  overflow: hidden;
-  background: var(--card-thumb);
-}
-html[data-style-theme="catalog-drawer"] .archive-card-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-html[data-style-theme="catalog-drawer"] .archive-card-cover-btn {
-  position: absolute; top: 6px; right: 6px; z-index: 5;
-  font-size: 10px; padding: 2px 6px; border-radius: 4px;
-  background: rgba(8,10,18,0.65); color: #fff; opacity: 0;
-  transition: opacity .15s ease;
-}
-html[data-style-theme="catalog-drawer"] .archive-card:hover .archive-card-cover-btn { opacity: 1; }
 html[data-style-theme="catalog-drawer"] .archive-card-lines {
-  margin-top: 9px; padding-top: 7px;
-  border-top: 1px dashed color-mix(in srgb, var(--accent) 18%, var(--panel-border));
   display: flex; flex-direction: column; gap: 2px;
   font-family: var(--font-mono); font-size: 10px; line-height: 1.6;
-  color: var(--text-secondary);
+  color: var(--ink-2);
 }
 html[data-style-theme="catalog-drawer"] .archive-card-actions {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: 6px; min-height: 18px;
 }
 html[data-style-theme="catalog-drawer"] .archive-card-type { font-size: 11px; color: var(--text-secondary); }
-html[data-style-theme="catalog-drawer"] .archive-card-action { font-size: 11px; opacity: 0; transition: opacity .15s ease; }
-html[data-style-theme="catalog-drawer"] .archive-card:hover .archive-card-action { opacity: 1; }
+html[data-style-theme="catalog-drawer"] .archive-card-action {
+  font-size: 11px; opacity: 0; transition: opacity var(--dur-enter) var(--ease-standard);
+}
+html[data-style-theme="catalog-drawer"] .archive-card:hover .archive-card-action,
+html[data-style-theme="catalog-drawer"] .archive-card:focus-visible .archive-card-action { opacity: 1; }
 html[data-style-theme="catalog-drawer"] .archive-card-action.ac { color: var(--accent); }
 html[data-style-theme="catalog-drawer"] .archive-card-action.dn { color: var(--danger); }
 

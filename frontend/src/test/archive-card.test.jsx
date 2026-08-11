@@ -83,6 +83,20 @@ describe("ArchiveCard", () => {
     expect(lines.textContent).toContain("─ 记录 1 条");
   });
 
+  it("Phase 2-2：封面为第一视觉锚点（cover 先于标题/编目行）；键盘 Enter 打开", () => {
+    const onOpen = vi.fn();
+    const { container } = render(<ArchiveCard it={ITEM} cover="https://x/1.jpg" onOpen={onOpen} />);
+    const card = container.querySelector(".archive-card");
+    expect(card.firstElementChild.className).toContain("archive-card-cover"); // 封面置顶
+    const body = card.querySelector(".archive-card-body");
+    expect(body.firstElementChild.className).toContain("archive-card-title");
+    // 键盘焦点：Enter 触发打开（--focus-ring 可见）
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalled();
+    fireEvent.keyDown(card, { key: " " });
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
   it("本地笔记不显示来源标注", () => {
     render(<ArchiveCard it={{ id: 1, title: "笔记", type: "note", source: "local" }} cover={null} onOpen={() => {}} />);
     expect(screen.queryByText("local")).toBeNull();
