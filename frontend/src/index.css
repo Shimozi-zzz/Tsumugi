@@ -565,3 +565,59 @@ body {
   font-variant-numeric: tabular-nums; font-size: 11px; letter-spacing: 0.18em;
   color: var(--text-secondary);
 }
+
+/* ==========================================================================
+   ADR 0055 · 网格三个探索性视觉方向（临时，不纳入正式主题）
+   选中哪个方向后再做 token 融入；本轮各自独立视觉语言。
+   ========================================================================== */
+
+/* 方向开关（网格工具栏） */
+.grid-concept-switch { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.grid-concept-switch button { padding: 3px 10px; border-radius: 999px; font-size: 11px; transition: none; }
+
+/* ---------- A 深夜书房：近黑 + 封面取色氛围光主视觉 ---------- */
+.concept-a { min-height: 100%; background: #0a0b0f; padding: 28px 36px 48px; }
+.concept-a-intro { margin: 0 0 22px; font-family: Georgia, "Songti SC", "Noto Serif SC", serif; font-size: 15px; letter-spacing: 0.06em; color: rgba(255,255,255,0.55); }
+.concept-a-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 34px 22px; }
+.concept-a-card { position: relative; display: flex; flex-direction: column; align-items: center; background: transparent; border: none; padding: 0; cursor: pointer; text-align: center; }
+.concept-a-glow { position: absolute; inset: -18px -12px; border-radius: 20px; pointer-events: none; opacity: 0.92; filter: blur(10px); transition: opacity .25s ease; }
+.concept-a-card:hover .concept-a-glow { opacity: 1; }
+.concept-a-cover { position: relative; display: block; width: 100%; aspect-ratio: 3/4; border-radius: 8px; overflow: hidden;
+  background: #12141a;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.10), 0 22px 44px rgba(0,0,0,0.75), 0 0 70px rgba(0,0,0,0.5);
+}
+.concept-a-cover img { width: 100%; height: 100%; object-fit: cover; filter: contrast(1.06) saturate(1.12) brightness(1.02); }
+.concept-a-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: ui-monospace, monospace; font-size: 22px; letter-spacing: 0.3em; color: rgba(255,255,255,0.28); }
+.concept-a-title { display: block; margin-top: 12px; font-family: Georgia, "Songti SC", "Noto Serif SC", serif; font-size: 14px; line-height: 1.4; color: #eae7e0; min-height: 40px; }
+.concept-a-no { display: block; margin-top: 3px; font-family: ui-monospace, Consolas, monospace; font-size: 10px; letter-spacing: 0.22em; color: rgba(255,255,255,0.32); }
+
+/* ---------- B 编目卡片抽屉：纸感索书卡，等宽+衬线强对比、密集 ---------- */
+.concept-b { min-height: 100%; background: #f2ecdf; padding: 26px 34px 44px; }
+.concept-b-intro { margin: 0 0 20px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; letter-spacing: 0.28em; color: #7a6a4a; }
+.concept-b-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+.concept-b-card { position: relative; background: #fbf6eb; border: 1px solid #d6c9ae; border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(95, 74, 40, 0.14), inset 0 0 46px rgba(125, 95, 55, 0.05);
+  padding: 10px 12px 12px; cursor: pointer; text-align: left; }
+.concept-b-card::before { content: ""; position: absolute; left: 10px; right: 10px; top: 40px; border-top: 1px solid rgba(160, 128, 78, 0.30); }
+.concept-b-top { display: flex; justify-content: space-between; align-items: baseline; font-family: ui-monospace, Consolas, monospace; font-size: 10px; letter-spacing: 0.14em; }
+.concept-b-no { font-weight: 700; color: #6d5636; }
+.concept-b-source { color: #9a855e; text-transform: uppercase; }
+.concept-b-title { font-family: Georgia, "Songti SC", "Noto Serif SC", serif; font-size: 16px; font-weight: 600; color: #362a16; margin: 7px 0 9px; line-height: 1.35; min-height: 44px; }
+.concept-b-cover { position: relative; aspect-ratio: 3/4; background: #eee4cf; border: 1px solid #ded1b4; overflow: hidden; }
+.concept-b-cover img { width: 100%; height: 100%; object-fit: cover; }
+.concept-b-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: Georgia, serif; font-size: 18px; color: #a08a62; letter-spacing: 0.2em; }
+.concept-b-lines { margin-top: 9px; display: flex; flex-direction: column; gap: 2px; font-family: ui-monospace, Consolas, monospace; font-size: 10px; color: #a08a62; line-height: 1.6; }
+
+/* ---------- C 展览橱窗：美术馆大留白、不规则展示单元、少而精 ---------- */
+.concept-c { min-height: 100%; background: #fafaf6; padding: 46px 54px 70px; }
+.concept-c-intro { margin: 0 0 34px; font-family: Georgia, "Songti SC", "Noto Serif SC", serif; font-size: 16px; letter-spacing: 0.05em; color: #8d8a80; }
+.concept-c-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 60px 48px; }
+.concept-c-card { position: relative; cursor: pointer; background: none; border: none; padding: 0; text-align: left; transition: opacity .18s ease; }
+.concept-c-card:hover { opacity: 0.9; }
+.concept-c-cover { position: relative; display: block; aspect-ratio: 3/4; background: #ecece5; overflow: hidden; box-shadow: 0 1px 0 rgba(0,0,0,0.08); }
+.concept-c-wide .concept-c-cover { aspect-ratio: 4/3; }
+.concept-c-cover img { width: 100%; height: 100%; object-fit: cover; }
+.concept-c-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: ui-monospace, monospace; font-size: 20px; letter-spacing: 0.3em; color: rgba(0,0,0,0.22); }
+.concept-c-no { position: absolute; top: 9px; right: 11px; font-family: ui-monospace, Consolas, monospace; font-size: 11px; letter-spacing: 0.2em; color: rgba(0,0,0,0.38); }
+.concept-c-title { display: block; margin-top: 14px; font-family: Georgia, "Songti SC", "Noto Serif SC", serif; font-size: 16px; font-weight: 600; color: #191914; min-height: 24px; }
+.concept-c-meta { display: block; margin-top: 5px; font-size: 11px; letter-spacing: 0.12em; color: #9c988d; }

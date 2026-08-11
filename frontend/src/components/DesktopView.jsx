@@ -31,6 +31,7 @@ import HomeShrine from "./HomeShrine.jsx";
 import MemoryGallery from "./MemoryGallery.jsx";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
 import ArchiveCard from "./ArchiveCard.jsx";
+import { GridConceptA, GridConceptB, GridConceptC, GridConceptSwitcher, parseConcept } from "./GridConcepts.jsx";
 import { WORK_TYPES, WORK_TYPE_LABEL } from "./ui.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
@@ -931,6 +932,16 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   // P1（ADR 0045）：图书馆按作品类型筛选（work_type）
   const [activeWorkType, setActiveWorkType] = useState(null);
   const workTypeOptions = WORK_TYPES.filter((t) => (gridItems || []).some((it) => it.work_type === t));
+  // 网格探索方向（ADR 0055）：URL ?concept=a|b|c|classic 或 localStorage，临时探索用
+  const [gridConcept, setGridConcept] = useState(() => parseConcept(localStorage.getItem("tsumugi-grid-concept")) || "classic");
+  useEffect(() => {
+    const fromUrl = parseConcept(new URLSearchParams(window.location.search).get("concept"));
+    if (fromUrl) setGridConcept(fromUrl);
+  }, []);
+  const changeConcept = (k) => {
+    setGridConcept(k);
+    try { localStorage.setItem("tsumugi-grid-concept", k); } catch { /* ignore */ }
+  };
   // 图书馆网格：按 work_type + libQuery 本地过滤（标题/内容）
   const libFiltered = gridItems.filter((it) => {
     if (activeWorkType && it.work_type !== activeWorkType) return false;
@@ -1473,6 +1484,12 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               </div>
             ) : (
               <div className="flex-1 min-h-0 overflow-y-auto">
+              {/* ADR 0055：网格探索方向开关（classic / A 深夜书房 / B 编目抽屉 / C 展览橱窗） */}
+              <div className="flex items-center gap-2 flex-wrap px-1 mb-3">
+                <span className="text-[11px] tracking-wider" style={{ color: "var(--text-secondary)" }}>视觉方向</span>
+                <GridConceptSwitcher value={gridConcept} onChange={changeConcept} />
+              </div>
+              {gridConcept === "classic" ? (
               <div className="grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(var(--d-grid-min), 1fr))`, gap: "var(--d-card-gap)" }}>
                 {libFiltered.map((it) => {
                   const selected = selectedIds.has(it.id);
@@ -1491,6 +1508,13 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   );
                 })}
               </div>
+              ) : gridConcept === "a" ? (
+                <GridConceptA items={libFiltered} coverOf={cardCover} onOpenItem={openItemDetail} />
+              ) : gridConcept === "b" ? (
+                <GridConceptB items={libFiltered} coverOf={cardCover} onOpenItem={openItemDetail} />
+              ) : (
+                <GridConceptC items={libFiltered} coverOf={cardCover} onOpenItem={openItemDetail} />
+              )}
               </div>
             )}
           </div>
