@@ -82,6 +82,24 @@ export const MEMORY_EMOTIONS = ["开心", "感动", "遗憾", "怀念", "平静"
 export const MEMORY_TYPE_LABEL = { review: "书评", text: "记录", milestone: "里程碑", collection: "收藏" };
 
 /**
+ * 统一页面头（ADR 0066 夜书房 Shell）：serif 房间名 + hairline + mono 路径。
+ * 全站唯一标题体系，禁止各页面另起标题。
+ * path 传相对路径（如 "书库 ▸ 网格"），children 为右侧附加内容（工具/操作）。
+ */
+export function PageHeader({ room, path, children }) {
+  return (
+    <header className="page-header" data-testid="page-header">
+      <div className="flex items-baseline gap-3 min-w-0">
+        <h1 className="page-header-room">{room}</h1>
+        {path ? <div className="page-header-path">{path}</div> : null}
+      </div>
+      <div className="page-header-rule" aria-hidden />
+      {children ? <div className="page-header-extra">{children}</div> : null}
+    </header>
+  );
+}
+
+/**
  * 记忆类型小标（Phase D · 情感权重呈现，ADR 0063）：回顾场景里让"收藏时刻/完成时刻"
  * 被自然识别，克制安静——书评保持正式 pill，轻量记录中性化，完成时刻暖色、收藏时刻
  * 降为入藏注记。不新增情感评分/字段/AI。

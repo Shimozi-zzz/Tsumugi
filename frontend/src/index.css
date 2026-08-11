@@ -70,6 +70,97 @@
   --card-bg: #faf5ea;
   --card-thumb: linear-gradient(150deg, #ece3cf, #e1d4b8);
   --card-text: #2b241a;
+
+  /* ============================================================
+     夜书房 · Visual Novel Archive（ADR 0066）Design Tokens
+     纸与墨为骨；暖橙为唯一主强调；氛围色只做 Scene Layer。
+     ============================================================ */
+
+  /* Typography 字阶（全站唯一来源；旧字号将逐步迁到此处） */
+  --fs-display: 28px;
+  --fs-heading: 20px;
+  --fs-subheading: 16px;
+  --fs-title: 15px;
+  --fs-body: 13px;
+  --fs-caption: 11px;
+  --fs-micro: 10px;
+  --leading-body: 1.7;
+  --leading-heading: 1.35;
+  --tracking-serif: 0.04em;   /* 衬线标题字距 */
+  --tracking-mono: 0.14em;    /* 等宽编号/路径字距 */
+
+  /* Spacing 4px 基网格（与旧 --space-* 并存，逐步收敛双轨） */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 28px; --sp-8: 32px;
+  --sp-10: 40px; --sp-12: 48px;
+
+  /* Border（hairline 为主） */
+  --border-hairline: 1px solid var(--panel-border);
+  --border-hairline-accent: 1px solid color-mix(in srgb, var(--accent) 35%, var(--panel-border));
+  --border-dashed: 1px dashed color-mix(in srgb, var(--accent) 25%, var(--panel-border));
+
+  /* Ink 层级（文本/说明） */
+  --ink-0: var(--text);
+  --ink-1: var(--text-secondary);
+  --ink-2: color-mix(in srgb, var(--text-secondary) 72%, transparent);
+
+  /* Surface：纸感三阶之上，Scene 面只用于 hero/氛围层（保证正文对比度） */
+  --scene-surface: color-mix(in srgb, var(--ambient-base, var(--accent)) 6%, var(--bg));
+
+  /* Shadow：细发丝 + 柔和环境影；浮层专用 */
+  --shadow-float: 0 12px 32px rgba(43, 36, 26, 0.14), 0 0 0 1px var(--panel-border);
+
+  /* Motion（统一三拍；easing 全站一致） */
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-enter: 180ms;   /* 进入：fade + 8px 上升 */
+  --dur-open: 240ms;    /* 打开档案：slide */
+  --dur-reveal: 400ms;  /* 记忆浮现：fade + 微 blur */
+  --motion-enter: opacity var(--dur-enter) var(--ease-standard), transform var(--dur-enter) var(--ease-standard);
+  --motion-open: opacity var(--dur-open) var(--ease-standard), transform var(--dur-open) var(--ease-standard);
+  --motion-reveal: opacity var(--dur-reveal) var(--ease-standard), transform var(--dur-reveal) var(--ease-standard);
+
+  /* Focus / Interaction */
+  --focus-ring: 0 0 0 2px var(--accent-soft), 0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+}
+
+/* 尊重系统减弱动态：全部过渡/动画退化为瞬时 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   夜书房 Shell（ADR 0066）：统一页面头 = serif 房间名 + hairline + mono 路径
+   ============================================================ */
+.page-header { margin-bottom: var(--sp-6); animation: var(--motion-enter); animation-name: ph-enter; }
+.page-header-room {
+  font-family: var(--font-heading); font-size: var(--fs-heading);
+  font-weight: 600; letter-spacing: var(--tracking-serif); color: var(--ink-0); line-height: 1.2;
+}
+.page-header-path {
+  font-family: var(--font-mono); font-size: var(--fs-micro);
+  letter-spacing: var(--tracking-mono); color: var(--ink-1); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis;
+}
+.page-header-rule {
+  height: 1px; margin-top: var(--sp-2);
+  background: linear-gradient(to right, var(--panel-border), color-mix(in srgb, var(--panel-border) 40%, transparent));
+}
+.page-header-extra { margin-top: var(--sp-3); }
+
+@keyframes ph-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
 }
 
 /* ---- 信息密度：紧凑档 ---- */
