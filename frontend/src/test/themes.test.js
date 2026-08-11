@@ -113,6 +113,16 @@ describe("theme system", () => {
     expect(dHue).toBeLessThan(40); // 暖橙（原蓝 ~221°）
   });
 
+  it("索书卡样式收进大风格主题作用域（html[data-style-theme=...]）", () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
+    expect(css).toContain('html[data-style-theme="catalog-drawer"] .archive-card {');
+    expect(css).toContain('html[data-style-theme="catalog-drawer"] .archive-card-lines');
+    expect(css).toContain('html[data-style-theme="catalog-drawer"] .archive-ph');
+    // 无裸规则（行首无作用域前缀的独立 .archive-card {）
+    const bareCard = /\n\s*\.archive-card \{/;
+    expect(bareCard.test(css)).toBe(false);
+  });
+
   it("index.css：仅保留默认主题块，mint/sakura/dark 已移除", () => {
     const css = fs.readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
     expect(css).toContain("--accent: #b25b36;");

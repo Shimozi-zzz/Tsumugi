@@ -20,10 +20,12 @@
 - `App.jsx`：`styleTheme` 状态 + effect 应用 + 下发 `styleTheme/setStyleTheme`。
 - `DesktopView.jsx`：设置「外观」新增「大风格主题」组（位于色彩主题之上），选中高亮，
   与其它主题共用选择器样式；现只有一项，机制已就绪。
-- `index.css`：索书卡基础样式即首项大风格主题的默认样式；注释标明后续大风格主题以
-  `html[data-style-theme="..."]` 作用域覆盖。
+- `index.css`：索书卡卡片样式（`.archive-card*`/`.catalog-no`/`.archive-ph*`）**正式收进
+  `html[data-style-theme="catalog-drawer"]` 作用域**——不再是无作用域全局基础样式；其它
+  大风格主题注册后以各自作用域覆盖。`main.jsx` 在首屏渲染前同步 `applyStyleTheme(...)`
+  设置 `data-style-theme`，避免作用域未命中的首帧闪样。
 
 ## 三、测试与实测
 
-- vitest **232 passed**（+2：STYLE_THEMES 注册 + applyStyleTheme 持久化与 data 属性、
-  loadStyleTheme 回退）。build 通过。
+- vitest **233 passed**（+3：STYLE_THEMES 注册 + applyStyleTheme 持久化与 data 属性、
+  loadStyleTheme 回退、索书卡样式作用域断言——含无裸 `.archive-card` 规则）。build 通过。
