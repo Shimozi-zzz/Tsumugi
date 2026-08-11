@@ -5,6 +5,11 @@
 // 平滑过渡），不覆盖文字/按钮；浅色主题克制、深色稍明显（--ambient-alpha）。
 // Phase B（ADR 0042）：双栏结构——"外部世界"（世界如何描述它）与"我的记录"
 // （我如何理解它，含 Memory 记忆时间轴）。
+// Phase 3-1（ADR 0075）：ItemDetailPanel 成为**统一 Work Detail 内容基底**。
+// - Classic（主从/网格/书架/角色墙/回廊/关系厅）、Mobile Detail Scene、ShellC 共用同一内容；
+// - 新增外部未收藏模式：`externalDetail`（无 itemId）只呈现作品本身 + 这个世界 + 外部操作
+//   （收藏入库/安利卡/刷新），回调由调用方传入（Panel 不承担新后端业务）；
+// - `refreshKey` 用于"刷新资料"后重取详情。
 import React, { useEffect, useRef, useState } from "react";
 import { fetchItemDetail, filePathToUrl, updateWorkColumns, updateCollection, createDirectMemory } from "../api.js";
 import { InfoTable, TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL, COLLECTION_STATUSES, MEMORY_EMOTIONS } from "./ui.jsx";
@@ -29,7 +34,11 @@ function ambientAlpha() {
   return 0.16;
 }
 
-export default function ItemDetailPanel({ itemId, className = "" }) {
+export default function ItemDetailPanel({
+  itemId, className = "",
+  externalDetail = null, refreshKey = 0,
+  onSaveDetail, onShareDetail, onRefreshDetail,
+}) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -45,18 +54,19 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
       .catch((e) => { if (!cancelled) { setError(e.message); setDetail(null); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [itemId]);
+  }, [itemId, refreshKey]);
 
   // ADR 0034：详情变化时从封面提取主色调（缓存于 ambient 模块；本地缓存封面优先，
   // 同源无 taint）。加载中保持旧氛围，新色就绪后经 box-shadow transition 平滑过渡。
   useEffect(() => {
-    if (!detail) return;
+    if (!detail && !externalDetail) return;
     let cancelled = false;
-    const coverSrc = filePathToUrl(detail?.file_path) || detail?.image_url || "";
+    const src = externalDetail || detail;
+    const coverSrc = filePathToUrl(src?.file_path) || src?.image_url || "";
     if (!coverSrc) { setPalette(null); return; }
     extractPalette(coverSrc).then((p) => { if (!cancelled) setPalette(p); });
     return () => { cancelled = true; };
-  }, [detail]);
+  }, [detail, externalDetail]);
 
   // P1（ADR 0045）：外部作品可在"外部世界"区内联修正作品类型（回填只在 NULL 时写，
   // 用户值不被覆盖）。Hook 放在所有条件返回之前，遵守 Rules of Hooks。
@@ -112,24 +122,29 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
     finally { setRecording(false); }
   }
 
-  if (itemId == null) {
-    return (
-      <div className={"flex items-center justify-center text-sm " + className}
-        style={{ color: "var(--text-secondary)" }}>
-        从左侧列表选择一条资料，详情会显示在这里。
-      </div>
-    );
-  }
-  if (loading) {
-    return <div className={"flex items-center justify-center text-sm " + className} style={{ color: "var(--text-secondary)" }}>加载详情…</div>;
-  }
-  if (error || !detail) {
-    return <div className={"flex items-center justify-center text-sm " + className} style={{ color: "var(--danger)" }}>{error || "加载失败"}</div>;
+  // Phase 3-1：外部未收藏详情（externalDetail）跳过取数守卫；已收藏走 detail（自取）
+  const externalMode = !!externalDetail;
+  if (!externalMode) {
+    if (itemId == null) {
+      return (
+        <div className={"flex items-center justify-center text-sm " + className}
+          style={{ color: "var(--text-secondary)" }}>
+          从左侧列表选择一条资料，详情会显示在这里。
+        </div>
+      );
+    }
+    if (loading) {
+      return <div className={"flex items-center justify-center text-sm " + className} style={{ color: "var(--text-secondary)" }}>加载详情…</div>;
+    }
+    if (error || !detail) {
+      return <div className={"flex items-center justify-center text-sm " + className} style={{ color: "var(--danger)" }}>{error || "加载失败"}</div>;
+    }
   }
 
-  const cover = detail.image_url || filePathToUrl(detail?.file_path) || "";
-  const rows = itemInfoRows(detail);
-  const tags = detail.tags || [];
+  const data = externalDetail || detail;
+  const cover = data.image_url || filePathToUrl(data?.file_path) || "";
+  const rows = itemInfoRows(data);
+  const tags = data.tags || [];
 
   // 氛围光晕（box-shadow 可平滑过渡；无主色时透明，回退主题表面色）
   const alpha = ambientAlpha();
@@ -153,30 +168,30 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
               onError={(e) => { e.target.style.display = "none"; }} />
           ) : null}
           <div className="min-w-0">
-            <h2 className="tsm-heading leading-tight" style={{ color: "var(--text)", fontSize: 22, fontWeight: 600 }}>{detail.title}</h2>
-            {detail.id != null && (
-              <div className="catalog-no mt-1">NO. {String(detail.id).padStart(4, "0")}</div>
+            <h2 className="tsm-heading leading-tight" style={{ color: "var(--text)", fontSize: 22, fontWeight: 600 }}>{data.title}</h2>
+            {data.id != null && (
+              <div className="catalog-no mt-1">NO. {String(data.id).padStart(4, "0")}</div>
             )}
             <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <TagCapsule text={detail.source || "本地"} />
-              {detail.rating != null && (
-                <TagCapsule text={`大众 ★${detail.rating}`} title="外部数据源公众评分" />
+              <TagCapsule text={data.source || "本地"} />
+              {data.rating != null && (
+                <TagCapsule text={`大众 ★${data.rating}`} title="外部数据源公众评分" />
               )}
-              {detail.my_rating != null && (
-                <TagCapsule text={`我的平均 ★${detail.my_rating}`} muted />
+              {data.my_rating != null && (
+                <TagCapsule text={`我的平均 ★${data.my_rating}`} muted />
               )}
             </div>
           </div>
         </div>
 
         {/* 外部世界：世界如何描述它（Phase B，ADR 0042 双栏结构）
-            P1（ADR 0045）：右侧提供作品类型内联修正（外部作品） */}
+            P1（ADR 0045）：右侧提供作品类型内联修正（外部作品，仅已收藏） */}
         <div className="mb-3 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-baseline gap-2">
             <span className="text-[11px] tracking-wider" style={{ color: "var(--accent)" }}>外部世界</span>
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>· 世界如何描述它</span>
           </div>
-          {detail.source !== "local" && (
+          {!externalMode && detail.source !== "local" && (
             <select value={workType} onChange={changeWorkType} title="作品类型（可手动修正）"
               disabled={workSaving}
               className="rounded-lg px-2 py-1 text-[11px] outline-none"
@@ -197,7 +212,7 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
         <div className="mb-4">
           <div className="text-[11px] mb-1.5 tracking-wider" style={{ color: "var(--text-secondary)" }}>简介</div>
           <div className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: "var(--text)" }}>
-            {introText(detail)}
+            {introText(data)}
           </div>
         </div>
 
@@ -207,21 +222,43 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
           </div>
         )}
 
-        {(detail.characters || []).length > 0 && (
+        {(data.characters || []).length > 0 && (
           <div>
             <div className="text-[11px] mb-1.5 tracking-wider" style={{ color: "var(--text-secondary)" }}>
-              角色（{detail.characters.length}）
+              角色（{data.characters.length}）
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {(detail.characters || []).map((c) => (
+              {(data.characters || []).map((c) => (
                 <TagCapsule key={c.id ?? c.name} text={c.name} title={c.summary || c.relation || undefined} />
               ))}
             </div>
           </div>
         )}
 
-        {/* 我的记录：我如何理解它（Phase B，ADR 0042）——Memory 记忆时间轴
-            P2（ADR 0046）：收藏状态/是否喜欢/收藏时间 内联编辑 */}
+        {/* Phase 3-1：外部世界结束处的外部操作（收藏入库/安利卡/刷新），由调用方传回调 */}
+        {(onSaveDetail || onShareDetail || onRefreshDetail) && (
+          <div className="mt-5 flex items-center gap-2 flex-wrap">
+            {onSaveDetail && (
+              <button onClick={onSaveDetail}
+                className="px-3 py-1.5 rounded-lg text-[12px] font-medium"
+                style={{ backgroundColor: "var(--accent)", color: "#fff" }}>收藏入库</button>
+            )}
+            {onShareDetail && (
+              <button onClick={onShareDetail}
+                className="px-3 py-1.5 rounded-lg text-[12px] font-medium"
+                style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>生成安利卡</button>
+            )}
+            {onRefreshDetail && (
+              <button onClick={onRefreshDetail}
+                className="px-3 py-1.5 rounded-lg text-[12px]"
+                style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}
+                title="重新从数据源下载最新简介与角色小传（受限流约束）">刷新资料</button>
+            )}
+          </div>
+        )}
+
+        {/* 我的记录：我如何理解它（仅已收藏；外部未收藏无我的记录） */}
+        {detail && (
         <div className="mt-7 pt-5 border-t" style={{ borderColor: "var(--panel-border)" }}>
           <div className="mb-3 flex items-baseline gap-2">
             <span className="text-[11px] tracking-wider" style={{ color: "var(--accent)" }}>我的记录</span>
@@ -290,6 +327,7 @@ export default function ItemDetailPanel({ itemId, className = "" }) {
           )}
           <MemoryTimeline itemId={itemId} refreshKey={timelineRefresh} />
         </div>
+        )}
       </div>
     </div>
   );

@@ -15,7 +15,6 @@ import {
 import InspectorPanel from "./InspectorPanel.jsx";
 import ReviewStudio from "./ReviewStudio.jsx";
 import ProviderSettings from "./ProviderSettings.jsx";
-import ItemDetailModal from "./ItemDetailModal.jsx";
 import CharacterWall from "./CharacterWall.jsx";
 import VoiceGraphView from "./VoiceGraphView.jsx";
 import YearlySummary from "./YearlySummary.jsx";
@@ -147,7 +146,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   // 书评面板：当前打开 review 面板的 item（null=关闭）
   const [reviewItem, setReviewItem] = useState(null);
   // 作品详情弹层：{detail, saved}；null=关闭（角色图鉴）
-  const [detailView, setDetailView] = useState(null);
+  const [detailView, setDetailView] = useState(null); // { itemId, externalDetail, saved }
+  const [detailRefreshKey, setDetailRefreshKey] = useState(0); // 刷新资料后重取详情
   // 安利卡弹层：当前生成安利卡的 item id（null=关闭）
   const [shareItem, setShareItem] = useState(null);
   // 图书馆视图模式：网格 / 书架 / 分组列表（localStorage 记忆，复用主题持久化模式）
@@ -500,33 +500,29 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     }
   }
 
-  // ---- 角色图鉴：详情弹层 ----
+  // ---- 角色图鉴：详情弹层（Phase 3-1 / ADR 0075：统一 Work Detail 内容系统）
+  // detailView = { itemId:number|null, externalDetail:ExternalDetailOut|null, saved:bool }
   async function openExternalDetail(r) {
     try {
       const d = await fetchExternalDetail(r.source, r.external_id);
-      setDetailView({ detail: d, saved: false });
+      setDetailView({ itemId: null, externalDetail: d, saved: false });
     } catch (err) {
       setAskError(err.message);
     }
   }
 
-  async function openItemDetail(it) {
-    try {
-      const d = await fetchItemDetail(it.id);
-      setDetailView({ detail: d, saved: true });
-    } catch (err) {
-      setAskError(err.message);
-    }
+  function openItemDetail(it) {
+    setDetailView({ itemId: it.id, externalDetail: null, saved: true });
   }
 
   // 手动刷新外部条目资料：重新拉取最新简介/角色小传（受限流约束，非阻塞 UI）
   async function handleRefreshExternal() {
-    if (!detailView || !detailView.saved) return;
-    const d = detailView.detail;
+    if (!detailView || !detailView.saved || detailView.itemId == null) return;
+    const itemId = detailView.itemId;
     try {
-      await refreshExternalItem(d.id);
-      const fresh = await fetchItemDetail(d.id);
-      setDetailView({ detail: fresh, saved: true });
+      await refreshExternalItem(itemId);
+      const fresh = await fetchItemDetail(itemId);
+      setDetailRefreshKey((k) => k + 1);
       refresh();
       setCharRefreshKey((k) => k + 1);
       toast.success(`已刷新「${fresh.title}」的完整资料`);
@@ -540,14 +536,16 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   }
 
   async function detailSave() {
-    if (!detailView) return;
-    const d = detailView.detail;
+    if (!detailView || detailView.saved) return;
+    const d = detailView.externalDetail;
+    if (!d) return;
     try {
-      await saveExternal({
+      const res = await saveExternal({
         source: d.source, external_id: d.external_id, title: d.title,
         description: d.description, image_url: d.image_url, tags: d.tags,
       });
-      setDetailView((v) => (v ? { ...v, saved: true } : v));
+      // 收藏入库后切换为已收藏模式（统一详情自取）
+      setDetailView({ itemId: res.item_id, externalDetail: null, saved: true });
       refresh();
       setCharRefreshKey((k) => k + 1);
       toast.success(`已收藏「${d.title}」`);
@@ -2269,16 +2267,28 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         />
       )}
 
-      {/* 作品详情弹层（角色图鉴入口） */}
+      {/* 作品详情弹层（Phase 3-1 / ADR 0075：统一 Work Detail——浮层容器 + ItemDetailPanel 内容基底） */}
       {detailView && (
-        <ItemDetailModal
-          detail={detailView.detail}
-          saved={detailView.saved}
-          onClose={() => setDetailView(null)}
-          onSave={detailView.saved ? null : detailSave}
-          onShare={(id) => setShareItem(id)}
-          onRefresh={detailView.saved ? handleRefreshExternal : null}
-        />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(20, 14, 8, 0.5)" }} onClick={() => setDetailView(null)}>
+          <div className="desk-askbar p-5 w-full max-w-2xl max-h-[86vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+            style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", borderRadius: "var(--radius-floating)" }}>
+            <div className="flex items-center justify-between mb-4">
+              <span className="tsm-heading text-sm" style={{ color: "var(--text)" }}>作品档案</span>
+              <button onClick={() => setDetailView(null)} title="关闭" className="text-sm px-2 py-0.5"
+                style={{ color: "var(--text-secondary)", borderRadius: "var(--radius-control)" }}>✕</button>
+            </div>
+            <ItemDetailPanel
+              itemId={detailView.itemId}
+              externalDetail={detailView.externalDetail}
+              refreshKey={detailRefreshKey}
+              onSaveDetail={detailView.saved ? null : detailSave}
+              onShareDetail={detailView.saved ? () => setShareItem(detailView.itemId) : null}
+              onRefreshDetail={detailView.saved ? handleRefreshExternal : null}
+            />
+          </div>
+        </div>
       )}
 
       {/* 安利卡弹层（分享卡片：封面 + 标题 + 我的评分 + 短评） */}

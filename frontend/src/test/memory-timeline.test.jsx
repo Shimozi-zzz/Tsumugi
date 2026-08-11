@@ -152,6 +152,28 @@ describe("ItemDetailPanel 双栏结构（Phase B / ADR 0042）", () => {
   });
 });
 
+describe("Phase 3-1 统一 Work Detail（外部未收藏模式）", () => {
+  it("外部详情：收藏入库 + 外部世界，无我的记录/composer/时间轴", () => {
+    const ext = { source: "bangumi", title: "外部作品", external_id: "x1", description: "外部简介", rating: 8, tags: ["热血"], characters: [] };
+    render(<ItemDetailPanel externalDetail={ext} onSaveDetail={() => {}} />);
+    expect(screen.getByText("外部作品")).toBeTruthy();
+    expect(screen.getByText("收藏入库")).toBeTruthy();
+    expect(screen.getByText("外部世界")).toBeTruthy();
+    expect(screen.queryByText("我的记录")).toBeNull();
+    expect(screen.queryByText("✓ 完成了")).toBeNull();
+    expect(screen.queryByText("书评")).toBeNull();
+  });
+
+  it("已收藏模式：传安利卡/刷新回调时渲染对应按钮 + 我的记录", async () => {
+    mockFetch();
+    render(<ItemDetailPanel itemId={1} onShareDetail={() => {}} onRefreshDetail={() => {}} />);
+    await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
+    expect(screen.getByText("生成安利卡")).toBeTruthy();
+    expect(screen.getByText("刷新资料")).toBeTruthy();
+    expect(screen.getByText("我的记录")).toBeTruthy();
+  });
+});
+
 describe("默认主题渲染（ADR 0059 起仅保留编目抽屉一套）", () => {
   it("时间轴与双栏结构在默认主题下正常渲染", async () => {
     applyTheme("default");
