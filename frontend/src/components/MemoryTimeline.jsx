@@ -19,13 +19,20 @@ function formatDate(iso) {
   return String(iso).slice(0, 10);
 }
 
-export default function MemoryTimeline({ itemId, refreshKey = 0 }) {
+export default function MemoryTimeline({ itemId, refreshKey = 0, memories: memoriesProp = null }) {
   const [memories, setMemories] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [openMem, setOpenMem] = useState(null); // 正在只读查看的 Memory（null=关闭）
 
   useEffect(() => {
+    // 若调用方已提供 memories（如统一 Work Detail 为「相遇纪事」复用），则不重复请求
+    if (memoriesProp) {
+      setMemories(memoriesProp);
+      setLoading(false);
+      setError("");
+      return;
+    }
     if (itemId == null) { setMemories([]); setError(""); return; }
     let cancelled = false;
     setLoading(true);
@@ -35,7 +42,7 @@ export default function MemoryTimeline({ itemId, refreshKey = 0 }) {
       .catch((e) => { if (!cancelled) { setError(e.message); setMemories([]); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [itemId, refreshKey]);
+  }, [itemId, refreshKey, memoriesProp]);
 
   function openMemory(mem) {
     if (mem.source_type === "collection") return; // 收藏时刻不弹层

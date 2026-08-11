@@ -24,6 +24,8 @@ const TYPE_RANK = { collection: 0, review: 1, memory: 2, milestone: 3 };
  */
 export function buildEncounterEvents({ collection = null, reviews = [], memories = [] } = {}) {
   const events = [];
+  const rs = Array.isArray(reviews) ? reviews : [];
+  const ms = Array.isArray(memories) ? memories : [];
 
   // 带回书架（明确事实：collection.added_at 是收藏入库时间；缺失则不显示）
   if (collection && collection.added_at) {
@@ -38,7 +40,7 @@ export function buildEncounterEvents({ collection = null, reviews = [], memories
   }
 
   // 写下书评（明确事实：review.created_at 是创建书评时间；不使用 updated_at）
-  for (const r of reviews || []) {
+  for (const r of rs) {
     if (!r.created_at) continue;
     events.push({
       id: `review-${r.id}`,
@@ -55,7 +57,7 @@ export function buildEncounterEvents({ collection = null, reviews = [], memories
   // - review / collection 类型记忆与主事件重复，不重复进纪事；
   // - milestone 是明确事实（完成/重新打开发生过）；「完成 vs 重新打开」只能由 summary 文本
   //   表达（无结构化子类型），事件标题直接用 summary，不伪造结构化类型。
-  for (const m of memories || []) {
+  for (const m of ms) {
     if (!m.occurred_at) continue;
     if (m.source_type === "text") {
       events.push({

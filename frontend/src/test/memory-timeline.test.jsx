@@ -140,9 +140,10 @@ describe("ItemDetailPanel 双栏结构（Phase B / ADR 0042）", () => {
     // 这个世界内容仍在（简介段落 + 标签）
     expect(screen.getAllByText(/简介/).length).toBeGreaterThan(0);
     expect(screen.getByText("科幻")).toBeTruthy();
-    // 我与它包含 书评入口 + 我的记忆区包含时间轴（记忆条目渲染）
+    // 我与它包含 书评入口 + 我的记忆区包含时间轴（记忆条目渲染；「神作」同时出现在
+    // 相遇纪事的书评事件标题与时间轴，故用 getAllByText）
     expect(screen.getByTitle("打开书评工作室")).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("神作")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("神作").length).toBeGreaterThan(0));
   });
 
   it("空库时详情页的我的记录区显示空状态引导", async () => {

@@ -682,6 +682,24 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 }
 .wd-hint { font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); }
 
+/* Work Detail 相遇纪事（Phase 3-2-C-1 / ADR 0076）：开放式档案时间记录，非 Card 列表 */
+.wd-encounter { margin-top: var(--sp-2); }
+.wd-encounter-item {
+  display: flex; gap: 14px; padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
+}
+.wd-encounter-item:hover .wd-encounter-date { color: var(--accent); }
+.wd-encounter-date {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em;
+  color: var(--ink-2); width: 92px; flex-shrink: 0; padding-top: 2px;
+}
+.wd-encounter-body { flex: 1; min-width: 0; }
+.wd-encounter-title {
+  font-family: var(--font-heading); font-size: 14px; font-weight: 500;
+  letter-spacing: 0.02em; color: var(--ink-0);
+}
+.wd-encounter-meta { margin-top: 2px; font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); }
+
 /* 书架分区（Phase 2-4 / ADR 0071）：状态=书架章节标题，serif + hairline + mono 册数 */
 .status-shelf-name {
   font-family: var(--font-heading); font-size: 14px; font-weight: 600;

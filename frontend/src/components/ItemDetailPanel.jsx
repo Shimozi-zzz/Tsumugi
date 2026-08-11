@@ -11,10 +11,11 @@
 //   （收藏入库/安利卡/刷新），回调由调用方传入（Panel 不承担新后端业务）；
 // - `refreshKey` 用于"刷新资料"后重取详情。
 import React, { useEffect, useRef, useState } from "react";
-import { fetchItemDetail, filePathToUrl, updateWorkColumns, updateCollection, createDirectMemory } from "../api.js";
+import { fetchItemDetail, fetchItemReviews, fetchItemMemories, filePathToUrl, updateWorkColumns, updateCollection, createDirectMemory } from "../api.js";
 import { TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL, COLLECTION_STATUSES, MEMORY_EMOTIONS } from "./ui.jsx";
 import { extractPalette } from "../ambient.js";
 import MemoryTimeline from "./MemoryTimeline.jsx";
+import { buildEncounterEvents } from "../encounter.js";
 
 function introText(detail) {
   const desc = (detail?.description || "").trim();
@@ -22,6 +23,17 @@ function introText(detail) {
   const ref = detail?.reference_text || "";
   const m = ref.match(/^# 作品简介\s*\n+([\s\S]*?)(?=\n# |$)/m);
   return (m?.[1] || ref).trim() || "暂无简介。";
+}
+
+// 相遇纪事日期：YYYY.MM.DD（mono 小字；事件时间为 event.occurredAt 的事实时间）
+function encounterDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (!Number.isNaN(d.getTime())) {
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+  }
+  return String(iso).slice(0, 10).replace(/-/g, ".");
 }
 
 // 氛围强度：读 --ambient-alpha（浅色 0.16-0.18，深色 0.30）；jsdom/未定义时回退 0.16
@@ -109,6 +121,19 @@ export default function ItemDetailPanel({
   const [recording, setRecording] = useState(false);
   const [timelineRefresh, setTimelineRefresh] = useState(0);
   const fileInputRef = useRef(null);
+
+  // Phase 3-2-C-1（ADR 0076）：相遇纪事数据——统一在此取 reviews/memories，
+  // 同一份 memories 同时供给 MemoryTimeline（避免重复请求）。
+  const [reviews, setReviews] = useState([]);
+  const [memories, setMemories] = useState([]);
+  useEffect(() => {
+    if (itemId == null) { setReviews([]); setMemories([]); return; }
+    let cancelled = false;
+    fetchItemReviews(itemId).then((r) => { if (!cancelled) setReviews(Array.isArray(r) ? r : []); }).catch(() => {});
+    fetchItemMemories(itemId).then((m) => { if (!cancelled) setMemories(Array.isArray(m) ? m : []); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [itemId, timelineRefresh]);
+
   async function submitDirect(sourceType, text) {
     setRecording(true);
     try {
@@ -145,6 +170,13 @@ export default function ItemDetailPanel({
   const cover = data.image_url || filePathToUrl(data?.file_path) || "";
   const rows = itemInfoRows(data);
   const tags = data.tags || [];
+
+  // Phase 3-2-C-1：相遇纪事事件（仅已收藏；由 buildEncounterEvents 唯一构造，不重复推导）
+  const encounterEvents = detail ? buildEncounterEvents({
+    collection: { added_at: detail.collected_at, status: detail.collection_status, favorite: detail.favorite },
+    reviews,
+    memories,
+  }) : [];
 
   // 氛围光晕（box-shadow 可平滑过渡；无主色时透明，回退主题表面色）
   const alpha = ambientAlpha();
@@ -329,6 +361,35 @@ export default function ItemDetailPanel({
           )}
         </section>
 
+        {/* 相遇纪事（Phase 3-2-C-1 / ADR 0076）：开放式档案时间记录，非 Card 列表。
+            事件仅来自 buildEncounterEvents；无事件整章隐藏；不显示「第一次遇见」。 */}
+        {encounterEvents.length > 0 && (
+          <section className="mt-8 pt-6 border-t" style={{ borderColor: "var(--panel-border)" }}>
+            <div className="flex items-baseline gap-3">
+              <h3 className="wd-chapter-title">相遇纪事</h3>
+              <span className="wd-meta" style={{ fontSize: 10, letterSpacing: "0.2em" }}>ENCOUNTER CHRONICLE</span>
+            </div>
+            <div className="wd-chapter-rule" />
+            <div className="wd-encounter">
+              {encounterEvents.map((ev) => (
+                <div key={ev.id} className="wd-encounter-item">
+                  <div className="wd-encounter-date">{encounterDate(ev.occurredAt)}</div>
+                  <div className="wd-encounter-body">
+                    <div className="wd-encounter-title">{ev.title}</div>
+                    {ev.metadata && (ev.metadata.rating != null || ev.metadata.status || ev.metadata.emotion) && (
+                      <div className="wd-encounter-meta">
+                        {ev.metadata.rating != null && <span>我的评分 {ev.metadata.rating}</span>}
+                        {ev.metadata.status && <span>{ev.metadata.rating != null ? " · " : ""}状态 · {ev.metadata.status}</span>}
+                        {ev.metadata.emotion && <span>{ev.metadata.rating != null || ev.metadata.status ? " · " : ""}情绪 · {ev.metadata.emotion}</span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* 我的记忆（P3 composer + MemoryTimeline：3-2-D 归位叙事标题，本阶段保持功能与位置） */}
         <div className="mt-8">
           {detail.source !== "local" && (
@@ -368,7 +429,7 @@ export default function ItemDetailPanel({
               </div>
             </div>
           )}
-          <MemoryTimeline itemId={itemId} refreshKey={timelineRefresh} />
+          <MemoryTimeline itemId={itemId} refreshKey={timelineRefresh} memories={memories} />
         </div>
         </>
         )}
