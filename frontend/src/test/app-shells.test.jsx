@@ -61,7 +61,7 @@ describe("保留的外壳结构", () => {
     await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
     fireEvent.click(screen.getByText("命运石之门"));
     await waitFor(() => expect(screen.getByText("作品档案")).toBeTruthy());
-    expect(screen.getByText("外部世界")).toBeTruthy();
+    expect(screen.getByText("这个世界")).toBeTruthy();
     fireEvent.click(screen.getByTitle("关闭"));
     await waitFor(() => expect(screen.queryByText("作品档案")).toBeNull());
   });

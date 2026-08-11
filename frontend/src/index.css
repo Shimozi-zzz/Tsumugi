@@ -628,6 +628,46 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
   color: var(--text-secondary);
 }
 
+/* Work Detail 叙事章节（Phase 3-2-A）：作品本身 + 这个世界 */
+.wd-cover {
+  border-radius: var(--radius-cover);
+  overflow: hidden;
+  background: var(--card-thumb);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 2px 8px rgba(43, 36, 26, 0.12);
+}
+.wd-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wd-meta {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: var(--ink-1);
+}
+.wd-chapter-title {
+  font-family: var(--font-heading); font-size: 16px; font-weight: 600;
+  letter-spacing: var(--tracking-serif); color: var(--ink-0);
+}
+.wd-chapter-rule {
+  height: 1px; margin: var(--sp-2) 0 var(--sp-4);
+  background: linear-gradient(to right, var(--panel-border), transparent);
+}
+.wd-intro { font-size: 13px; line-height: 1.8; color: var(--ink-0); white-space: pre-wrap; }
+.wd-catalog { margin-top: var(--sp-4); }
+.wd-catalog-row {
+  display: flex; align-items: baseline; gap: 12px; padding: 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 55%, transparent);
+  font-size: 12px;
+}
+.wd-catalog-label {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
+  color: var(--ink-2); width: 76px; flex-shrink: 0;
+}
+.wd-catalog-value { color: var(--ink-0); flex: 1; min-width: 0; }
+.wd-tags { margin-top: var(--sp-3); display: flex; flex-wrap: wrap; gap: 6px; }
+.wd-chars { margin-top: var(--sp-4); }
+.wd-chars-title {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+  color: var(--ink-2); margin-bottom: 6px;
+}
+.wd-actions { margin-top: var(--sp-5); display: flex; gap: 8px; flex-wrap: wrap; }
+
 /* 书架分区（Phase 2-4 / ADR 0071）：状态=书架章节标题，serif + hairline + mono 册数 */
 .status-shelf-name {
   font-family: var(--font-heading); font-size: 14px; font-weight: 600;

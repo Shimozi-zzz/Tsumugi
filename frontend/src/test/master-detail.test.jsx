@@ -70,10 +70,10 @@ describe("主从视图（Master-Detail）", () => {
       const h2 = document.querySelector("h2");
       expect(h2 && h2.textContent).toBe("命运石之门");
     });
-    // 基本信息属性表格 + 标签胶囊
-    expect(screen.getByText("基本信息")).toBeTruthy();
-    expect(screen.getByText("STEINS;GATE")).toBeTruthy(); // InfoTable 值（原名）
-    expect(screen.getByText("2011-04")).toBeTruthy();      // InfoTable 值（日期）
+    // 这个世界章节 + 编目（原名/日期）+ 标签胶囊
+    expect(screen.getByText("这个世界")).toBeTruthy();
+    expect(screen.getByText("STEINS;GATE")).toBeTruthy(); // 编目值（原名）
+    expect(screen.getByText("2011-04")).toBeTruthy();      // 编目值（日期）
     expect(screen.getByText("科幻")).toBeTruthy();          // TagCapsule
   });
 

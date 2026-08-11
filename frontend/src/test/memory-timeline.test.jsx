@@ -129,15 +129,15 @@ describe("MemoryTimeline 时间轴", () => {
 });
 
 describe("ItemDetailPanel 双栏结构（Phase B / ADR 0042）", () => {
-  it("渲染「外部世界 · 世界如何描述它」与「我的记录 · 我如何理解它」两个区域", async () => {
+  it("渲染「这个世界」与「我的记录」两个区域", async () => {
     mockFetch();
     render(<ItemDetailPanel itemId={1} />);
     await waitFor(() => expect(screen.getByText("命运石之门")).toBeTruthy());
-    expect(screen.getByText("外部世界")).toBeTruthy();
+    expect(screen.getByText("这个世界")).toBeTruthy();
     expect(screen.getByText("我的记录")).toBeTruthy();
     // 详情标题带编目号（ADR 0056）
     expect(screen.getByText("NO. 0001")).toBeTruthy();
-    // 外部世界内容仍在（简介段落 + 标签）
+    // 这个世界内容仍在（简介段落 + 标签）
     expect(screen.getAllByText(/简介/).length).toBeGreaterThan(0);
     expect(screen.getByText("科幻")).toBeTruthy();
     // 我的记录区包含时间轴（记忆条目渲染）
@@ -147,18 +147,18 @@ describe("ItemDetailPanel 双栏结构（Phase B / ADR 0042）", () => {
   it("空库时详情页的我的记录区显示空状态引导", async () => {
     mockFetch({ memories: [] });
     render(<ItemDetailPanel itemId={1} />);
-    await waitFor(() => expect(screen.getByText("外部世界")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("这个世界")).toBeTruthy());
     await waitFor(() => expect(screen.getByText(/还没有值得被记住的时刻/)).toBeTruthy());
   });
 });
 
 describe("Phase 3-1 统一 Work Detail（外部未收藏模式）", () => {
-  it("外部详情：收藏入库 + 外部世界，无我的记录/composer/时间轴", () => {
+  it("外部详情：收藏入库 + 这个世界，无我的记录/composer/时间轴", () => {
     const ext = { source: "bangumi", title: "外部作品", external_id: "x1", description: "外部简介", rating: 8, tags: ["热血"], characters: [] };
     render(<ItemDetailPanel externalDetail={ext} onSaveDetail={() => {}} />);
     expect(screen.getByText("外部作品")).toBeTruthy();
     expect(screen.getByText("收藏入库")).toBeTruthy();
-    expect(screen.getByText("外部世界")).toBeTruthy();
+    expect(screen.getByText("这个世界")).toBeTruthy();
     expect(screen.queryByText("我的记录")).toBeNull();
     expect(screen.queryByText("✓ 完成了")).toBeNull();
     expect(screen.queryByText("书评")).toBeNull();

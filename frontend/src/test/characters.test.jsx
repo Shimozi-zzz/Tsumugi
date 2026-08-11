@@ -65,7 +65,7 @@ describe("ItemDetailPanel 统一 Work Detail（Phase 3-1 迁移自 ItemDetailMod
       />
     );
     expect(screen.getByText("辉夜大小姐想让我告白")).toBeTruthy();
-    expect(screen.getByText("大众 ★8.9")).toBeTruthy();
+    expect(screen.getByText(/大众 ★8.9/)).toBeTruthy(); // 收敛为 mono 编目行
     expect(screen.getByText("恋爱头脑战。")).toBeTruthy();
     expect(screen.getByText("四宫辉夜")).toBeTruthy();
     expect(screen.getByText("收藏入库")).toBeTruthy();

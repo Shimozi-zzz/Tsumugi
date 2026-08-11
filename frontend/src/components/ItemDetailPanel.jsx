@@ -12,7 +12,7 @@
 // - `refreshKey` 用于"刷新资料"后重取详情。
 import React, { useEffect, useRef, useState } from "react";
 import { fetchItemDetail, filePathToUrl, updateWorkColumns, updateCollection, createDirectMemory } from "../api.js";
-import { InfoTable, TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL, COLLECTION_STATUSES, MEMORY_EMOTIONS } from "./ui.jsx";
+import { TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL, COLLECTION_STATUSES, MEMORY_EMOTIONS } from "./ui.jsx";
 import { extractPalette } from "../ambient.js";
 import MemoryTimeline from "./MemoryTimeline.jsx";
 
@@ -162,96 +162,96 @@ export default function ItemDetailPanel({
           boxShadow: glowShadow, transition: "box-shadow 0.5s ease", zIndex: 0,
         }} />
       <div className="relative" style={{ zIndex: 1 }}>
-        <div className="flex gap-4 mb-4">
+        {/* 作品本身（Phase 3-2-A）：封面为第一视觉锚点——像桌上的一本书；
+            标题 serif；NO./来源/评分收敛为 mono 编目行，不再胶囊堆叠 */}
+        <div className="flex gap-4 mb-6 items-start">
           {cover ? (
-            <img src={cover} alt="" className="w-24 h-32 object-cover rounded-xl shrink-0"
-              onError={(e) => { e.target.style.display = "none"; }} />
+            <div className="wd-cover shrink-0" style={{ width: 128 }}>
+              <img src={cover} alt="" style={{ aspectRatio: "3/4" }}
+                onError={(e) => { e.target.style.display = "none"; }} />
+            </div>
           ) : null}
           <div className="min-w-0">
-            <h2 className="tsm-heading leading-tight" style={{ color: "var(--text)", fontSize: 22, fontWeight: 600 }}>{data.title}</h2>
+            <h2 className="tsm-heading leading-tight" style={{ color: "var(--text)", fontSize: 24, fontWeight: 600 }}>{data.title}</h2>
             {data.id != null && (
-              <div className="catalog-no mt-1">NO. {String(data.id).padStart(4, "0")}</div>
+              <div className="wd-meta mt-1.5">NO. {String(data.id).padStart(4, "0")}</div>
             )}
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <TagCapsule text={data.source || "本地"} />
-              {data.rating != null && (
-                <TagCapsule text={`大众 ★${data.rating}`} title="外部数据源公众评分" />
-              )}
-              {data.my_rating != null && (
-                <TagCapsule text={`我的平均 ★${data.my_rating}`} muted />
-              )}
+            <div className="wd-meta mt-1.5">
+              {data.source || "本地"}
+              {data.rating != null && <span> · 大众 ★{data.rating}</span>}
+              {data.my_rating != null && <span> · 我的平均 ★{data.my_rating}</span>}
             </div>
           </div>
         </div>
 
-        {/* 外部世界：世界如何描述它（Phase B，ADR 0042 双栏结构）
-            P1（ADR 0045）：右侧提供作品类型内联修正（外部作品，仅已收藏） */}
-        <div className="mb-3 flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-baseline gap-2">
-            <span className="text-[11px] tracking-wider" style={{ color: "var(--accent)" }}>外部世界</span>
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>· 世界如何描述它</span>
-          </div>
-          {!externalMode && detail.source !== "local" && (
-            <select value={workType} onChange={changeWorkType} title="作品类型（可手动修正）"
-              disabled={workSaving}
-              className="rounded-lg px-2 py-1 text-[11px] outline-none"
-              style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }}>
-              <option value="">未分类</option>
-              {WORK_TYPES.map((t) => <option key={t} value={t}>{WORK_TYPE_LABEL[t]}</option>)}
-            </select>
-          )}
-        </div>
-
-        {rows.length > 0 && (
-          <div className="mb-4">
-            <div className="text-[11px] mb-1.5 tracking-wider" style={{ color: "var(--text-secondary)" }}>基本信息</div>
-            <InfoTable rows={rows} />
-          </div>
-        )}
-
-        <div className="mb-4">
-          <div className="text-[11px] mb-1.5 tracking-wider" style={{ color: "var(--text-secondary)" }}>简介</div>
-          <div className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: "var(--text)" }}>
-            {introText(data)}
-          </div>
-        </div>
-
-        {tags.length > 0 && (
-          <div className="mb-4 flex flex-wrap gap-1.5">
-            {tags.map((t) => <TagCapsule key={t} text={t} />)}
-          </div>
-        )}
-
-        {(data.characters || []).length > 0 && (
-          <div>
-            <div className="text-[11px] mb-1.5 tracking-wider" style={{ color: "var(--text-secondary)" }}>
-              角色（{data.characters.length}）
+        {/* 这个世界（Phase 3-2-A）：作品自身是什么——简介优先（阅读），编目为辅助（非表格中心），
+            标签轻量索引，角色是作品世界的一部分 */}
+        <section>
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <div className="flex items-baseline gap-3">
+              <h3 className="wd-chapter-title">这个世界</h3>
+              <span className="wd-meta" style={{ fontSize: 10, letterSpacing: "0.2em" }}>WORLD</span>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {(data.characters || []).map((c) => (
-                <TagCapsule key={c.id ?? c.name} text={c.name} title={c.summary || c.relation || undefined} />
+            {!externalMode && detail.source !== "local" && (
+              <select value={workType} onChange={changeWorkType} title="作品类型（可手动修正）"
+                disabled={workSaving}
+                className="px-2 py-1 text-[11px] outline-none"
+                style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)", borderRadius: "var(--radius-control)" }}>
+                <option value="">未分类</option>
+                {WORK_TYPES.map((t) => <option key={t} value={t}>{WORK_TYPE_LABEL[t]}</option>)}
+              </select>
+            )}
+          </div>
+          <div className="wd-chapter-rule" />
+
+          <div className="wd-intro">{introText(data)}</div>
+
+          {rows.length > 0 && (
+            <div className="wd-catalog">
+              {rows.map((r) => (
+                <div key={r.label} className="wd-catalog-row">
+                  <span className="wd-catalog-label">{r.label}</span>
+                  <span className="wd-catalog-value">{r.value}</span>
+                </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Phase 3-1：外部世界结束处的外部操作（收藏入库/安利卡/刷新），由调用方传回调 */}
+          {tags.length > 0 && (
+            <div className="wd-tags">
+              {tags.map((t) => <TagCapsule key={t} text={t} />)}
+            </div>
+          )}
+
+          {(data.characters || []).length > 0 && (
+            <div className="wd-chars">
+              <div className="wd-chars-title">角色 · {data.characters.length}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {(data.characters || []).map((c) => (
+                  <TagCapsule key={c.id ?? c.name} text={c.name} title={c.summary || c.relation || undefined} />
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Phase 3-1：这个世界结束处的外部操作（收藏入库/安利卡/刷新），由调用方传回调 */}
         {(onSaveDetail || onShareDetail || onRefreshDetail) && (
-          <div className="mt-5 flex items-center gap-2 flex-wrap">
+          <div className="wd-actions">
             {onSaveDetail && (
               <button onClick={onSaveDetail}
-                className="px-3 py-1.5 rounded-lg text-[12px] font-medium"
-                style={{ backgroundColor: "var(--accent)", color: "#fff" }}>收藏入库</button>
+                className="px-3 py-1.5 text-[12px] font-medium"
+                style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: "var(--radius-control)" }}>收藏入库</button>
             )}
             {onShareDetail && (
               <button onClick={onShareDetail}
-                className="px-3 py-1.5 rounded-lg text-[12px] font-medium"
-                style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>生成安利卡</button>
+                className="px-3 py-1.5 text-[12px] font-medium"
+                style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)", borderRadius: "var(--radius-control)" }}>生成安利卡</button>
             )}
             {onRefreshDetail && (
               <button onClick={onRefreshDetail}
-                className="px-3 py-1.5 rounded-lg text-[12px]"
-                style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}
+                className="px-3 py-1.5 text-[12px]"
+                style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)", borderRadius: "var(--radius-control)" }}
                 title="重新从数据源下载最新简介与角色小传（受限流约束）">刷新资料</button>
             )}
           </div>
