@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from "react";
 import { fetchItemMemories, deleteMemory } from "../api.js";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
-import { MEMORY_TYPE_LABEL, ArchiveNo } from "./ui.jsx";
+import { MemoryTypeTag, ArchiveNo } from "./ui.jsx";
 
 function formatDate(iso) {
   if (!iso) return "";
@@ -76,10 +76,15 @@ export default function MemoryTimeline({ itemId, refreshKey = 0 }) {
           const clickable = mem.source_type !== "collection";
           const deletable = mem.source_type === "text" || mem.source_type === "milestone";
           const no = String(idx + 1).padStart(2, "0");
+          // Phase D（ADR 0063）：时间轴点按类型——收藏时刻降为暖石注记（安静、入藏），
+          // 其余可点类型保持 accent
+          const dotColor = mem.source_type === "collection"
+            ? "color-mix(in srgb, var(--accent) 40%, var(--panel-border))"
+            : (clickable ? "var(--accent)" : "var(--text-secondary)");
           return (
             <div key={mem.id} className="relative mb-3 last:mb-0">
               <span className="absolute -left-5 top-1.5 w-2 h-2 rounded-full"
-                style={{ backgroundColor: clickable ? "var(--accent)" : "var(--text-secondary)", opacity: 0.85 }} />
+                style={{ backgroundColor: dotColor, opacity: 0.85 }} />
               <button type="button" onClick={() => openMemory(mem)} disabled={!clickable}
                 title={clickable ? "查看这条记忆" : undefined}
                 className="block w-full text-left"
@@ -88,9 +93,7 @@ export default function MemoryTimeline({ itemId, refreshKey = 0 }) {
                   style={{ color: "var(--text-secondary)" }}>
                   <ArchiveNo color="muted" className="mr-1.5">{no}</ArchiveNo>
                   {formatDate(mem.occurred_at)}
-                  <span className="ml-1.5 px-1 py-px rounded" style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
-                    {MEMORY_TYPE_LABEL[mem.source_type] || mem.source_type}
-                  </span>
+                  <MemoryTypeTag sourceType={mem.source_type} />
                   {mem.emotion && <span className="ml-1.5" style={{ color: "var(--text-secondary)" }}>· {mem.emotion}</span>}
                 </span>
                 <span className="block text-[13px] leading-snug mt-0.5" style={{ color: "var(--text)" }}>

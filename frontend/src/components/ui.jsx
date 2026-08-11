@@ -81,6 +81,38 @@ export const COLLECTION_STATUSES = ["想看", "在看", "看完", "搁置", "弃
 export const MEMORY_EMOTIONS = ["开心", "感动", "遗憾", "怀念", "平静", "治愈"];
 export const MEMORY_TYPE_LABEL = { review: "书评", text: "记录", milestone: "里程碑", collection: "收藏" };
 
+/**
+ * 记忆类型小标（Phase D · 情感权重呈现，ADR 0063）：回顾场景里让"收藏时刻/完成时刻"
+ * 被自然识别，克制安静——书评保持正式 pill，轻量记录中性化，完成时刻暖色、收藏时刻
+ * 降为入藏注记。不新增情感评分/字段/AI。
+ */
+export function MemoryTypeTag({ sourceType }) {
+  const t = sourceType || "";
+  if (t === "collection") {
+    return (
+      <span className="ml-1.5 inline-flex items-center rounded px-1 py-px text-[10px] tracking-wider whitespace-nowrap"
+        style={{ color: "var(--text-secondary)" }}>＋ 收藏</span>
+    );
+  }
+  if (t === "milestone") {
+    return (
+      <span className="ml-1.5 inline-flex items-center rounded px-1 py-px text-[10px] tracking-wider whitespace-nowrap"
+        style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)", fontWeight: 600 }}>✓ 完成</span>
+    );
+  }
+  if (t === "text") {
+    return (
+      <span className="ml-1.5 inline-flex items-center rounded px-1 py-px text-[10px] tracking-wider whitespace-nowrap"
+        style={{ backgroundColor: "var(--panel-border)", color: "var(--text-secondary)" }}>记录</span>
+    );
+  }
+  const label = MEMORY_TYPE_LABEL[t] || t || "";
+  return (
+    <span className="ml-1.5 inline-flex items-center rounded px-1 py-px text-[10px] tracking-wider whitespace-nowrap"
+      style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{label}</span>
+  );
+}
+
 export function itemInfoRows(detail) {
   if (!detail) return [];
   const raw = detail.raw_metadata && typeof detail.raw_metadata === "object" ? detail.raw_metadata : null;

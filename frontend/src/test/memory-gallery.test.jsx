@@ -102,6 +102,21 @@ describe("记忆回廊页面", () => {
     // 改用：仅一条 2026 记忆，点年份后仍显示；验证无数据年份 chip 不出现
     expect(screen.queryByText("2025")).toBeNull();
   });
+
+  it("Phase D：收藏/完成时刻在回廊里带类型标记（书评行保持干净）", async () => {
+    mockFetch([
+      { id: 1, item_id: 1, item_title: "魔法少女小圆", source_type: "review", source_ref: 10, occurred_at: "2026-08-07T09:00:00", summary: "神作", created_at: "2026-08-07T09:00:00" },
+      { id: 2, item_id: 2, item_title: "命运石之门", source_type: "collection", source_ref: 2, occurred_at: "2026-08-08T10:00:00", summary: "这一天，我把它带回了图书馆", created_at: "2026-08-08T10:00:00" },
+      { id: 3, item_id: 3, item_title: "空之境界", source_type: "milestone", source_ref: null, occurred_at: "2026-08-09T11:00:00", summary: "这一天，我把《空之境界》看完了", created_at: "2026-08-09T11:00:00" },
+    ]);
+    render(<MemoryGallery onOpenWork={() => {}} />);
+    await waitFor(() => expect(screen.getByText("神作")).toBeTruthy());
+    expect(screen.getByText("＋ 收藏")).toBeTruthy();
+    expect(screen.getByText("✓ 完成")).toBeTruthy();
+    // 书评行不出现类型标记（干净）
+    const reviewRow = screen.getByText("神作").closest("button");
+    expect(reviewRow.textContent).not.toContain("书评");
+  });
 });
 
 describe("命令面板动作项", () => {

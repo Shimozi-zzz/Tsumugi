@@ -85,8 +85,18 @@ describe("MemoryTimeline 时间轴", () => {
     mockFetch({ memories: [{ id: 9, item_id: 1, item_title: "x", source_type: "collection", source_ref: null, occurred_at: "2026-08-01T10:00:00", summary: "这一天，我把它带回了图书馆", created_at: "2026-08-01T10:00:00" }] });
     render(<MemoryTimeline itemId={1} />);
     await waitFor(() => expect(screen.getByText(/带回了图书馆/)).toBeTruthy());
+    expect(screen.getByText("＋ 收藏")).toBeTruthy(); // Phase D：收藏时刻类型标记
     fireEvent.click(screen.getByText(/带回了图书馆/));
     expect(document.querySelector(".doc")).toBeNull(); // 不打开书评弹层
+  });
+
+  it("Phase D：完成时刻（milestone）显示「✓ 完成」标记，可删除", async () => {
+    mockFetch({ memories: [
+      { id: 7, item_id: 1, item_title: "魔法少女小圆", source_type: "milestone", source_ref: null, occurred_at: "2026-08-20T21:00:00", summary: "这一天，我把《魔法少女小圆》看完了", created_at: "2026-08-20T21:00:00" },
+    ] });
+    render(<MemoryTimeline itemId={1} />);
+    await waitFor(() => expect(screen.getByText(/看完了/)).toBeTruthy());
+    expect(screen.getByText("✓ 完成")).toBeTruthy();
   });
 
   it("itemId 变化时重新拉取", async () => {

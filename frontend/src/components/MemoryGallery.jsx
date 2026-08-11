@@ -7,7 +7,7 @@
 // - 本轮明确不做：意外重逢（Phase E）、轻量记录（Phase D）、标签/语义筛选（结构化筛选）。
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchMemories } from "../api.js";
-import { ArchiveNo } from "./ui.jsx";
+import { ArchiveNo, MemoryTypeTag } from "./ui.jsx";
 
 function yearOf(iso) {
   return iso ? String(iso).slice(0, 4) : "";
@@ -104,7 +104,11 @@ export default function MemoryGallery({ onOpenWork, className = "" }) {
                   className="relative mb-2.5 block w-full text-left last:mb-0 hover:opacity-80 transition-opacity">
                   <span className="absolute -left-5 top-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: "var(--accent)", opacity: 0.7 }} />
                   <span className="block text-[10px] tabular-nums tracking-wider" style={{ color: "var(--text-secondary)" }}>
-                    {md(m.occurred_at)} · {m.item_title || `作品 #${m.item_id}`}
+                    {md(m.occurred_at)}
+                    {/* Phase D（ADR 0063）：回廊里非书评类型（收藏/完成/轻量记录）给类型标记，
+                        让"收藏时刻/完成时刻"被自然识别；书评保持干净 */}
+                    {m.source_type !== "review" && <MemoryTypeTag sourceType={m.source_type} />}
+                    <span> · {m.item_title || `作品 #${m.item_id}`}</span>
                   </span>
                   <span className="block text-[13px] leading-snug mt-0.5" style={{ color: "var(--text)" }}>{m.summary || "（无摘要）"}</span>
                 </button>
