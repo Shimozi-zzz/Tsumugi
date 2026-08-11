@@ -1483,15 +1483,15 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 <div className="flex items-center gap-0.5 px-1 py-0.5"
                   style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", borderRadius: "var(--radius-control)" }}>
                   <button onClick={() => setLibView("grid")} title="网格视图"
-                    className="px-2 py-1 text-[11px]"
+                    className="px-2.5 py-1.5 text-[11px]"
                     style={{ borderRadius: "var(--radius-control)", backgroundColor: libView === "grid" ? "var(--accent-soft)" : "transparent",
                       color: libView === "grid" ? "var(--accent)" : "var(--text-secondary)" }}>▦</button>
                   <button onClick={() => setLibView("shelf")} title="书架视图"
-                    className="px-2 py-1 text-[11px]"
+                    className="px-2.5 py-1.5 text-[11px]"
                     style={{ borderRadius: "var(--radius-control)", backgroundColor: libView === "shelf" ? "var(--accent-soft)" : "transparent",
                       color: libView === "shelf" ? "var(--accent)" : "var(--text-secondary)" }}>▤</button>
                   <button onClick={() => setLibView("list")} title="分组列表（主从视图）"
-                    className="px-2 py-1 text-[11px]"
+                    className="px-2.5 py-1.5 text-[11px]"
                     style={{ borderRadius: "var(--radius-control)", backgroundColor: libView === "list" ? "var(--accent-soft)" : "transparent",
                       color: libView === "list" ? "var(--accent)" : "var(--text-secondary)" }}>☰</button>
                 </div>
@@ -1555,11 +1555,10 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 {gridItems.length === 0 ? "暂无资料，在左侧「导入」添加吧。" : "没有匹配的存储内容。"}
               </div>
             ) : libView === "list" ? (
-              /* 主从视图（ADR 0029/0030）：左=状态分组列表，右=详情；
-                 左右各套 --surface-1 面板背景（深色下与最外层 --surface-0 拉开层次），
-                 各自独立滚动 */
-              <div className="flex-1 min-h-0 flex gap-4">
-                <div className="w-[300px] shrink-0 min-h-0 flex flex-col border overflow-hidden"
+              <>
+              {/* 主从视图（ADR 0029/0030；Phase 2-6 移动端适配）：桌面左右主从，窄屏列表全宽 + 全屏详情 */}
+              <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4">
+                <div className="w-full lg:w-[300px] shrink-0 min-h-0 flex flex-col border overflow-hidden"
                   style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)", borderRadius: "var(--radius-surface)" }}>
                   <StatusGroupedList
                     className="flex-1 min-h-0 overflow-y-auto p-2"
@@ -1567,13 +1566,31 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                     selectedId={detailBrowseId} onSelect={setDetailBrowseId}
                   />
                 </div>
-                <div className="flex-1 min-h-0 border overflow-hidden"
+                <div className="flex-1 min-h-0 border overflow-hidden hidden lg:flex"
                   style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)", borderRadius: "var(--radius-surface)" }}>
                   <div className="h-full overflow-y-auto p-5">
                     <ItemDetailPanel itemId={detailBrowseId} />
                   </div>
                 </div>
               </div>
+              {/* Phase 2-6（ADR 0073）：移动端全屏 Detail Scene（<1024，选中行时）——
+                  复用 ItemDetailPanel 与 detailBrowseId，不新增第二套详情系统。
+                  JS 视口守卫与 CSS lg:hidden 双保险（jsdom 无 CSS 时守卫生效）。 */}
+              {detailBrowseId != null && window.innerWidth < 1024 && (
+                <div className="fixed inset-0 z-50 overflow-y-auto lg:hidden"
+                  style={{ backgroundColor: "var(--bg)" }}>
+                  <div className="flex items-center justify-between px-5 py-3 border-b sticky top-0"
+                    style={{ backgroundColor: "var(--bg)", borderColor: "var(--panel-border)" }}>
+                    <span className="tsm-heading text-sm" style={{ color: "var(--text)" }}>作品档案</span>
+                    <button onClick={() => setDetailBrowseId(null)} title="关闭"
+                      className="px-2 py-1 text-sm" style={{ color: "var(--text-secondary)", borderRadius: "var(--radius-control)" }}>✕</button>
+                  </div>
+                  <div className="p-5">
+                    <ItemDetailPanel itemId={detailBrowseId} />
+                  </div>
+                </div>
+              )}
+              </>
             ) : libView === "shelf" ? (
               <div className="flex-1 min-h-0 overflow-y-auto">
                 <Bookshelf items={libFiltered} coverOf={cardCover} onOpenItem={(it) => openItemDetail(it)}
