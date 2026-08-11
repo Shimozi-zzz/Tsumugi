@@ -43,6 +43,18 @@ describe("保留的外壳结构", () => {
     await waitFor(() => expect(container.querySelector('.shell-c-room[data-room="gallery"]')).toBeTruthy());
   });
 
+  it("Phase 2-0：ShellC rail 并入馆内导览视觉语言（serif 标签 + mono 编号 + 激活态）", async () => {
+    mockFetch(ITEMS);
+    const { container } = render(<ShellC />);
+    const nav = container.querySelector(".shell-c-rail");
+    const first = nav.querySelector("button");
+    expect(first.querySelector(".shell-c-no")).toBeTruthy();      // mono 编号
+    expect(first.querySelector(".shell-c-label").textContent).toBe("书库"); // serif 标签
+    expect(first.className).toContain("shell-c-active");          // 默认激活 library
+    const other = nav.querySelectorAll("button")[1];
+    expect(other.className).not.toContain("shell-c-active");
+  });
+
   it("C 外壳交互化：点书库卡片 → 打开作品详情弹层（可关闭）", async () => {
     mockFetch(ITEMS);
     render(<ShellC />);

@@ -651,15 +651,24 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 /* 通用：书库网格内容（探索用） */
 .shell-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
 
-/* ---------- C 非对称档案室：不同房间格局不同 ---------- */
+/* ---------- C 非对称档案室：不同房间格局不同 ----------
+   Phase 2-0（ADR 0067）：rail 视觉语言统一到「馆内导览」Design System——
+   serif 馆室名 + mono 编号 + 相同 active/inactive 层级与 spacing/border/motion token。
+   不改变房间数量 / section key / 状态管理 / 数据 / 布局概念。 */
 .shell-c { display: flex; height: 100%; background: var(--bg); font-family: var(--font-body); }
-.shell-c-rail { width: 148px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px;
-  padding: 20px 12px; border-right: 1px solid var(--panel-border); background: var(--surface-1); }
-.shell-c-nav { display: flex; align-items: baseline; gap: 8px; padding: 9px 10px; border: 1px solid transparent;
-  border-radius: 4px; font-size: 13px; color: var(--text-secondary); cursor: pointer; text-align: left; transition: none; }
+.shell-c-rail { width: 176px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px;
+  padding: 16px 10px; border-right: 1px solid var(--panel-border); background: var(--rail-bg); }
+.shell-c-nav { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border: none; border-radius: 4px;
+  color: var(--text-secondary); cursor: pointer; text-align: left;
+  transition: background-color var(--dur-enter) var(--ease-standard), color var(--dur-enter) var(--ease-standard); }
 .shell-c-nav:hover { color: var(--text); }
-.shell-c-active { color: var(--accent); font-weight: 600; background: var(--accent-soft); border-color: var(--panel-border); }
-.shell-c-no { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--text-secondary); }
+.shell-c-active { color: var(--accent); background: var(--accent-soft); }
+.shell-c-no { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em;
+  width: 16px; text-align: center; color: var(--ink-2); }
+.shell-c-active .shell-c-no { color: var(--accent); }
+.shell-c-label { font-family: var(--font-heading); font-size: 12px; letter-spacing: 0.06em; font-weight: 500; }
+.shell-c-active .shell-c-label { font-weight: 600; }
 .shell-c-room { flex: 1; min-width: 0; overflow-y: auto; }
 /* 每个房间：不同的宽度/偏移/错落（走进不同房间格局不同） */
 .shell-c-room[data-room="library"] { padding: 34px 22px 40px 44px; }

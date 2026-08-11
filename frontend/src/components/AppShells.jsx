@@ -339,7 +339,7 @@ export function ShellC({ shellValue = "c", onShellChange = () => {}, setTheme = 
             className={"shell-c-nav" + (section === s.key ? " shell-c-active" : "")}
             onClick={() => setSection(s.key)}>
             <span className="shell-c-no">{String(i + 1).padStart(2, "0")}</span>
-            <span>{s.label}</span>
+            <span className="shell-c-label">{s.label}</span>
           </button>
         ))}
       </nav>
