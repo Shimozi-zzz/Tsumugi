@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import React from "react";
 import CharacterWall from "../components/CharacterWall.jsx";
-import ItemDetailModal from "../components/ItemDetailModal.jsx";
+import ItemDetailPanel from "../components/ItemDetailPanel.jsx";
 
 const WORK_A = { item_id: 1, title: "辉夜大小姐想让我告白", image_url: "https://img/a.jpg", source: "bangumi" };
 
@@ -51,45 +51,42 @@ describe("CharacterWall", () => {
   });
 });
 
-describe("ItemDetailModal", () => {
-  it("渲染封面/简介/评分/角色墙", () => {
+describe("ItemDetailPanel 统一 Work Detail（Phase 3-1 迁移自 ItemDetailModal）", () => {
+  it("外部未收藏详情：渲染封面/简介/评分/角色墙 + 收藏入库", () => {
     render(
-      <ItemDetailModal
-        detail={{
+      <ItemDetailPanel
+        externalDetail={{
           source: "bangumi", title: "辉夜大小姐想让我告白",
           description: "恋爱头脑战。", image_url: "https://img/a.jpg",
           rating: 8.9, tags: ["恋爱", "搞笑"],
           characters: [{ id: 1, name: "四宫辉夜", image_url: "https://img/h.jpg", relation: "主角" }],
         }}
-        saved={false} onClose={() => {}} onSave={() => {}}
+        onSaveDetail={() => {}}
       />
     );
     expect(screen.getByText("辉夜大小姐想让我告白")).toBeTruthy();
     expect(screen.getByText("大众 ★8.9")).toBeTruthy();
     expect(screen.getByText("恋爱头脑战。")).toBeTruthy();
     expect(screen.getByText("四宫辉夜")).toBeTruthy();
-    expect(screen.getByText("登场角色")).toBeTruthy();
+    expect(screen.getByText("收藏入库")).toBeTruthy();
   });
 
-  it("saved=true 显示已收藏，saved=true 不显示收藏按钮", () => {
-    render(
-      <ItemDetailModal
-        detail={{ source: "bangumi", title: "X", characters: [] }}
-        saved={true} onClose={() => {}}
-      />
-    );
-    expect(screen.getByText("已收藏")).toBeTruthy();
+  it("已收藏（saved）模式：进入我的记录，不显示收藏入库", async () => {
+    global.fetch = vi.fn((url) => {
+      const u = String(url);
+      if (u.includes("/detail")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: "X", source: "bangumi", characters: [], tags: [], description: "" }) });
+      if (u.includes("/memories")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      if (u.includes("/reviews")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("我的记录")).toBeTruthy());
     expect(screen.queryByText("收藏入库")).toBeNull();
   });
 
-  it("未收藏时显示收藏按钮，点击触发 onSave", () => {
+  it("未收藏时显示收藏按钮，点击触发 onSaveDetail", () => {
     const onSave = vi.fn();
-    render(
-      <ItemDetailModal
-        detail={{ source: "bangumi", title: "X", characters: [] }}
-        saved={false} onClose={() => {}} onSave={onSave}
-      />
-    );
+    render(<ItemDetailPanel externalDetail={{ source: "bangumi", title: "X", characters: [] }} onSaveDetail={onSave} />);
     fireEvent.click(screen.getByText("收藏入库"));
     expect(onSave).toHaveBeenCalled();
   });
