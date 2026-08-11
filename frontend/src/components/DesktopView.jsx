@@ -1458,44 +1458,13 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         {section === "library" && (
           <div className="lib-space h-full flex flex-col min-h-0">
             <PageHeader room="书库" path="LIBRARY" />
-            <div className="flex items-center justify-between gap-3 mb-5 shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[15px] font-medium tracking-wide" style={{ color: "var(--text)" }}>
-                  {activeTag ? `# ${activeTag}` : "全部资料"}
-                </span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full"
-                  style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{gridTotal}</span>
-              </div>
-            <div className="flex items-center gap-2">
-              {/* 批量选择模式 */}
-              <button onClick={() => { setSelectMode((v) => !v); setSelectedIds(new Set()); }}
-                title="批量选择"
-                className="px-3 py-1.5 rounded-full text-[11px]"
-                style={{ backgroundColor: selectMode ? "var(--accent)" : "var(--accent-soft)",
-                  color: selectMode ? "#fff" : "var(--accent)" }}>
-                选择
-              </button>
-              {/* 视图切换：网格 / 书架 / 分组列表（列表=主从视图） */}
-              <div className="flex items-center gap-0.5 rounded-full px-1 py-0.5"
+            {/* 工具栏（Phase 2-3 / ADR 0070）：「整理书架」三级层级——
+                Level1 搜索（主入口）/ Level2 视图切换 / Level3 批量选择（默认安静） */}
+            <div className="flex items-center justify-between gap-3 mb-4 shrink-0 flex-wrap">
+              <div className="flex items-center gap-2 rounded-full px-3.5 py-2 w-full sm:w-72"
                 style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
-                <button onClick={() => setLibView("grid")} title="网格视图"
-                  className="px-2 py-1 rounded-full text-[11px]"
-                  style={{ backgroundColor: libView === "grid" ? "var(--accent)" : "transparent",
-                    color: libView === "grid" ? "#fff" : "var(--text-secondary)" }}>▦</button>
-                <button onClick={() => setLibView("shelf")} title="书架视图"
-                  className="px-2 py-1 rounded-full text-[11px]"
-                  style={{ backgroundColor: libView === "shelf" ? "var(--accent)" : "transparent",
-                    color: libView === "shelf" ? "#fff" : "var(--text-secondary)" }}>▤</button>
-                <button onClick={() => setLibView("list")} title="分组列表（主从视图）"
-                  className="px-2 py-1 rounded-full text-[11px]"
-                  style={{ backgroundColor: libView === "list" ? "var(--accent)" : "transparent",
-                    color: libView === "list" ? "#fff" : "var(--text-secondary)" }}>☰</button>
-              </div>
-              {/* 图书馆本地查找（按标题/内容过滤当前视图） */}
-              <div className="flex items-center gap-2 rounded-full px-3.5 py-2 w-64"
-                style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"
-                  className="shrink-0" style={{ color: "var(--text-secondary)" }}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5"
+                  strokeLinecap="round" className="shrink-0" style={{ color: "var(--text-secondary)" }}>
                   <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
                 </svg>
                 <input value={libQuery}
@@ -1503,29 +1472,78 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   placeholder="查找存储的内容…"
                   className="flex-1 bg-transparent outline-none text-sm min-w-0"
                   style={{ color: "var(--text)" }} />
+                {libQuery && (
+                  <button onClick={() => setLibQuery("")} title="清除搜索" className="text-[11px] shrink-0"
+                    style={{ color: "var(--text-secondary)" }}>✕</button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {/* 视图切换：紧凑安静 */}
+                <div className="flex items-center gap-0.5 rounded-full px-1 py-0.5"
+                  style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
+                  <button onClick={() => setLibView("grid")} title="网格视图"
+                    className="px-2 py-1 rounded-full text-[11px]"
+                    style={{ backgroundColor: libView === "grid" ? "var(--accent-soft)" : "transparent",
+                      color: libView === "grid" ? "var(--accent)" : "var(--text-secondary)" }}>▦</button>
+                  <button onClick={() => setLibView("shelf")} title="书架视图"
+                    className="px-2 py-1 rounded-full text-[11px]"
+                    style={{ backgroundColor: libView === "shelf" ? "var(--accent-soft)" : "transparent",
+                      color: libView === "shelf" ? "var(--accent)" : "var(--text-secondary)" }}>▤</button>
+                  <button onClick={() => setLibView("list")} title="分组列表（主从视图）"
+                    className="px-2 py-1 rounded-full text-[11px]"
+                    style={{ backgroundColor: libView === "list" ? "var(--accent-soft)" : "transparent",
+                      color: libView === "list" ? "var(--accent)" : "var(--text-secondary)" }}>☰</button>
+                </div>
+                {/* 批量选择入口（Level3：默认安静，进入 Selection Mode 才获得权重） */}
+                <button onClick={() => { setSelectMode((v) => !v); setSelectedIds(new Set()); }}
+                  title="批量选择"
+                  className="px-2.5 py-1.5 rounded text-[11px]"
+                  style={{ color: selectMode ? "var(--accent)" : "var(--text-secondary)",
+                    backgroundColor: selectMode ? "var(--accent-soft)" : "transparent" }}>
+                  选择
+                </button>
               </div>
             </div>
-          </div>
 
-          {/* P1（ADR 0045）：按作品类型筛选（有该类型数据时显示 chips） */}
-          {workTypeOptions.length > 0 && (
-            <div className="flex items-center gap-1.5 mb-4 flex-wrap shrink-0">
-              <button onClick={() => setActiveWorkType(null)}
-                className="px-3 py-1 rounded-full text-xs transition-colors"
-                style={{ color: activeWorkType === null ? "#fff" : "var(--text-secondary)",
-                  backgroundColor: activeWorkType === null ? "var(--accent)" : "var(--accent-soft)" }}>
-                全部类型
-              </button>
+            {/* 书架范围（Phase 2-3）：当前筛选状态一目了然，克制、可清除 */}
+            <div className="flex items-center gap-1.5 mb-4 flex-wrap shrink-0"
+              style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.04em", color: "var(--ink-2)" }}>
+              <span>共 {gridTotal} 册</span>
+              <span style={{ opacity: 0.4 }}>·</span>
+              <button onClick={() => setActiveWorkType(null)} title="全部类型"
+                className="px-2 py-0.5 rounded-full"
+                style={{ color: activeWorkType === null ? "var(--accent)" : "var(--ink-2)",
+                  backgroundColor: activeWorkType === null ? "var(--accent-soft)" : "transparent" }}>全部类型</button>
               {workTypeOptions.map((t) => (
                 <button key={t} onClick={() => setActiveWorkType(activeWorkType === t ? null : t)}
-                  className="px-3 py-1 rounded-full text-xs transition-colors"
-                  style={{ color: activeWorkType === t ? "#fff" : "var(--text-secondary)",
-                    backgroundColor: activeWorkType === t ? "var(--accent)" : "var(--accent-soft)" }}>
+                  className="px-2 py-0.5 rounded-full"
+                  style={{ color: activeWorkType === t ? "var(--accent)" : "var(--ink-2)",
+                    backgroundColor: activeWorkType === t ? "var(--accent-soft)" : "transparent" }}>
                   {WORK_TYPE_LABEL[t]}
                 </button>
               ))}
+              {activeTag && (
+                <button onClick={() => setActiveTag(null)} title="清除标签"
+                  className="px-2 py-0.5 rounded-full"
+                  style={{ color: "var(--accent)", backgroundColor: "var(--accent-soft)" }}># {activeTag} ✕</button>
+              )}
+              {activeGroup !== "all" && (
+                <button onClick={() => setActiveGroup("all")} title="清除分组"
+                  className="px-2 py-0.5 rounded-full"
+                  style={{ color: "var(--accent)", backgroundColor: "var(--accent-soft)" }}>
+                  {({ all: "全部", note: "笔记", image: "图片", external: "外部收藏" })[activeGroup] || activeGroup} ✕
+                </button>
+              )}
+              {libQuery.trim() && (
+                <button onClick={() => setLibQuery("")} title="清除搜索条件"
+                  className="px-2 py-0.5 rounded-full"
+                  style={{ color: "var(--accent)", backgroundColor: "var(--accent-soft)" }}>「{libQuery.trim()}」 ✕</button>
+              )}
+              {(activeTag || activeGroup !== "all" || activeWorkType || libQuery.trim()) && (
+                <button onClick={() => { setActiveTag(null); setActiveGroup("all"); setActiveWorkType(null); setLibQuery(""); }}
+                  title="清除筛选" className="px-1" style={{ color: "var(--text-secondary)" }}>清除筛选</button>
+              )}
             </div>
-          )}
 
             {gridLoading ? (
               <div className="flex-1 min-h-0 flex items-center justify-center text-sm"
