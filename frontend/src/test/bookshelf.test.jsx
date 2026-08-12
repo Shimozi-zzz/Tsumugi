@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import React from "react";
 import { stringHash, spineSeed, spineColor, hexToHsl, primaryTag, spineThickness, groupBookshelf } from "../bookshelf.js";
-import Bookshelf from "../components/Bookshelf.jsx";
+import Bookshelf, { spineColorVaried } from "../components/Bookshelf.jsx";
 import DesktopView from "../components/DesktopView.jsx";
 
 const ITEM_A = { id: 1, title: "辉夜大小姐", type: "external_ref", source: "bangumi", tags: ["恋爱"], content: "", image_url: null, file_path: null };
@@ -235,5 +235,83 @@ describe("视图切换 + 持久化 + 筛选联动（DesktopView）", () => {
     fireEvent.change(screen.getByPlaceholderText("查找存储的内容…"), { target: { value: "命运石之门" } });
     await waitFor(() => expect(screen.getByTitle("命运石之门")).toBeTruthy());
     expect(screen.queryByTitle("辉夜大小姐")).toBeNull();
+  });
+});
+
+describe("Bookshelf-2：视觉合架 + 色彩节奏（P1/P2）", () => {
+  function renderShelf(items) {
+    return render(<Bookshelf items={items} coverOf={() => null} onOpenItem={() => {}} />);
+  }
+
+  it("小分类（≤2 册）视觉合并进共享架：书不丢失、仍是独立 button、只有一个匣/层板", () => {
+    const { container } = renderShelf([
+      { id: 1, title: "A", tags: ["恋爱"], content: "" },
+      { id: 2, title: "B", tags: ["科幻"], content: "" },
+    ]);
+    // 两本都在
+    expect(container.querySelectorAll("button.shelf-book").length).toBe(2);
+    // 共享架容器存在；只生成一个 shelf-case / 一条层板（而非两个全宽空架）
+    expect(container.querySelector('[data-testid="shelf-shared"]')).toBeTruthy();
+    expect(container.querySelectorAll(".shelf-case").length).toBe(1);
+    expect(container.querySelectorAll(".shelf-board").length).toBe(1);
+    // 每本书仍是独立 button；两个小组都保留索引（data-testid 语义）
+    expect(container.querySelectorAll('[data-testid="shelf-group"]').length).toBe(2);
+    const labels = [...container.querySelectorAll('[data-testid="shelf-label"]')].map((l) => l.textContent);
+    expect(labels[0]).toContain("恋爱");
+    expect(labels[1]).toContain("科幻");
+  });
+
+  it("大分类（>2 册）仍为独立 shelf-unit，不产生共享架", () => {
+    const big = Array.from({ length: 6 }, (_, i) => ({ id: i + 1, title: "T" + i, tags: ["TV"], content: "x".repeat(2000) }));
+    const { container } = renderShelf(big);
+    expect(container.querySelector('[data-testid="shelf-shared"]')).toBeNull();
+    expect(container.querySelectorAll(".shelf-case").length).toBe(1);
+    expect(container.querySelectorAll("button.shelf-book").length).toBe(6);
+  });
+
+  it("混合：大分类独立单元 + 小分类共享架，书总数不变", () => {
+    const items = [
+      ...Array.from({ length: 6 }, (_, i) => ({ id: 100 + i, title: "T" + i, tags: ["TV"], content: "x".repeat(2000) })),
+      { id: 200, title: "S1", tags: ["百合"], content: "" },
+      { id: 201, title: "S2", tags: ["神作"], content: "" },
+    ];
+    const { container } = renderShelf(items);
+    expect(container.querySelectorAll("button.shelf-book").length).toBe(8);
+    expect(container.querySelectorAll('[data-testid="shelf-group"]').length).toBe(3); // TV + 百合 + 神作
+    expect(container.querySelectorAll(".shelf-case").length).toBe(2); // TV 匣 + 共享匣
+    expect(container.querySelectorAll(".shelf-board").length).toBe(2);
+  });
+
+  it("selectMode：每本书显示小型选择标记，aria-pressed 正确", () => {
+    const sel = new Set([1]);
+    const { container } = render(
+      <Bookshelf items={[ITEM_A, ITEM_B]} coverOf={() => null} onOpenItem={() => {}}
+        selectMode selectedIds={sel} />,
+    );
+    expect(container.querySelectorAll(".shelf-book-mark").length).toBe(2);
+    expect(screen.getByTitle("辉夜大小姐").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTitle("命运石之门").getAttribute("aria-pressed")).toBeNull();
+  });
+
+  it("context menu：onContextMenu 回调被触发", () => {
+    const onCtx = vi.fn();
+    render(<Bookshelf items={[ITEM_A]} coverOf={() => null} onOpenItem={() => {}} onContextMenu={onCtx} />);
+    fireEvent.contextMenu(screen.getByTitle("辉夜大小姐"));
+    expect(onCtx).toHaveBeenCalledTimes(1);
+  });
+
+  it("P2 色彩节奏：同类书颜色 deterministic、±12° 内、且同架存在差异（非整架同色）", () => {
+    const accent = "#f09199";
+    const base = spineColor(accent, spineSeed({ id: 1, tags: ["恋爱"] }));
+    const hueOf = (s) => parseFloat(/hsl\(\s*([\d.]+)/.exec(s)[1]);
+    const adist = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+    // 10 本同类书：色相差异 ≤ 12°，且颜色不全相同（自然藏书节奏）
+    const ids = Array.from({ length: 10 }, (_, i) => i + 1);
+    const colors = ids.map((id) => spineColorVaried(accent, { id, tags: ["恋爱"] }));
+    for (const c of colors) expect(adist(hueOf(c), hueOf(base))).toBeLessThanOrEqual(12);
+    expect(new Set(colors).size).toBeGreaterThan(1);
+    // deterministic：同 id 恒同色
+    expect(spineColorVaried(accent, { id: 5, tags: ["恋爱"] }))
+      .toBe(spineColorVaried(accent, { id: 5, tags: ["恋爱"] }));
   });
 });

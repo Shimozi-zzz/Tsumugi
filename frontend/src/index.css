@@ -499,9 +499,11 @@ body {
   border-radius: 2px;
 }
 
-/* ---------- 真书架 · 文献式视觉结构（P5 / ADR 0049；Phase 7-2 / ADR 0078）----------
+/* ---------- 真书架 · 文献式视觉结构（P5 / ADR 0049；Phase 7-2 / ADR 0078；Bookshelf-2 / ADR 0079）----------
    每个分类 = 一个书架单元：分类索引（serif + mono 册数 + hairline）+ 书架匣 + 层板。
-   书 = 实体馆藏对象：数据厚度映射 15..45px；圆柱明暗 + 顶部头带 + 底脚 + 接触影。
+   Bookshelf-2（P1）：匣/层板宽度贴近书本（fit-content），小分类视觉合并进共享架——
+   共享架 = 同一匣 + 同一条层板承托多个小组，每组保留小索引（非 badge）。
+   书 = 实体馆藏对象：数据厚度映射 22..46px；圆柱明暗 + 顶部头带 + 底脚 + 接触影。
    hover = 抽书（轻微上浮 + 环境光）；选中 = 微 accent 外框 + 小型选择标记。 */
 .shelf-view { padding: 2px 4px 10px; }
 .shelf-unit { margin-bottom: 30px; }
@@ -511,15 +513,22 @@ body {
 .shelf-index-count { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--ink-2); }
 .shelf-index-rule { flex: 1 1 auto; height: 1px; align-self: center;
   background: linear-gradient(90deg, var(--panel-border), transparent); opacity: .75; }
-/* 书架匣：hairline 围合 + 顶部微光，形成"一格书架"的空间 */
-.shelf-case { border: 1px solid color-mix(in srgb, var(--panel-border) 62%, transparent);
+/* 书架匣：宽度贴近实际书本区域（fit-content，最大 100%），层板只承托书本而非空场 */
+.shelf-case { width: fit-content; max-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 62%, transparent);
   border-radius: var(--radius-surface);
   background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 62%, transparent), color-mix(in srgb, var(--surface-1) 26%, transparent));
   padding: 18px 14px 0; }
 .shelf-books { display: flex; align-items: flex-end; gap: 5px; overflow-x: auto; scrollbar-width: thin; }
+/* 共享架：小组间留白更大，小组 = 小索引 + 自己的书（同一条层板上） */
+.shelf-unit-shared .shelf-books { gap: 20px; }
+.shelf-subgroup { display: flex; flex-direction: row; align-items: flex-end; gap: 8px; }
+.shelf-sub-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--ink-2);
+  padding: 0 0 3px 2px; white-space: nowrap; }
+.shelf-sub-books { display: flex; align-items: flex-end; gap: 5px; }
 /* 书（实体对象） */
 .shelf-book { position: relative; flex-shrink: 0; overflow: hidden; border: none; padding: 0;
-  width: max(var(--sw, 16px), 16px); border-radius: 2px;
+  width: max(var(--sw, 16px), 16px); height: 210px; border-radius: 2px;
   transition: transform .3s ease, box-shadow .3s ease;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,.07), inset 4px 0 5px -3px rgba(255,255,255,.55),
     inset -2px 0 4px -1px rgba(0,0,0,.20), 0 3px 4px -2px rgba(0,0,0,.22); }
@@ -545,16 +554,21 @@ body {
   border-radius: 999px; border: 1px solid var(--accent);
   color: var(--accent); background: transparent; }
 .shelf-book-mark[data-selected="1"] { color: #fff; background: var(--accent); }
-/* 层板：上表面亮、前缘暗、轻微下垂影——书"站在"层板上 */
+/* 层板：上表面亮、前缘暗、轻微下垂影——书"站在"层板上；宽度随匣（只承托书本区域） */
 .shelf-board { height: 13px; margin: 0 -14px; border-radius: 2px 2px 3px 3px;
   background: linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.30) 4px, var(--surface-2) 4px);
   border: 1px solid var(--panel-border); border-top-color: rgba(255,255,255,.55);
   box-shadow: 0 3px 5px -2px rgba(0,0,0,.18); }
-/* 移动端：书脊最小 24px（杜绝不可用的细柱）；单架横向可浏览 */
+/* 移动端（P3）：紧凑书架——书高度 172、单元间距收紧、共享架已有，仍为"书"非细柱 */
 @media (max-width: 640px) {
-  .shelf-book { width: max(var(--sw, 24px), 24px); }
-  .shelf-case { padding: 16px 10px 0; }
+  .shelf-book { width: max(var(--sw, 24px), 24px); height: 172px; }
+  .shelf-unit { margin-bottom: 18px; }
+  .shelf-case { padding: 14px 10px 0; }
   .shelf-board { margin: 0 -10px; }
+  .shelf-index { margin-bottom: 8px; }
+  .shelf-index-name { font-size: 13px; }
+  .shelf-unit-shared .shelf-books { gap: 14px; }
+  .shelf-subgroup { gap: 6px; }
 }
 
 /* 本轮（ADR 0053）：关键标题用衬线（排版自信升级）；字号/字重在具体组件 inline 控制 */
