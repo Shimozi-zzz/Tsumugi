@@ -166,13 +166,18 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
               <span className="shelf-index-count">{unit.groups.reduce((n, sg) => n + sg.items.length, 0)} 册</span>
               <span className="shelf-index-rule" aria-hidden />
             </div>
-            {/* 共享架：同一匣 / 同一条层板承托多个小组（每小组保留独立索引） */}
+            {/* 共享架极轻索引：9 个小组的 mono 小字（可换行、不撑宽）——只说明"这些书来自哪些小分类" */}
+            <div className="shelf-shared-index" aria-label="零散藏书分类">
+              {unit.groups.map((sg) => (
+                <span key={sg.tag} className="shelf-sub-label" data-testid="shelf-label">{sg.tag} · {sg.items.length} 册</span>
+              ))}
+            </div>
+            {/* 共享架：同一匣 / 同一条层板承托多个小组（书决定架宽，标签不参与宽度） */}
             <div className="shelf-case">
               <div className="shelf-books">
                 {unit.groups.map((sg) => (
                   <div key={sg.tag} className="shelf-subgroup" data-testid="shelf-group">
-                    <span className="shelf-sub-label" data-testid="shelf-label">{sg.tag} · {sg.items.length} 册</span>
-                    <div className="shelf-sub-books">{sg.items.map(renderBook)}</div>
+                    {sg.items.map(renderBook)}
                   </div>
                 ))}
               </div>

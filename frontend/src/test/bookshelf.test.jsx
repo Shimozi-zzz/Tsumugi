@@ -315,6 +315,19 @@ describe("Bookshelf-2：视觉合架 + 色彩节奏（P1/P2）", () => {
       .toBe(spineColorVaried(accent, { id: 5, tags: ["恋爱"] }));
   });
 
+  it("共享架标签移出 shelf-case（不再以标签撑宽，书决定架宽）", () => {
+    const { container } = renderShelf([
+      { id: 1, title: "A", tags: ["恋爱"], content: "" },
+      { id: 2, title: "B", tags: ["科幻"], content: "" },
+    ]);
+    const shared = container.querySelector('[data-testid="shelf-shared"]');
+    // 极轻索引带在 case 之外，case 内不再有 label → 标签不参与架宽
+    expect(shared.querySelector(".shelf-case .shelf-sub-label")).toBeNull();
+    expect(shared.querySelectorAll(".shelf-shared-index .shelf-sub-label").length).toBe(2);
+    // subgroup 保留且只包裹书（每本仍是独立 button）
+    expect(shared.querySelectorAll(".shelf-subgroup button.shelf-book").length).toBe(2);
+  });
+
   it("书本姿态 bookPose：deterministic、高度 ±8、宽度 ±2、倾斜 ≤0.6°", () => {
     const a = { id: 42, tags: ["T"] };
     const p1 = bookPose(a);
