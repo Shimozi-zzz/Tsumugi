@@ -4,11 +4,12 @@
 // - 统计摘要：全年收藏/书评总数、最活跃月份、最长连续活跃、活跃天数
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchActivity } from "../api.js";
+import { ArchiveNo } from "./ui.jsx";
 
 const CELL = 11;        // 单元格尺寸
 const GAP = 2;          // 间距
 const LEVELS = [0, 1, 2, 3, 4];
-const LEVEL_PCT = [0, 22, 42, 62, 85]; // accent 透明度百分比（color-mix）
+const LEVEL_PCT = [0, 18, 34, 52, 70]; // accent 透明度百分比（color-mix，克制）
 
 function levelOf(score) {
   if (score <= 0) return 0;
@@ -100,27 +101,29 @@ export default function YearlySummary({ year: propYear, className = "" }) {
 
   return (
     <div className={className}>
+      {/* 年度档案头（Phase 6-1）：ArchiveNo 年份 + mono + hairline；传说克制 */}
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] px-2 py-0.5 rounded-full"
-            style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{year} 年度</span>
-          <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-            活跃度 = 书评×{data.weights?.review ?? 2} + 收藏×{data.weights?.collection ?? 1}
-          </span>
+        <div className="flex items-baseline gap-3">
+          <ArchiveNo size="lg">{year}</ArchiveNo>
+          <span className="wd-meta" style={{ fontSize: 10, letterSpacing: "0.2em" }}>ANNUAL ARCHIVE</span>
         </div>
-        <div className="flex items-center gap-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+        <div className="flex items-center gap-1 text-[10px]" style={{ color: "var(--ink-2)" }}>
           <span>少</span>
           {LEVELS.map((l) => (
-            <span key={l} className="inline-block rounded-[3px]"
-              style={{ width: CELL, height: CELL, backgroundColor: l === 0 ? "var(--surface-2)" : `color-mix(in srgb, var(--accent) ${LEVEL_PCT[l]}%, transparent)` }} />
+            <span key={l} className="ys-legend-cell"
+              style={{ backgroundColor: l === 0 ? "var(--surface-2)" : `color-mix(in srgb, var(--accent) ${LEVEL_PCT[l]}%, transparent)` }} />
           ))}
           <span className="ml-1">多</span>
         </div>
       </div>
+      <div className="wd-chapter-rule" />
+      <p className="ys-weight-note">
+        活跃度 = 书评×{data.weights?.review ?? 2} + 收藏×{data.weights?.collection ?? 1}
+      </p>
 
-      {/* 热力图 */}
-      <div className="rounded-2xl border p-3 overflow-x-auto"
-        style={{ backgroundColor: "var(--surface-0)", borderColor: "var(--panel-border)" }}>
+      {/* 年度活动时间记录（Phase 6-1：纸面 hairline 容器，去 Dashboard 卡片） */}
+      <div className="border p-3 overflow-x-auto mt-3"
+        style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)", borderRadius: "var(--radius-card)" }}>
         <svg width={grid.cols * sw} height={height + 18} viewBox={`0 0 ${grid.cols * sw} ${height + 18}`} role="img" aria-label={`${year} 年活跃度热力图`}>
           {/* 月份标签 */}
           {Object.entries(grid.monthCol).map(([m, col]) => (
@@ -152,14 +155,13 @@ export default function YearlySummary({ year: propYear, className = "" }) {
         </svg>
       </div>
 
-      {/* 统计摘要 */}
-      <div className="grid grid-cols-4 gap-3 mt-4">
-        {stats.map((c, i) => (
-          <div key={i} className="rounded-xl p-3"
-            style={{ backgroundColor: "var(--surface-1)", border: "1px solid var(--panel-border)" }}>
-            <div className="text-[10px] truncate" style={{ color: "var(--text-secondary)" }}>{c.label}</div>
-            <div className="text-xl font-bold" style={{ color: "var(--accent)" }}>{c.value}</div>
-            <div className="text-[10px] mt-0.5" style={{ color: "var(--text-secondary)" }}>{c.sub}</div>
+      {/* 年度统计（Phase 6-1：quiet catalog 行，去数字卡片墙） */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 mt-5">
+        {stats.map((c) => (
+          <div key={c.label} className="ys-stat-row">
+            <span className="ys-stat-label">{c.label}</span>
+            <span className="ys-stat-value">{c.value}</span>
+            <span className="ys-stat-sub">{c.sub}</span>
           </div>
         ))}
       </div>

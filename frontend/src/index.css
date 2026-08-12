@@ -716,6 +716,17 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 .mg-specimen-media { display: block; margin-top: var(--sp-2); }
 .mg-specimen-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: var(--radius-cover); border: 1px solid var(--panel-border); margin-right: 6px; }
 
+/* 年度档案（Phase 6-1 · 时光轴房间）：ArchiveNo 年份 + quiet catalog 统计，去仪表卡 */
+.ys-legend-cell { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.ys-weight-note { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--ink-2); margin-top: var(--sp-2); }
+.ys-stat-row {
+  display: flex; align-items: baseline; gap: 10px; padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 50%, transparent);
+}
+.ys-stat-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--ink-2); width: 80px; flex-shrink: 0; }
+.ys-stat-value { font-family: var(--font-heading); font-size: 16px; font-weight: 600; color: var(--ink-0); }
+.ys-stat-sub { font-size: 10px; color: var(--ink-2); }
+
 /* Memory Composer「留下这一刻」（Phase 4-1/4-2）：书写区最大面积、辅助安静、主操作唯一 accent */
 .mc { margin-bottom: var(--sp-5); }
 .mc-write {

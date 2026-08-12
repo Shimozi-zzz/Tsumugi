@@ -50,14 +50,14 @@ describe("YearlySummary（年度热力图）", () => {
     expect(titles.some((t) => t.includes("0 条书评 · 4 个收藏"))).toBe(true);
   });
 
-  it("档位配色：高分天用 accent 高透明度（level4=85%），零分天用 surface-2", async () => {
+  it("档位配色：高分天用 accent 高透明度（level4=70%，克制收敛），零分天用 surface-2", async () => {
     mockFetch();
     const { container } = render(<YearlySummary year={2026} />);
     await waitFor(() => expect(container.querySelectorAll("svg rect").length).toBeGreaterThan(0));
     const rects = [...container.querySelectorAll("svg rect")];
     const high = rects.find((r) => r.querySelector("title")?.textContent.includes("57 条书评"));
     const low = rects.find((r) => r.querySelector("title")?.textContent.includes("2026 年 1 月 2 日") || r.getAttribute("fill") === "var(--surface-2)");
-    expect(high.getAttribute("fill")).toContain("85%");
+    expect(high.getAttribute("fill")).toContain("70%");
     expect(low.getAttribute("fill")).toBe("var(--surface-2)");
   });
 });
