@@ -104,21 +104,27 @@ export default function MemoryGallery({ onOpenWork, className = "", showHeader =
               <span className="text-[10px] tabular-nums tracking-wider"
                 style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>{g.items.length} 条</span>
             </div>
-            <div className="relative pl-5">
-              <div className="absolute left-[3px] top-2 bottom-2 w-px" style={{ backgroundColor: "var(--panel-border)" }} />
+            {/* 记忆标本行（Phase 5-2-1）：去竖线 rail / accent 圆点，克制档案行——
+                日期(mono) + 类型 + 作品 · 摘要 · 情绪(存在时) · 附图缩略图(存在时) */}
+            <div className="flex flex-col gap-1">
               {g.items.map((m) => (
                 <button key={m.id} type="button" onClick={() => onOpenWork?.(m.item_id)}
-                  title="打开这部作品"
-                  className="relative mb-2.5 block w-full text-left last:mb-0 hover:opacity-80 transition-opacity">
-                  <span className="absolute -left-5 top-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: "var(--accent)", opacity: 0.7 }} />
-                  <span className="block text-[10px] tabular-nums tracking-wider" style={{ color: "var(--text-secondary)" }}>
-                    {md(m.occurred_at)}
-                    {/* Phase D（ADR 0063）：回廊里非书评类型（收藏/完成/轻量记录）给类型标记，
-                        让"收藏时刻/完成时刻"被自然识别；书评保持干净 */}
+                  title="打开这部作品" className="mg-specimen">
+                  <span className="mg-specimen-meta">
+                    <span className="mg-specimen-date">{md(m.occurred_at)}</span>
                     {m.source_type !== "review" && <MemoryTypeTag sourceType={m.source_type} />}
-                    <span> · {m.item_title || `作品 #${m.item_id}`}</span>
+                    <span className="mg-specimen-work"> · {m.item_title || `作品 #${m.item_id}`}</span>
                   </span>
-                  <span className="block text-[13px] leading-snug mt-0.5" style={{ color: "var(--text)" }}>{m.summary || "（无摘要）"}</span>
+                  <span className="mg-specimen-summary">{m.summary || "（无摘要）"}</span>
+                  {m.emotion && <span className="mg-specimen-emotion">情绪 · {m.emotion}</span>}
+                  {(m.media || []).length > 0 && (
+                    <span className="mg-specimen-media">
+                      {m.media.slice(0, 2).map((med) => (
+                        <img key={med.id} src={med.url} alt=""
+                          className="mg-specimen-thumb" />
+                      ))}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

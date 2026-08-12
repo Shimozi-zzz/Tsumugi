@@ -700,6 +700,22 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 }
 .wd-encounter-meta { margin-top: 2px; font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); }
 
+/* 记忆标本行（Phase 5-2-1）：克制档案行，去时间轴 rail/dot；typography-first */
+.mg-specimen {
+  display: block; width: 100%; text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-control);
+  transition: background-color var(--dur-enter) var(--ease-standard);
+}
+.mg-specimen:hover { background-color: var(--surface-2); }
+.mg-specimen-meta { display: flex; align-items: baseline; gap: var(--sp-1); flex-wrap: wrap; }
+.mg-specimen-date { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--ink-2); }
+.mg-specimen-work { font-size: 11px; color: var(--ink-1); }
+.mg-specimen-summary { display: block; font-size: 13px; line-height: 1.6; color: var(--ink-0); margin-top: 2px; }
+.mg-specimen-emotion { display: block; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--ink-2); margin-top: 2px; }
+.mg-specimen-media { display: block; margin-top: var(--sp-2); }
+.mg-specimen-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: var(--radius-cover); border: 1px solid var(--panel-border); margin-right: 6px; }
+
 /* Memory Composer「留下这一刻」（Phase 4-1/4-2）：书写区最大面积、辅助安静、主操作唯一 accent */
 .mc { margin-bottom: var(--sp-5); }
 .mc-write {

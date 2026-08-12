@@ -138,6 +138,20 @@ describe("记忆回廊页面", () => {
     const reviewRow = screen.getByText("神作").closest("button");
     expect(reviewRow.textContent).not.toContain("书评");
   });
+
+  it("标本行（Phase 5-2-1）：text 记忆渲染 情绪 + 附图缩略图；无时间轴 rail/dot", async () => {
+    mockFetch([
+      { id: 9, item_id: 1, item_title: "命运石之门", source_type: "text", source_ref: null,
+        occurred_at: "2026-08-01T10:00:00", summary: "夜里重看", emotion: "怀念",
+        media: [{ id: 1, url: "/static/uploads/a.png", media_type: "image" }],
+        created_at: "2026-08-01T10:00:00" },
+    ]);
+    const { container } = render(<MemoryGallery onOpenWork={() => {}} />);
+    await waitFor(() => expect(screen.getByText("夜里重看")).toBeTruthy());
+    expect(screen.getByText("情绪 · 怀念")).toBeTruthy();
+    expect(container.querySelector(".mg-specimen-thumb")).toBeTruthy();
+    expect(container.querySelector(".relative.pl-5")).toBeNull(); // rail 已移除
+  });
 });
 
 describe("命令面板动作项", () => {
