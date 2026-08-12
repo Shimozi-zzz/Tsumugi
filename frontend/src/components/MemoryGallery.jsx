@@ -95,10 +95,10 @@ export default function MemoryGallery({ onOpenWork, className = "", showHeader =
     );
   } else {
     body = (
-      <div className="space-y-6">
+      <div className="space-y-8">
         {groups.map((g) => (
           <section key={g.year}>
-            <div className="flex items-baseline gap-2 mb-2">
+            <div className="flex items-baseline gap-2 mb-3">
               <ArchiveNo size="lg">{g.year}</ArchiveNo>
               <span className="h-px flex-1 self-center" style={{ backgroundColor: "var(--panel-border)" }} />
               <span className="text-[10px] tabular-nums tracking-wider"
