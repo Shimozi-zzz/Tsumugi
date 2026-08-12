@@ -1004,10 +1004,11 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const askSearchBar = (
     <div className="relative w-full max-w-2xl">
       <div
-        className="w-full desk-searchbar flex items-center gap-3 rounded-full px-5 py-3"
+        className="w-full desk-searchbar flex items-center gap-3 px-5 py-3"
         style={{
           backgroundColor: "var(--input-bg)",
           border: "1px solid var(--input-border)",
+          borderRadius: "var(--radius-control)",
           transition: "border-color 0.2s ease, box-shadow 0.2s ease",
           boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
         }}>
@@ -1024,15 +1025,15 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           className="flex-1 bg-transparent outline-none text-base min-w-0"
           style={{ color: "var(--text)" }} />
         <button onClick={() => setHistoryOpen((v) => !v)} title="搜索历史"
-          className="shrink-0 p-1.5 rounded-full transition-colors"
-          style={{ color: "var(--text-secondary)", backgroundColor: historyOpen ? "var(--accent-soft)" : "transparent" }}>
+          className="shrink-0 p-1.5 transition-colors"
+          style={{ color: "var(--text-secondary)", backgroundColor: historyOpen ? "var(--accent-soft)" : "transparent", borderRadius: "var(--radius-control)" }}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" />
           </svg>
         </button>
         <button onClick={handleAsk} disabled={asking || !query.trim()}
-          className="text-sm px-4 py-1.5 rounded-full shrink-0 disabled:opacity-40 font-medium"
-          style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+          className="text-sm px-4 py-1.5 shrink-0 disabled:opacity-40 font-medium"
+          style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: "var(--radius-control)" }}>
           {asking ? "思考中…" : "提问"}
         </button>
         <button onClick={loadAiStatus} title="AI 问答状态（点击刷新）"
@@ -1659,102 +1660,95 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
             </div>
 
             {askError && (
-              <div className="text-sm mb-3 px-4 py-3 rounded-2xl"
-                style={{ backgroundColor: "rgba(248,113,113,0.14)", color: "var(--danger)" }}>{askError}</div>
+              <div className="ask-error" aria-live="polite">{askError}</div>
             )}
-            {/* P6 检索台（ADR 0050）：个人全文检索结果（作品/书评/记忆） */}
+            {/* Phase 7-1：文献式检索台——我的检索 / 外部检索 / 来源脚注 / 综合回答 */}
             {mySearch && mySearch.q && (
-              <div className="mb-3 desk-answer-card rounded-2xl p-4"
-                style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
-                <div className="text-[11px] mb-2 tracking-wider" style={{ color: "var(--accent)" }}>
-                  我的检索 · 「{mySearch.q}」
+              <section className="ask-section">
+                <div className="ask-section-head">
+                  <h3 className="wd-chapter-title">我的检索</h3>
+                  <span className="wd-meta" style={{ fontSize: 10, letterSpacing: "0.2em" }}>「{mySearch.q}」</span>
                 </div>
+                <div className="ask-section-rule" />
                 {mySearch.loading ? (
-                  <div className="text-xs py-1" style={{ color: "var(--text-secondary)" }}>正在翻找馆藏…</div>
+                  <div className="ask-hint">正在翻找馆藏…</div>
                 ) : (mySearch.works.length + mySearch.reviews.length + mySearch.memories.length) === 0 ? (
-                  <div className="text-xs py-1" style={{ color: "var(--text-secondary)" }}>没有匹配的我的记录</div>
+                  <div className="ask-hint">没有匹配的我的记录</div>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="ask-list">
                     {mySearch.works.map((w) => (
-                      <button key={"w" + w.id} onClick={() => openItemDetail(w)}
-                        className="w-full flex items-center gap-2 text-left text-sm hover:opacity-80">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
-                          style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
-                          {w.type === "note" ? "笔记" : "作品"}
-                        </span>
-                        <span className="truncate" style={{ color: "var(--text)" }}>{w.title}</span>
+                      <button key={"w" + w.id} onClick={() => openItemDetail(w)} className="ask-row">
+                        <span className="ask-type">作品</span>
+                        <span className="ask-row-title">{w.title}</span>
                       </button>
                     ))}
                     {mySearch.reviews.map((r) => (
-                      <button key={"r" + r.id} onClick={() => setOpenMem({ itemId: r.item_id, sourceRef: r.id, memory: null })}
-                        className="w-full flex items-center gap-2 text-left text-sm hover:opacity-80">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
-                          style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>书评</span>
-                        <span className="truncate" style={{ color: "var(--text)" }}>{r.title || r.content}</span>
-                        <span className="text-[11px] shrink-0" style={{ color: "var(--text-secondary)" }}>{r.item_title}</span>
+                      <button key={"r" + r.id} onClick={() => setOpenMem({ itemId: r.item_id, sourceRef: r.id, memory: null })} className="ask-row">
+                        <span className="ask-type">书评</span>
+                        <span className="ask-row-title">{r.title || r.content}</span>
+                        <span className="ask-row-meta">{r.item_title}</span>
                       </button>
                     ))}
                     {mySearch.memories.map((m) => (
-                      <button key={"m" + m.id} onClick={() => setOpenMem({ itemId: m.item_id, sourceRef: m.source_ref, memory: m })}
-                        className="w-full flex items-center gap-2 text-left text-sm hover:opacity-80">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
-                          style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>记忆</span>
-                        <span className="truncate" style={{ color: "var(--text)" }}>{m.summary}</span>
-                        <span className="text-[11px] shrink-0" style={{ color: "var(--text-secondary)" }}>{m.item_title}</span>
+                      <button key={"m" + m.id} onClick={() => setOpenMem({ itemId: m.item_id, sourceRef: m.source_ref, memory: m })} className="ask-row">
+                        <span className="ask-type">记忆</span>
+                        <span className="ask-row-title">{m.summary}</span>
+                        <span className="ask-row-meta">{m.item_title}</span>
                       </button>
                     ))}
                   </div>
                 )}
-              </div>
+              </section>
             )}
             {answerOpen && (answer || sources.length > 0 || fedResults.length > 0) ? (
-              <div className="flex-1 overflow-y-auto space-y-3">
+              <div className="flex-1 overflow-y-auto space-y-6">
                 {fedResults.length > 0 && (
-                  <div className="desk-answer-card rounded-2xl p-4"
-                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
-                    <div className="text-[11px] mb-2 tracking-wider" style={{ color: "var(--accent)" }}>外部检索</div>
-                    {fedResults.slice(0, 4).map((r, i) => (
-                      <div key={i} className="flex items-center justify-between py-1.5 text-sm">
-                        <button onClick={() => openExternalDetail(r)}
-                          className="flex items-center min-w-0 text-left"
-                          style={{ color: "var(--text)" }}>
-                          <span className="mr-2 truncate hover:underline">{r.title}</span>
-                          <span className="text-[11px] px-1.5 py-0.5 rounded-full shrink-0"
-                            style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>{r.source}</span>
-                        </button>
-                        <div className="flex items-center gap-2 shrink-0 ml-2">
-                          <button onClick={() => openExternalDetail(r)} className="text-xs"
-                            style={{ color: "var(--text-secondary)" }}>详情</button>
-                          <button onClick={() => handleSave(r)} className="text-xs"
-                            style={{ color: "var(--accent)" }}>收藏</button>
+                  <section className="ask-section">
+                    <div className="ask-section-head">
+                      <h3 className="wd-chapter-title">外部检索</h3>
+                    </div>
+                    <div className="ask-section-rule" />
+                    <div className="ask-list">
+                      {fedResults.slice(0, 4).map((r, i) => (
+                        <div key={i} className="ask-external-row">
+                          <button onClick={() => openExternalDetail(r)} className="ask-external-main">
+                            <span className="ask-type">{r.source}</span>
+                            <span className="ask-row-title">{r.title}</span>
+                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button onClick={() => openExternalDetail(r)} className="ask-action">详情</button>
+                            <button onClick={() => handleSave(r)} className="ask-action accent">收藏</button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  </section>
                 )}
                 {sources.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {sources.map((s, i) => (
-                      <span key={i} className="text-[11px] px-2.5 py-1 rounded-full"
-                        style={{ backgroundColor: "var(--tag-bg)", color: "var(--tag-text)" }}>
-                        <span className="mr-1.5"
-                          style={{
-                            color: s.source_type === "external_reference"
-                              ? "var(--accent)" : "var(--text-secondary)",
-                          }}>
-                          {sourceTypeLabel(s)}
-                        </span>
-                        {s.item_title} · {s.score.toFixed(2)}
-                      </span>
-                    ))}
-                  </div>
+                  <section className="ask-section">
+                    <div className="ask-section-head">
+                      <h3 className="wd-chapter-title">来源</h3>
+                    </div>
+                    <div className="ask-section-rule" />
+                    <div className="ask-sources">
+                      {sources.map((s, i) => (
+                        <div key={i} className="ask-source-row">
+                          <span className="ask-source-label">{sourceTypeLabel(s)}</span>
+                          <span className="ask-source-title">{s.item_title}</span>
+                          <span className="ask-source-score">{s.score.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
                 )}
                 {answer && (
-                  <div className="desk-answer-card rounded-2xl p-4"
-                    style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed"
-                      style={{ color: "var(--text)" }}>{answer}</pre>
-                  </div>
+                  <section className="ask-section">
+                    <div className="ask-section-head">
+                      <h3 className="wd-chapter-title">综合回答</h3>
+                    </div>
+                    <div className="ask-section-rule" />
+                    <div className="ask-answer">{answer}</div>
+                  </section>
                 )}
               </div>
             ) : null}
