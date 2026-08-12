@@ -101,7 +101,8 @@ export default function MemoryGallery({ onOpenWork, className = "", showHeader =
             <div className="flex items-baseline gap-2 mb-2">
               <ArchiveNo size="lg">{g.year}</ArchiveNo>
               <span className="h-px flex-1 self-center" style={{ backgroundColor: "var(--panel-border)" }} />
-              <span className="text-[11px] tabular-nums" style={{ color: "var(--text-secondary)" }}>{g.items.length} 条</span>
+              <span className="text-[10px] tabular-nums tracking-wider"
+                style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>{g.items.length} 条</span>
             </div>
             <div className="relative pl-5">
               <div className="absolute left-[3px] top-2 bottom-2 w-px" style={{ backgroundColor: "var(--panel-border)" }} />
@@ -140,21 +141,21 @@ export default function MemoryGallery({ onOpenWork, className = "", showHeader =
             </>
           )}
         </div>
-        {/* 文本筛 + 作品筛选 */}
+        {/* 文本筛 + 作品筛选（Phase 5-1：radius 收敛到 --radius-control，保持原生语义） */}
         <div className="flex items-center gap-2 flex-wrap">
           <input value={q} onChange={(e) => setQ(e.target.value)}
             placeholder="搜索记忆内容…"
             aria-label="搜索记忆"
-            className="rounded-xl px-3 py-1.5 text-xs outline-none w-44"
-            style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }} />
+            className="px-3 py-1.5 text-xs outline-none w-44"
+            style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)", borderRadius: "var(--radius-control)" }} />
           {q && (
             <button onClick={() => setQ("")} title="清除搜索"
               className="text-[11px] px-1" style={{ color: "var(--text-secondary)" }}>✕</button>
           )}
           {works.length > 0 && (
             <select value={itemId ?? ""} onChange={(e) => setItemId(e.target.value ? Number(e.target.value) : null)}
-              className="rounded-xl px-3 py-1.5 text-xs outline-none max-w-[240px]"
-              style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)" }}>
+              className="px-3 py-1.5 text-xs outline-none max-w-[240px]"
+              style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)", color: "var(--text)", borderRadius: "var(--radius-control)" }}>
               <option value="">全部作品</option>
               {works.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
             </select>
@@ -162,20 +163,20 @@ export default function MemoryGallery({ onOpenWork, className = "", showHeader =
         </div>
       </div>
 
-      {/* 年份筛选 */}
+      {/* 年份筛选（Phase 5-1：去白字实心 accent，克制 chip——active=accent-soft+accent） */}
       {years.length > 0 && (
         <div className="flex items-center gap-1.5 mb-4 flex-wrap">
           <button onClick={() => setYear(null)}
-            className="px-3 py-1 rounded-full text-xs transition-colors"
-            style={{ color: year === null ? "#fff" : "var(--text-secondary)",
-              backgroundColor: year === null ? "var(--accent)" : "var(--accent-soft)" }}>
+            className="px-2.5 py-1 rounded-full text-xs transition-colors"
+            style={{ color: year === null ? "var(--accent)" : "var(--text-secondary)",
+              backgroundColor: year === null ? "var(--accent-soft)" : "transparent" }}>
             全部
           </button>
           {years.map((y) => (
             <button key={y} onClick={() => setYear(year === y ? null : y)}
-              className="px-3 py-1 rounded-full text-xs transition-colors"
-              style={{ color: year === y ? "#fff" : "var(--text-secondary)",
-                backgroundColor: year === y ? "var(--accent)" : "var(--accent-soft)" }}>
+              className="px-2.5 py-1 rounded-full text-xs transition-colors"
+              style={{ color: year === y ? "var(--accent)" : "var(--text-secondary)",
+                backgroundColor: year === y ? "var(--accent-soft)" : "transparent" }}>
               {y}
             </button>
           ))}
