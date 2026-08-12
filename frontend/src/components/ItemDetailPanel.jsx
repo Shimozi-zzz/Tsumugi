@@ -6,7 +6,7 @@
 // Phase B（ADR 0042）：双栏结构——"外部世界"（世界如何描述它）与"我的记录"
 // （我如何理解它，含 Memory 记忆时间轴）。
 // Phase 3-1（ADR 0075）：ItemDetailPanel 成为**统一 Work Detail 内容基底**。
-// - Classic（主从/网格/书架/角色墙/回廊/关系厅）、Mobile Detail Scene、ShellC 共用同一内容；
+// - Classic（主从/网格/书架/角色墙/回廊/关系厅）、Mobile Detail Scene 共用同一内容；
 // - 新增外部未收藏模式：`externalDetail`（无 itemId）只呈现作品本身 + 这个世界 + 外部操作
 //   （收藏入库/安利卡/刷新），回调由调用方传入（Panel 不承担新后端业务）；
 // - `refreshKey` 用于"刷新资料"后重取详情。

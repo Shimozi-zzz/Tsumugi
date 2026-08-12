@@ -30,7 +30,6 @@ import HomeShrine from "./HomeShrine.jsx";
 import MemoryGallery from "./MemoryGallery.jsx";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
 import ArchiveCard from "./ArchiveCard.jsx";
-import { ShellC, ShellSwitcher, parseShell } from "./AppShells.jsx";
 import { WORK_TYPES, WORK_TYPE_LABEL, PageHeader } from "./ui.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
@@ -945,16 +944,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   // P1（ADR 0045）：图书馆按作品类型筛选（work_type）
   const [activeWorkType, setActiveWorkType] = useState(null);
   const workTypeOptions = WORK_TYPES.filter((t) => (gridItems || []).some((it) => it.work_type === t));
-  // 外壳空间结构探索（ADR 0057）：?shell=a|b|c|classic 或 localStorage，临时探索用
-  const [shellConcept, setShellConcept] = useState(() => parseShell(localStorage.getItem("tsumugi-shell-concept")) || "classic");
-  useEffect(() => {
-    const fromUrl = parseShell(new URLSearchParams(window.location.search).get("shell"));
-    if (fromUrl) setShellConcept(fromUrl);
-  }, []);
-  const changeShellConcept = (k) => {
-    setShellConcept(k);
-    try { localStorage.setItem("tsumugi-shell-concept", k); } catch { /* ignore */ }
-  };
   // 图书馆网格：按 work_type + libQuery 本地过滤（标题/内容）
   const libFiltered = gridItems.filter((it) => {
     if (activeWorkType && it.work_type !== activeWorkType) return false;
@@ -1129,7 +1118,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
 
   return (
     <>
-      {shellConcept === "classic" ? (
     <div className="desktop-view flex relative flex-1 min-h-0 overflow-hidden"
       data-testid="app-shell">
 
@@ -1824,14 +1812,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
             {settingsTab === "appearance" && (
               <div className="space-y-4">
                 <div className="desk-askbar p-5">
-                  <h3 className="text-sm font-medium mb-1">应用外壳</h3>
-                  <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
-                    图书馆的空间结构（经典三栏 / C 非对称档案室）
-                  </p>
-                  <ShellSwitcher value={shellConcept} onChange={changeShellConcept} />
-                </div>
-
-                <div className="desk-askbar p-5">
                   <h3 className="text-sm font-medium mb-1">大风格主题</h3>
                   <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
                     整体视觉语言（版式/材质/信息呈现）。当前注册「编目抽屉·索书卡」，
@@ -2440,10 +2420,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         })}
       </nav>
     </div>
-      ) : (
-        <ShellC shellValue={shellConcept} onShellChange={changeShellConcept} setTheme={setTheme} />
-      )}
-      {/* 全局 toast（两外壳共用） */}
+      {/* 全局 toast */}
       <ToastHost />
     </>
   );

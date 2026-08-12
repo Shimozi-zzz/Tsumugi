@@ -13,7 +13,7 @@ export default function CommandPalette({ open, onClose, ctx, commands }) {
   const inputRef = useRef(null);
 
   // 全部命令（构建一次；内容搜索的 items 由 ctx 提供）。
-  // 传入 commands 时直接用（ShellC 作用域命令集，ADR 0064），否则用 buildCommands(ctx)。
+  // 传入 commands 时直接用（作用域命令集），否则用 buildCommands(ctx)。
   const allCommands = useMemo(
     () => (commands ? commands : (ctx ? buildCommands(ctx) : [])),
     [ctx, commands]
