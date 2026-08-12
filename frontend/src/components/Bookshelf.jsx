@@ -1,12 +1,23 @@
-// 真书架（P5 / ADR 0049）：层板线 + 按主标签分架 + 书脊厚度来自数据 + hover 取书浮起
-// 对 ADR 0019"书脊列表"的有意推翻（详见 ADR 0049）；书脊配色仍按标签哈希（0019），
-// 但书架有了"空间"：每层一个分类标签 + 层板线，书站上去、hover 浮起、点击进详情。
-// hover 抽书预览（封面/标题/我的评分）保留。
+// 真书架（P5 / ADR 0049；Phase 7-2 / ADR 0078 视觉结构重做）
+// 数据逻辑冻结：spineColor / spineSeed / spineThickness / groupBookshelf 全保留。
+// 视觉重做：
+//  - 每个分类 = 一个「书架单元」：分类索引（serif + mono 册数 + hairline）+ 书架匣 + 层板
+//  - 书 = 实体馆藏对象：数据厚度映射到 15..45px（读得出厚薄），圆柱明暗 + 头带/底脚 + 接触影
+//  - hover = 抽书（轻微上浮 + 环境光，保留 CoverAmbient / 评分 / 书评摘录）
+//  - 移动端书脊最小 24px，杜绝不可用的细柱
+//  - 交互保留：点击进详情 / selectMode / 右键菜单 / hover 预览
 import React, { useRef, useState } from "react";
 import { fetchItemDetail, fetchItemReviews } from "../api.js";
 import { readCssVar } from "../shareCard.js";
 import { spineColor, spineSeed, spineThickness, groupBookshelf } from "../bookshelf.js";
 import CoverAmbient from "./CoverAmbient.jsx";
+
+// 数据驱动厚度（9..28）→ 可视书脊宽度（22..46px）：保留 spineThickness 的相对关系，
+// 映射到能让"书"读出厚薄、且书名可读的屏幕尺度（常规书 22-25px，厚书近 46px）。
+function bookWidth(it) {
+  const t = spineThickness(it);
+  return Math.round(22 + ((t - 9) / 19) * 24);
+}
 
 export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, selectedIds, onToggleSelect, onContextMenu }) {
   const [hover, setHover] = useState(null); // {it, x, y, rating, loading}
@@ -54,69 +65,62 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
   const groups = groupBookshelf(items);
 
   return (
-    <div>
+    <div className="shelf-view">
       {groups.map((g) => (
-        <div key={g.tag} className="mb-6" data-testid="shelf-group">
-          {/* 分类架标签（左侧边目录卡标签） */}
-          <div className="shelf-label" data-testid="shelf-label">
-            <span className="shelf-label-tag">{g.tag}</span>
-            <span className="shelf-label-count">{g.items.length} 册</span>
+        <div key={g.tag} className="shelf-unit" data-testid="shelf-group">
+          {/* 分类索引：serif 分类名 + mono 册数 + hairline 延伸线（比书安静） */}
+          <div className="shelf-index" data-testid="shelf-label">
+            <span className="shelf-index-name">{g.tag}</span>
+            <span className="shelf-index-count">{g.items.length} 册</span>
+            <span className="shelf-index-rule" aria-hidden />
           </div>
-          {/* 一层书（站在层板上） */}
-          <div className="flex items-end gap-1.5 px-1 overflow-x-auto"
-            style={{ minHeight: 216, scrollbarWidth: "thin" }}>
-            {g.items.map((it) => {
-              const color = spineColor(accent, spineSeed(it));
-              const selected = selectedIds && selectedIds.has(it.id);
-              return (
-                <CoverAmbient key={it.id} src={coverOf(it)} radius={6} blur={12} spread={1} alphaFactor={0.7}>
-                <button
-                  onClick={() => { if (selectMode) onToggleSelect?.(it.id); else onOpenItem(it); }}
-                  onMouseEnter={(e) => startHover(e, it)}
-                  onMouseLeave={clearHover}
-                  onContextMenu={(e) => onContextMenu?.(e, it)}
-                  title={it.title}
-                  className="shelf-book shrink-0 relative overflow-hidden"
-                  style={{
-                    width: spineThickness(it), height: 210, borderRadius: 4,
-                    backgroundColor: color, cursor: "pointer",
-                    border: selected ? "2px solid var(--accent)" : "1px solid rgba(80,60,35,0.18)",
-                    boxShadow: selected ? "0 0 0 2px var(--accent-soft)" : "inset 2px 0 0 rgba(255,255,255,0.35), 0 2px 5px rgba(80,60,35,0.14)",
-                  }}>
-                  {selectMode && (
-                    <span className="absolute top-1 left-1 z-10 w-4 h-4 rounded-full flex items-center justify-center text-[10px]"
-                      style={{ backgroundColor: selected ? "var(--accent)" : "rgba(255,255,255,0.9)",
-                        color: selected ? "#fff" : "var(--text-secondary)",
-                        border: "1px solid var(--accent)" }}>
-                      {selected ? "✓" : ""}
-                    </span>
-                  )}
-                  <span className="absolute left-0 top-0 bottom-0"
-                    style={{ width: 2, backgroundColor: "rgba(255,255,255,0.45)" }} />
-                  <span className="absolute inset-0 flex items-start justify-center"
+          {/* 书架匣：一格书架（hairline 围合 + 顶部微光），书站在层板上 */}
+          <div className="shelf-case">
+            <div className="shelf-books">
+              {g.items.map((it) => {
+                const color = spineColor(accent, spineSeed(it));
+                const selected = selectedIds && selectedIds.has(it.id);
+                const w = bookWidth(it);
+                return (
+                  <CoverAmbient key={it.id} src={coverOf(it)} radius={3} blur={10} spread={1} alphaFactor={0.7}>
+                  <button
+                    onClick={() => { if (selectMode) onToggleSelect?.(it.id); else onOpenItem(it); }}
+                    onMouseEnter={(e) => startHover(e, it)}
+                    onMouseLeave={clearHover}
+                    onContextMenu={(e) => onContextMenu?.(e, it)}
+                    title={it.title}
+                    aria-pressed={selected || undefined}
+                    data-narrow={w < 20 ? "1" : undefined}
+                    className={"shelf-book shrink-0" + (selected ? " shelf-book-selected" : "")}
                     style={{
-                      writingMode: "vertical-rl", textOrientation: "mixed",
-                      padding: "12px 6px", fontSize: 11, color: "var(--text)",
-                      letterSpacing: 2, lineHeight: 1.35, fontWeight: 600,
-                      textAlign: "center", wordBreak: "break-all",
+                      "--sw": w + "px", height: 210,
+                      backgroundColor: color, cursor: "pointer",
                     }}>
-                    {it.title}
-                  </span>
-                  <span className="absolute left-0 right-0 bottom-0"
-                    style={{ height: 9, backgroundColor: "rgba(80,60,35,0.22)" }} />
-                </button>
-                </CoverAmbient>
-              );
-            })}
+                    {selectMode && (
+                      <span className="shelf-book-mark" data-selected={selected ? "1" : "0"}>
+                        {selected ? "✓" : ""}
+                      </span>
+                    )}
+                    <span className="shelf-book-title"
+                      style={{
+                        position: "absolute", inset: 0, zIndex: 1,
+                        display: "flex", alignItems: "flex-start", justifyContent: "center",
+                        writingMode: "vertical-rl", textOrientation: "mixed",
+                        padding: "22px 5px 8px", fontSize: 11, color: "var(--text)",
+                        letterSpacing: 2, lineHeight: 1.3, fontWeight: 600,
+                        textAlign: "center", wordBreak: "break-all",
+                      }}>
+                      {it.title}
+                    </span>
+                    <span className="shelf-book-foot" aria-hidden />
+                  </button>
+                  </CoverAmbient>
+                );
+              })}
+            </div>
+            {/* 层板（书架板，书站在上面） */}
+            <div className="shelf-board" aria-hidden />
           </div>
-          {/* 层板线（书架板，书站在上面） */}
-          <div className="shelf-board mx-1 mt-0.5"
-            style={{
-              height: 7, borderRadius: 3,
-              background: "linear-gradient(180deg, var(--surface-1), var(--surface-2))",
-              borderBottom: "1px solid var(--panel-border)",
-              boxShadow: "0 2px 3px rgba(0,0,0,0.10)",
-            }} />
         </div>
       ))}
       {items.length === 0 && (
@@ -125,15 +129,15 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
         </div>
       )}
 
-      {/* hover 抽书预览（fixed 定位，脱离滚动） */}
+      {/* hover 抽书预览（fixed 定位，脱离滚动；贴近书本、克制、无大浮卡） */}
       {hover && (
-        <div className="fixed z-40" style={{ left: hover.x, top: hover.y, width: 132, pointerEvents: "none" }}
+        <div className="fixed z-40" style={{ left: hover.x, top: hover.y, width: 118, pointerEvents: "none" }}
           data-testid="shelf-preview">
           <div className="overflow-hidden"
             style={{
               backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)",
-              borderRadius: "var(--radius-floating)",
-              boxShadow: "0 14px 34px rgba(0,0,0,0.34)",
+              borderRadius: "var(--radius-cover)",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.20)",
             }}>
             {coverOf(hover.it) ? (
               <img src={coverOf(hover.it)} alt="" className="w-full object-cover"

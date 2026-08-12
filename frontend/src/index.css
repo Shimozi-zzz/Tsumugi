@@ -499,15 +499,63 @@ body {
   border-radius: 2px;
 }
 
-/* P5 / ADR 0049 真书架：取书浮起（hover）+ 目录卡标签 + 层板 */
-.shelf-book { transition: transform .3s ease, box-shadow .3s ease; }
-.shelf-book:hover { transform: translateY(-6px); }
-/* 分类架目录卡标签（左侧边） */
-.shelf-label { display: inline-flex; align-items: baseline; gap: 8px; margin: 0 0 6px 2px;
-  padding: 3px 10px 3px 8px; border: 1px solid var(--panel-border); border-left: 3px solid var(--accent);
-  background: var(--surface-1); border-radius: 2px; }
-.shelf-label-tag { font-family: Georgia, "Songti SC", serif; font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: 0.05em; }
-.shelf-label-count { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; color: var(--text-secondary); }
+/* ---------- 真书架 · 文献式视觉结构（P5 / ADR 0049；Phase 7-2 / ADR 0078）----------
+   每个分类 = 一个书架单元：分类索引（serif + mono 册数 + hairline）+ 书架匣 + 层板。
+   书 = 实体馆藏对象：数据厚度映射 15..45px；圆柱明暗 + 顶部头带 + 底脚 + 接触影。
+   hover = 抽书（轻微上浮 + 环境光）；选中 = 微 accent 外框 + 小型选择标记。 */
+.shelf-view { padding: 2px 4px 10px; }
+.shelf-unit { margin-bottom: 30px; }
+/* 分类索引：安静、弱于书；hairline 向右延伸 */
+.shelf-index { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px 2px; }
+.shelf-index-name { font-family: var(--font-heading); font-size: 15px; letter-spacing: 0.06em; color: var(--text); }
+.shelf-index-count { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--ink-2); }
+.shelf-index-rule { flex: 1 1 auto; height: 1px; align-self: center;
+  background: linear-gradient(90deg, var(--panel-border), transparent); opacity: .75; }
+/* 书架匣：hairline 围合 + 顶部微光，形成"一格书架"的空间 */
+.shelf-case { border: 1px solid color-mix(in srgb, var(--panel-border) 62%, transparent);
+  border-radius: var(--radius-surface);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 62%, transparent), color-mix(in srgb, var(--surface-1) 26%, transparent));
+  padding: 18px 14px 0; }
+.shelf-books { display: flex; align-items: flex-end; gap: 5px; overflow-x: auto; scrollbar-width: thin; }
+/* 书（实体对象） */
+.shelf-book { position: relative; flex-shrink: 0; overflow: hidden; border: none; padding: 0;
+  width: max(var(--sw, 16px), 16px); border-radius: 2px;
+  transition: transform .3s ease, box-shadow .3s ease;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.07), inset 4px 0 5px -3px rgba(255,255,255,.55),
+    inset -2px 0 4px -1px rgba(0,0,0,.20), 0 3px 4px -2px rgba(0,0,0,.22); }
+.shelf-book::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, rgba(0,0,0,.12), transparent 22%, rgba(255,255,255,.18) 48%, transparent 74%, rgba(0,0,0,.20)); }
+.shelf-book::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 5px;
+  background: linear-gradient(180deg, rgba(0,0,0,.20), rgba(0,0,0,.05)); }
+.shelf-book-title { position: relative; }
+.shelf-book-foot { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: rgba(0,0,0,.16); }
+.shelf-book[data-narrow="1"] .shelf-book-title { display: none; }
+.shelf-book:hover { transform: translateY(-5px); z-index: 3;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.07), inset 4px 0 5px -3px rgba(255,255,255,.55),
+    inset -2px 0 4px -1px rgba(0,0,0,.18), 0 10px 16px -6px rgba(0,0,0,.34); }
+.shelf-book:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 选中态：书架语言（微 accent 外框 + 小型选择标记），非 checkbox 卡 */
+.shelf-book.shelf-book-selected { outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+  box-shadow: inset 0 0 0 1px var(--accent), inset 4px 0 5px -3px rgba(255,255,255,.55),
+    inset -2px 0 4px -1px rgba(0,0,0,.18), 0 3px 4px -2px rgba(0,0,0,.22); }
+.shelf-book-mark { position: absolute; top: 8px; right: 3px; z-index: 2; width: 13px; height: 13px;
+  display: flex; align-items: center; justify-content: center; font-size: 9px; line-height: 1;
+  border-radius: 999px; border: 1px solid var(--accent);
+  color: var(--accent); background: transparent; }
+.shelf-book-mark[data-selected="1"] { color: #fff; background: var(--accent); }
+/* 层板：上表面亮、前缘暗、轻微下垂影——书"站在"层板上 */
+.shelf-board { height: 13px; margin: 0 -14px; border-radius: 2px 2px 3px 3px;
+  background: linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.30) 4px, var(--surface-2) 4px);
+  border: 1px solid var(--panel-border); border-top-color: rgba(255,255,255,.55);
+  box-shadow: 0 3px 5px -2px rgba(0,0,0,.18); }
+/* 移动端：书脊最小 24px（杜绝不可用的细柱）；单架横向可浏览 */
+@media (max-width: 640px) {
+  .shelf-book { width: max(var(--sw, 24px), 24px); }
+  .shelf-case { padding: 16px 10px 0; }
+  .shelf-board { margin: 0 -10px; }
+}
 
 /* 本轮（ADR 0053）：关键标题用衬线（排版自信升级）；字号/字重在具体组件 inline 控制 */
 .tsm-heading { font-family: var(--font-heading); letter-spacing: 0.01em; }
