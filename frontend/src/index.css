@@ -513,22 +513,31 @@ body {
 .shelf-index-count { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--ink-2); }
 .shelf-index-rule { flex: 1 1 auto; height: 1px; align-self: center;
   background: linear-gradient(90deg, var(--panel-border), transparent); opacity: .75; }
-/* 书架匣：宽度贴近实际书本区域（fit-content，最大 100%），层板只承托书本而非空场 */
-.shelf-case { width: fit-content; max-width: 100%;
+/* 书架匣：宽度贴近实际书本区域（fit-content，最大 100%），层板只承托书本而非空场。
+   Bookshelf-2.5：overflow-x: clip 防微倾造成横向溢出；顶部留白 = 架格墙 + 顶缘阴影 */
+.shelf-case { position: relative; width: fit-content; max-width: 100%;
+  overflow-x: clip;
   border: 1px solid color-mix(in srgb, var(--panel-border) 62%, transparent);
   border-radius: var(--radius-surface);
   background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 62%, transparent), color-mix(in srgb, var(--surface-1) 26%, transparent));
-  padding: 18px 14px 0; }
-.shelf-books { display: flex; align-items: flex-end; gap: 5px; overflow-x: auto; scrollbar-width: thin; }
+  padding: 26px 14px 0; }
+/* 架格顶部内影：书顶上方一段暗部，暗示"上方还有层板"，让书"放进架格"而非贴盒 */
+.shelf-case::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 26px;
+  pointer-events: none; border-radius: inherit;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ink-2) 16%, transparent), transparent); }
+.shelf-books { display: flex; align-items: flex-end; gap: 5px; overflow-x: auto; scrollbar-width: thin;
+  box-shadow: inset 0 14px 16px -12px color-mix(in srgb, var(--ink-2) 30%, transparent); }
 /* 共享架：小组间留白更大，小组 = 小索引 + 自己的书（同一条层板上） */
 .shelf-unit-shared .shelf-books { gap: 20px; }
 .shelf-subgroup { display: flex; flex-direction: row; align-items: flex-end; gap: 8px; }
 .shelf-sub-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--ink-2);
   padding: 0 0 3px 2px; white-space: nowrap; }
 .shelf-sub-books { display: flex; align-items: flex-end; gap: 5px; }
-/* 书（实体对象） */
+/* 书（实体对象）：高度随 --bh（210±8，Bookshelf-2.5 姿态微差）；--tilt 使极少数书 ±0.6° 微倾，
+   原点在底部（书"站在层板上"，顶缘轻靠邻书）；hover 抽书保留倾斜并上浮 */
 .shelf-book { position: relative; flex-shrink: 0; overflow: hidden; border: none; padding: 0;
-  width: max(var(--sw, 16px), 16px); height: 210px; border-radius: 2px;
+  width: max(var(--sw, 16px), 16px); height: var(--bh, 210px); border-radius: 2px;
+  transform: rotate(var(--tilt, 0deg)); transform-origin: 50% 100%;
   transition: transform .3s ease, box-shadow .3s ease;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,.07), inset 4px 0 5px -3px rgba(255,255,255,.55),
     inset -2px 0 4px -1px rgba(0,0,0,.20), 0 3px 4px -2px rgba(0,0,0,.22); }
@@ -540,7 +549,7 @@ body {
 .shelf-book-foot { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
   background: rgba(0,0,0,.16); }
 .shelf-book[data-narrow="1"] .shelf-book-title { display: none; }
-.shelf-book:hover { transform: translateY(-5px); z-index: 3;
+.shelf-book:hover { transform: rotate(var(--tilt, 0deg)) translateY(-5px); z-index: 3;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,.07), inset 4px 0 5px -3px rgba(255,255,255,.55),
     inset -2px 0 4px -1px rgba(0,0,0,.18), 0 10px 16px -6px rgba(0,0,0,.34); }
 .shelf-book:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -558,12 +567,14 @@ body {
 .shelf-board { height: 13px; margin: 0 -14px; border-radius: 2px 2px 3px 3px;
   background: linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.30) 4px, var(--surface-2) 4px);
   border: 1px solid var(--panel-border); border-top-color: rgba(255,255,255,.55);
+  border-bottom-color: color-mix(in srgb, var(--ink-2) 26%, transparent);
   box-shadow: 0 3px 5px -2px rgba(0,0,0,.18); }
-/* 移动端（P3）：紧凑书架——书高度 172、单元间距收紧、共享架已有，仍为"书"非细柱 */
+/* 移动端（P3）：紧凑书架——书高 172±（= --bh − 38px）、单元间距收紧、共享架已有，仍为"书"非细柱 */
 @media (max-width: 640px) {
-  .shelf-book { width: max(var(--sw, 24px), 24px); height: 172px; }
+  .shelf-book { width: max(var(--sw, 24px), 24px); height: calc(var(--bh, 210px) - 38px); }
   .shelf-unit { margin-bottom: 18px; }
-  .shelf-case { padding: 14px 10px 0; }
+  .shelf-case { padding: 20px 10px 0; }
+  .shelf-case::before { height: 20px; }
   .shelf-board { margin: 0 -10px; }
   .shelf-index { margin-bottom: 8px; }
   .shelf-index-name { font-size: 13px; }

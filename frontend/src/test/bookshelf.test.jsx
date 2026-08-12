@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import React from "react";
 import { stringHash, spineSeed, spineColor, hexToHsl, primaryTag, spineThickness, groupBookshelf } from "../bookshelf.js";
-import Bookshelf, { spineColorVaried } from "../components/Bookshelf.jsx";
+import Bookshelf, { spineColorVaried, bookPose } from "../components/Bookshelf.jsx";
 import DesktopView from "../components/DesktopView.jsx";
 
 const ITEM_A = { id: 1, title: "辉夜大小姐", type: "external_ref", source: "bangumi", tags: ["恋爱"], content: "", image_url: null, file_path: null };
@@ -313,5 +313,51 @@ describe("Bookshelf-2：视觉合架 + 色彩节奏（P1/P2）", () => {
     // deterministic：同 id 恒同色
     expect(spineColorVaried(accent, { id: 5, tags: ["恋爱"] }))
       .toBe(spineColorVaried(accent, { id: 5, tags: ["恋爱"] }));
+  });
+
+  it("书本姿态 bookPose：deterministic、高度 ±8、宽度 ±2、倾斜 ≤0.6°", () => {
+    const a = { id: 42, tags: ["T"] };
+    const p1 = bookPose(a);
+    const p2 = bookPose(a);
+    expect(p1).toEqual(p2); // 同一本书一致
+    expect(Math.abs(p1.hOff)).toBeLessThanOrEqual(8);
+    expect(Math.abs(p1.wOff)).toBeLessThanOrEqual(2);
+    expect(Math.abs(p1.tilt)).toBeLessThanOrEqual(0.6);
+    // 一批书里出现非零倾斜（自然摆放，非全直立柱子）
+    const poses = Array.from({ length: 30 }, (_, i) => bookPose({ id: i + 1, tags: ["T"] }));
+    expect(poses.some((p) => p.tilt !== 0)).toBe(true);
+  });
+
+  it("书本姿态应用到渲染：--bh/--tilt/--sw 存在且 deterministic（两次渲染一致）", () => {
+    const items = [{ id: 42, title: "X", tags: ["T"], content: "" }];
+    const r1 = render(<Bookshelf items={items} coverOf={() => null} onOpenItem={() => {}} />);
+    const b1 = r1.container.querySelector("button.shelf-book");
+    const g1 = {
+      bh: b1.style.getPropertyValue("--bh"),
+      tilt: b1.style.getPropertyValue("--tilt"),
+      sw: b1.style.getPropertyValue("--sw"),
+      bg: b1.style.backgroundColor,
+    };
+    cleanup();
+    const r2 = render(<Bookshelf items={items} coverOf={() => null} onOpenItem={() => {}} />);
+    const b2 = r2.container.querySelector("button.shelf-book");
+    expect({
+      bh: b2.style.getPropertyValue("--bh"),
+      tilt: b2.style.getPropertyValue("--tilt"),
+      sw: b2.style.getPropertyValue("--sw"),
+      bg: b2.style.backgroundColor,
+    }).toEqual(g1);
+    // 范围
+    const bh = parseFloat(g1.bh);
+    expect(bh).toBeGreaterThanOrEqual(202);
+    expect(bh).toBeLessThanOrEqual(218);
+    expect(Math.abs(parseFloat(g1.tilt))).toBeLessThanOrEqual(0.6);
+  });
+
+  it("书籍姿态不影响交互：倾斜书仍可点击进入详情", () => {
+    const onOpenItem = vi.fn();
+    render(<Bookshelf items={[ITEM_A]} coverOf={() => null} onOpenItem={onOpenItem} />);
+    fireEvent.click(screen.getByTitle("辉夜大小姐"));
+    expect(onOpenItem).toHaveBeenCalledWith(ITEM_A);
   });
 });

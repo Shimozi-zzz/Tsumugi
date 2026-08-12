@@ -20,9 +20,9 @@ function bookWidth(it) {
   return Math.round(22 + ((t - 9) / 19) * 24);
 }
 
-// 视觉层色彩节奏（P2，Bookshelf-2）：在 spineColor(标签基色) 上按 it.id 做 ±12° 的
-// 确定性色相扰动——同分类保持相近色系、每本略有差异，形成"藏书自然色彩节奏"。
-// 不动 bookshelf.js 的 spineColor/spineSeed 语义；同一本书每次渲染颜色一致。
+// 视觉层色彩节奏（P2，Bookshelf-2 / 2.5）：在 spineColor(标签基色) 上按 it.id 做 ±12°
+// 色相 + ±3% 明度的确定性扰动——同分类保持相近色系、每本略有差异（"22 本不同的紫书"
+// 而非"一整块紫墙"）。不动 bookshelf.js 的 spineColor/spineSeed 语义；同一本书一致。
 export function spineColorVaried(accentHex, it) {
   const base = spineColor(accentHex, spineSeed(it));
   const m = /^hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)$/.exec(base);
@@ -30,8 +30,23 @@ export function spineColorVaried(accentHex, it) {
   const hue = (parseFloat(m[1]) + 360) % 360;
   const sat = parseFloat(m[2]);
   const light = parseFloat(m[3]);
-  const jitter = (stringHash(String(it.id != null ? it.id : "")) % 25) - 12; // ±12°
-  return `hsl(${Math.round((hue + jitter + 360) % 360)}, ${Math.round(sat)}%, ${Math.round(light)}%)`;
+  const h = stringHash(String(it.id != null ? it.id : ""));
+  const jitter = (h % 25) - 12;       // 色相 ±12°
+  const lOff = ((h >> 5) % 7) - 3;    // 明度 ±3%
+  return `hsl(${Math.round((hue + jitter + 360) % 360)}, ${Math.round(sat)}%,
+    ${Math.round(Math.min(72, Math.max(42, light + lOff)))}%)`;
+}
+
+// 书本自然姿态（Bookshelf-2.5）：由 it.id 确定性派生——
+// 高度 ±8px、宽度 ±2px（保留 spineThickness 相对关系）、极少数书 ±0.6° 微倾。
+// 目的：像"人真实摆放过的藏书"，而非程序生成的等间距柱子；不做成 Pinterest 乱序。
+const TILTS = [0, 0, 0, 0, 0, 0.5, 0, 0, -0.4, 0, 0, 0.6, 0, 0, -0.5, 0, 0, 0.4, 0, 0];
+export function bookPose(it) {
+  const h = stringHash(String(it.id != null ? it.id : ""));
+  const hOff = (h % 17) - 8;         // 高度：-8..+8
+  const wOff = (((h >> 3) % 5) - 2); // 宽度：-2..+2
+  const tilt = TILTS[h % TILTS.length];
+  return { hOff, wOff, tilt };
 }
 
 // 视觉合架阈值：册数 ≤ SMALL 的分类合并进共享架（P1），数据分组不变。
@@ -97,9 +112,10 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
   flushShared();
 
   const renderBook = (it) => {
+    const pose = bookPose(it);
     const color = spineColorVaried(accent, it);
     const selected = selectedIds && selectedIds.has(it.id);
-    const w = bookWidth(it);
+    const w = bookWidth(it) + pose.wOff;
     return (
       <CoverAmbient key={it.id} src={coverOf(it)} radius={3} blur={10} spread={1} alphaFactor={0.7}>
       <button
@@ -113,6 +129,8 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
         className={"shelf-book shrink-0" + (selected ? " shelf-book-selected" : "")}
         style={{
           "--sw": w + "px",
+          "--bh": (210 + pose.hOff) + "px",
+          "--tilt": pose.tilt + "deg",
           backgroundColor: color, cursor: "pointer",
         }}>
         {selectMode && (
