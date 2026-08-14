@@ -212,6 +212,36 @@ describe("声优图谱（ADR 0036 邻域视图）", () => {
       expect(onOpenWork).toHaveBeenCalledWith(1);
     });
   });
+
+  describe("Phase 8-2-B：Search / Controls 视觉语言收敛", () => {
+    it("搜索框/actor 快捷入口/概览按钮已收敛（非 pill / 非白字实心 accent）", async () => {
+      mockFetch();
+      const { container } = renderGraph();
+      await waitFor(() => expect(screen.getByRole("button", { name: /声优甲/ })).toBeTruthy());
+      // 搜索框 = radius-control 类，非 pill
+      const search = container.querySelector(".voice-search-control");
+      expect(search).toBeTruthy();
+      expect(search.className).not.toContain("rounded-full");
+      // actor 快捷入口 = quiet link（voice-actor-link，非 pill）
+      const links = container.querySelectorAll(".voice-actor-link");
+      expect(links.length).toBeGreaterThan(0);
+      for (const l of links) expect(l.className).not.toContain("rounded-full");
+      // 概览按钮 = quiet control（无 inline 实心 accent）
+      const modeBtn = [...container.querySelectorAll("button")].find((b) => b.textContent.includes("查看全部声优网络"));
+      expect(modeBtn.className).toContain("voice-mode-control");
+      expect(modeBtn.getAttribute("style")).toBeNull();
+      // 进入概览 → active 态 = accent-soft + accent（voice-mode-control-active，非白字实心）
+      fireEvent.click(modeBtn);
+      await waitFor(() => expect(screen.getByText(/全局概览：同时渲染/)).toBeTruthy());
+      const exitBtn = [...container.querySelectorAll("button")].find((b) => b.textContent.includes("退出全局概览"));
+      expect(exitBtn.className).toContain("voice-mode-control-active");
+      expect(exitBtn.className).not.toContain("rounded-full");
+      // 阈值按钮 = quiet control + active 修饰
+      const thresh = container.querySelector(".voice-threshold");
+      expect(thresh).toBeTruthy();
+      expect(thresh.className).not.toContain("rounded-full");
+    });
+  });
 });
 
 describe("命令面板动作项", () => {

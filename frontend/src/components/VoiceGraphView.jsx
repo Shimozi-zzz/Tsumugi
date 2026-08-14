@@ -122,7 +122,7 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
     <div className={className}>
       {/* 顶部：搜索框 + 概览入口 */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <div className="flex items-center gap-2 rounded-full px-3.5 py-2 flex-1 min-w-[220px]"
+        <div className="voice-search-control flex items-center gap-2 px-3.5 py-2 flex-1 min-w-[220px]"
           style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"
             className="shrink-0" style={{ color: "var(--text-secondary)" }}>
@@ -135,14 +135,11 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
             style={{ color: "var(--text)" }} />
         </div>
         {mode === "ego" && selected && (
-          <button onClick={() => { setSelected(null); setMode("search"); }}
-            className="px-3 py-1.5 rounded-xl text-xs shrink-0"
-            style={{ backgroundColor: "var(--accent)", color: "#fff" }}>收起 / 搜索其它声优</button>
+          <button type="button" onClick={() => { setSelected(null); setMode("search"); }}
+            className="voice-graph-action shrink-0">收起 / 搜索其它声优</button>
         )}
-        <button onClick={() => setMode(mode === "overview" ? "search" : "overview")}
-          className="px-3 py-1.5 rounded-xl text-xs shrink-0"
-          style={{ backgroundColor: mode === "overview" ? "var(--accent)" : "var(--accent-soft)",
-            color: mode === "overview" ? "#fff" : "var(--accent)" }}>
+        <button type="button" onClick={() => setMode(mode === "overview" ? "search" : "overview")}
+          className={"voice-mode-control shrink-0" + (mode === "overview" ? " voice-mode-control-active" : "")}>
           {mode === "overview" ? "退出全局概览" : "查看全部声优网络"}
         </button>
       </div>
@@ -158,10 +155,8 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
           <div className="flex items-center gap-2 text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
             <span>最低配音作品数</span>
             {THRESHOLDS.map((t) => (
-              <button key={t} data-threshold={t} onClick={() => setThreshold(t)}
-                className="px-2 py-1 rounded-lg text-[11px]"
-                style={{ backgroundColor: threshold === t ? "var(--accent)" : "var(--surface-2)",
-                  color: threshold === t ? "#fff" : "var(--text)" }}>
+              <button type="button" key={t} data-threshold={t} onClick={() => setThreshold(t)}
+                className={"voice-threshold" + (threshold === t ? " voice-threshold-active" : "")}>
                 {t}
               </button>
             ))}
@@ -305,9 +300,8 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {searchHits.map((a) => (
-                  <button key={a.name} onClick={() => { setSelected(a); setMode("ego"); }}
-                    className="px-2.5 py-1 rounded-full text-[11px]"
-                    style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+                  <button type="button" key={a.name} onClick={() => { setSelected(a); setMode("ego"); }}
+                    className="voice-actor-link">
                     {a.name} <span className="opacity-70">· {a.work_count} 部</span>
                   </button>
                 ))}
