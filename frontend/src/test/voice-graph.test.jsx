@@ -125,6 +125,93 @@ describe("声优图谱（ADR 0036 邻域视图）", () => {
     expect(texts).toContain("作品丙");
     expect(overview.querySelectorAll("circle").length).toBeGreaterThan(8);
   });
+
+  describe("Phase 8-2-A：Voice Graph 节点可访问性", () => {
+    async function enterEgo(container) {
+      await waitFor(() => expect(screen.getByRole("button", { name: /声优甲/ })).toBeTruthy());
+      fireEvent.click(screen.getByRole("button", { name: /声优甲/ }));
+      await waitFor(() => expect(container.querySelectorAll("svg[aria-label='声优邻域关系图']").length).toBe(1));
+    }
+
+    it("可交互节点具备键盘语义：role=button + tabindex=0 + 非空 aria-label（作品与声优）", async () => {
+      mockFetch();
+      const { container } = renderGraph();
+      await enterEgo(container);
+      const interactive = container.querySelectorAll('svg[aria-label="声优邻域关系图"] [role="button"]');
+      expect(interactive.length).toBeGreaterThan(0);
+      const works = container.querySelectorAll('svg[aria-label="声优邻域关系图"] g[aria-label="作品甲"]');
+      expect(works.length).toBe(1);
+      const work = works[0];
+      expect(work.getAttribute("role")).toBe("button");
+      expect(work.getAttribute("tabindex")).toBe("0");
+      expect(work.getAttribute("aria-label")).toBe("作品甲");
+      // 共同出演声优节点也有语义
+      const actors = container.querySelectorAll('svg[aria-label="声优邻域关系图"] g[role="button"][aria-label^="声优："]');
+      expect(actors.length).toBeGreaterThan(0);
+      // 全部可交互节点都有 accessible name
+      for (const n of interactive) expect(n.getAttribute("aria-label") || "").not.toBe("");
+    });
+
+    it("Enter 激活作品节点 = 与鼠标 click 相同业务结果（onOpenWork）", async () => {
+      mockFetch();
+      const { container, onOpenWork } = renderGraph();
+      await enterEgo(container);
+      const work = container.querySelector('svg[aria-label="声优邻域关系图"] g[aria-label="作品甲"]');
+      fireEvent.keyDown(work, { key: "Enter" });
+      expect(onOpenWork).toHaveBeenCalledWith(1);
+      expect(onOpenWork).toHaveBeenCalledTimes(1); // 键盘不额外触发 click
+    });
+
+    it("Space 激活作品节点 = 与鼠标 click 相同业务结果（onOpenWork）", async () => {
+      mockFetch();
+      const { container, onOpenWork } = renderGraph();
+      await enterEgo(container);
+      const work = container.querySelector('svg[aria-label="声优邻域关系图"] g[aria-label="作品乙"]');
+      fireEvent.keyDown(work, { key: " " });
+      expect(onOpenWork).toHaveBeenCalledWith(2);
+      expect(onOpenWork).toHaveBeenCalledTimes(1);
+    });
+
+    it("Enter 激活声优节点 = 进入该声优邻域（与鼠标 click 相同）", async () => {
+      mockFetch();
+      const { container } = renderGraph();
+      await enterEgo(container);
+      // 从声优甲邻域，用 Enter 激活共同出演声优乙 → 中心切换为声优乙
+      const coActor = container.querySelector('svg[aria-label="声优邻域关系图"] g[role="button"][aria-label="声优：声优乙"]');
+      fireEvent.keyDown(coActor, { key: "Enter" });
+      await waitFor(() => expect(container.querySelectorAll("svg[aria-label='声优邻域关系图']").length).toBe(1));
+      const texts = svgTexts(container);
+      expect(texts).toContain("声优乙");
+      expect(texts).toContain("作品丙");
+      expect(texts).not.toContain("作品乙"); // 声优乙没配过作品乙
+    });
+
+    it("不可交互 SVG 元素未被标记为可交互（中心节点/连线无 role=button）", async () => {
+      mockFetch();
+      const { container } = renderGraph();
+      await enterEgo(container);
+      const svg = container.querySelector('svg[aria-label="声优邻域关系图"]');
+      // 中心声优（r=26）无 role/tabindex
+      const center = svg.querySelector('circle[r="26"]');
+      expect(center.getAttribute("role")).toBeNull();
+      expect(center.getAttribute("tabindex")).toBeNull();
+      // 连线 line 无 role/tabindex
+      const lines = svg.querySelectorAll("line");
+      expect(lines.length).toBeGreaterThan(0);
+      for (const l of lines) {
+        expect(l.getAttribute("role")).toBeNull();
+        expect(l.getAttribute("tabindex")).toBeNull();
+      }
+    });
+
+    it("鼠标 click 行为保持不变（既有作品点击仍触发 onOpenWork）", async () => {
+      mockFetch();
+      const { container, onOpenWork } = renderGraph();
+      await enterEgo(container);
+      expect(clickSvgText(container, "作品甲")).toBe(true);
+      expect(onOpenWork).toHaveBeenCalledWith(1);
+    });
+  });
 });
 
 describe("命令面板动作项", () => {

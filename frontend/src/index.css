@@ -644,6 +644,12 @@ body {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-border)); color: var(--text); }
 .character-archive-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .character-archive-action-accent { color: var(--accent); }
+/* ---------- Voice Graph 节点键盘焦点（Phase 8-2-A）----------
+   可交互 SVG 节点（role=button + tabindex=0）在键盘 focus 时显示 accent 环：
+   无 glow / 无 gradient / 无 layout shift；鼠标指针操作不显示（:focus-visible 语义） */
+svg g:focus-visible, svg circle:focus-visible { outline: none; }
+svg g:focus-visible > circle { stroke: var(--accent); stroke-width: 2.5; }
+svg circle:focus-visible { stroke: var(--accent); stroke-width: 2.5; }
 
 /* 本轮（ADR 0053）：关键标题用衬线（排版自信升级）；字号/字重在具体组件 inline 控制 */
 .tsm-heading { font-family: var(--font-heading); letter-spacing: 0.01em; }

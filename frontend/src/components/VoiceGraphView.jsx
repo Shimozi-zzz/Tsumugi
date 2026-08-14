@@ -16,6 +16,15 @@ import {
 const THRESHOLDS = [2, 3, 5, 8];
 const DEFAULT_THRESHOLD = 3;
 
+// Phase 8-2-A：可交互 SVG 节点的键盘激活（Enter / Space → 与鼠标 click 相同业务；
+// preventDefault 阻止 Space 滚动页面；键盘不额外触发 click，避免重复执行）。
+const activate = (fn) => (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    fn();
+  }
+};
+
 export default function VoiceGraphView({ focusActor, onOpenWork, className = "" }) {
   const [data, setData] = useState(null);
   const [mode, setMode] = useState("search"); // "search" | "ego" | "overview"
@@ -103,6 +112,12 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
 
   const stats = data.stats || {};
 
+  // Phase 8-2-A：声优节点选中复用同一业务函数（鼠标 click 与键盘激活共用）
+  const selectActorByName = (name) => {
+    const a = data.actors.find((x) => x.name === name);
+    if (a) { setSelected(a); setMode("ego"); }
+  };
+
   return (
     <div className={className}>
       {/* 顶部：搜索框 + 概览入口 */}
@@ -167,7 +182,9 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
                 );
               })}
               {overview.works.map((w) => (
-                <g key={w.item_id} onClick={() => onOpenWork?.(w.item_id)} style={{ cursor: "pointer" }}>
+                <g key={w.item_id} onClick={() => onOpenWork?.(w.item_id)} style={{ cursor: "pointer" }}
+                  role="button" tabIndex={0} aria-label={w.title}
+                  onKeyDown={activate(() => onOpenWork?.(w.item_id))}>
                   <circle cx={w.x} cy={w.y} r="12" fill="var(--surface-2)" stroke="var(--panel-border)" strokeWidth="1">
                     <title>{w.title}</title>
                   </circle>
@@ -179,12 +196,16 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
               ))}
               {overview.chars.map((c, i) => (
                 <circle key={"c" + i} cx={c.x} cy={c.y} r="2.6" fill="var(--tag-bg)" stroke="var(--tag-text)"
-                  strokeWidth="1" opacity="0.85" onClick={() => onOpenWork?.(c.work_id)} style={{ cursor: "pointer" }}>
+                  strokeWidth="1" opacity="0.85" onClick={() => onOpenWork?.(c.work_id)} style={{ cursor: "pointer" }}
+                  role="button" tabIndex={0} aria-label={`${c.name}（${c.actor}）`}
+                  onKeyDown={activate(() => onOpenWork?.(c.work_id))}>
                   <title>{`${c.name}（${c.actor}）`}</title>
                 </circle>
               ))}
               {overview.actors.map((a) => (
-                <g key={a.name} onClick={() => { setSelected(a); setMode("ego"); }} style={{ cursor: "pointer" }}>
+                <g key={a.name} onClick={() => selectActorByName(a.name)} style={{ cursor: "pointer" }}
+                  role="button" tabIndex={0} aria-label={`声优：${a.name}`}
+                  onKeyDown={activate(() => selectActorByName(a.name))}>
                   <circle cx={a.x} cy={a.y} r={Math.min(5 + a.work_count * 0.9, 16)}
                     fill="var(--accent-soft)" stroke="var(--accent)" strokeWidth="1.5">
                     <title>{`${a.name}：配音 ${a.work_count} 部作品`}</title>
@@ -227,7 +248,9 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
             })}
             {/* 作品节点 */}
             {egoGraph.works.map((w) => (
-              <g key={w.item_id} onClick={() => onOpenWork?.(w.item_id)} style={{ cursor: "pointer" }}>
+              <g key={w.item_id} onClick={() => onOpenWork?.(w.item_id)} style={{ cursor: "pointer" }}
+                role="button" tabIndex={0} aria-label={w.title}
+                onKeyDown={activate(() => onOpenWork?.(w.item_id))}>
                 <circle cx={w.x} cy={w.y} r="14" fill="var(--surface-2)" stroke="var(--panel-border)" strokeWidth="1">
                   <title>{w.title}</title>
                 </circle>
@@ -240,14 +263,17 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
             {/* 角色小圆点 */}
             {egoGraph.chars.map((ch, i) => (
               <circle key={"ch" + i} cx={ch.x} cy={ch.y} r="3" fill="var(--tag-bg)" stroke="var(--tag-text)"
-                strokeWidth="1" onClick={() => onOpenWork?.(ch.work_id)} style={{ cursor: "pointer" }}>
+                strokeWidth="1" onClick={() => onOpenWork?.(ch.work_id)} style={{ cursor: "pointer" }}
+                role="button" tabIndex={0} aria-label={`${ch.name}（${egoGraph.actor.name} 配音）`}
+                onKeyDown={activate(() => onOpenWork?.(ch.work_id))}>
                 <title>{`${ch.name}（${egoGraph.actor.name} 配音）`}</title>
               </circle>
             ))}
             {/* 共同出演声优（外环） */}
             {egoGraph.coActors.map((c) => (
-              <g key={c.name} onClick={() => { setSelected(data.actors.find((x) => x.name === c.name)); setMode("ego"); }}
-                style={{ cursor: "pointer" }}>
+              <g key={c.name} onClick={() => selectActorByName(c.name)} style={{ cursor: "pointer" }}
+                role="button" tabIndex={0} aria-label={`声优：${c.name}`}
+                onKeyDown={activate(() => selectActorByName(c.name))}>
                 <circle cx={c.x} cy={c.y} r={Math.min(4 + c.shared.length, 11)} fill="var(--accent-soft)"
                   stroke="var(--accent)" strokeWidth="1">
                   <title>{`${c.name}：与 ${egoGraph.actor.name} 共同出演 ${c.shared.length} 部`}</title>
