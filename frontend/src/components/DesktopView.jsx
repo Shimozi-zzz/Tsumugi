@@ -152,10 +152,11 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   // 图书馆视图模式：网格 / 书架 / 分组列表（localStorage 记忆，复用主题持久化模式）
   const [libView, setLibView] = useState(() => {
     try { return localStorage.getItem("tsumugi-lib-view") || "grid"; } catch { return "grid"; }
-  });
-  useEffect(() => {
+  });  useEffect(() => {
     try { localStorage.setItem("tsumugi-lib-view", libView); } catch { /* ignore */ }
   }, [libView]);
+  // Phase 10-1-A-4：Bangumi 导入后导向 Library 的 quiet 提示（导入数量）
+  const [libRecordHint, setLibRecordHint] = useState(null);
   // 主从视图（ADR 0029 分组列表模式）：当前选中浏览的条目 id
   const [detailBrowseId, setDetailBrowseId] = useState(null);
   // 条目 → 追番状态 映射（P2 / ADR 0046：收藏状态源改为 collections 表，不再取书评状态）
@@ -1506,8 +1507,22 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               </div>
             </div>
 
-            {/* 书架范围（Phase 2-3）：当前筛选状态一目了然，克制、可清除 */}
-            <div className="flex items-center gap-1.5 mb-4 flex-wrap shrink-0"
+            {/* Phase 10-1-A-4：导入后导向 Library 的 quiet 提示 */}
+            {libRecordHint != null && (
+              <div className="flex items-center gap-3 mb-3 px-3 py-2"
+                style={{ border: "1px solid var(--panel-border)", borderRadius: "var(--radius-control)" }}>
+                <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                  刚刚导入 {libRecordHint} 部作品——选择一部作品，写下你的第一次记录（§ 标记 = 已有记录）。
+                </span>
+                <button type="button" onClick={() => setLibRecordHint(null)}
+                  className="text-[11px] shrink-0"
+                  style={{ color: "var(--text-secondary)", borderRadius: "var(--radius-control)" }}>
+                  收起
+                </button>
+              </div>
+            )}
+
+            {/* 书架范围（Phase 2-3）：当前筛选状态一目了然，克制、可清除 */}            <div className="flex items-center gap-1.5 mb-4 flex-wrap shrink-0"
               style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.04em", color: "var(--ink-2)" }}>
               <span>共 {gridTotal} 册</span>
               <span style={{ opacity: 0.4 }}>·</span>
@@ -1929,7 +1944,11 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
 
             {/* Bangumi 连接 + 批量导入 */}
             {settingsTab === "bangumi" && (
-              <BangumiPanel />
+              <BangumiPanel onRecord={(n) => {
+                setSection("library");
+                setLibView("grid");
+                setLibRecordHint(n);
+              }} />
             )}
 
             {/* 导航栏：排序（除 settings 外的按键） */}

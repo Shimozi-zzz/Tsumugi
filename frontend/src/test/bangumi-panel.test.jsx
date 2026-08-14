@@ -68,4 +68,37 @@ describe("BangumiPanel", () => {
     expect(screen.getByText("100%")).toBeTruthy();
     expect(screen.getByText(/导入 10 条/)).toBeTruthy(); // 完成 toast
   });
+
+  it("Phase 10-1-A-4：导入完成后显示『去记录第一条回忆』并回调 imported 数", async () => {
+    const onRecord = vi.fn();
+    global.fetch = vi.fn((u) => {
+      const url = String(u);
+      if (url.includes("/bangumi/oauth/status")) return ok({ connected: true, config_configured: true });
+      if (url.includes("/bangumi/import/status"))
+        return ok({ job_id: "j1", state: "done", total: 10, current: 10, imported: 7, skipped: 3, failed: 0, failures: [], message: "导入完成" });
+      if (url.includes("/bangumi/import")) return ok({ job_id: "j1" });
+      return ok({});
+    });
+    render(<BangumiPanel onRecord={onRecord} />);
+    await waitFor(() => expect(screen.getByText("已连接")).toBeTruthy());
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByText("批量导入我的收藏"));
+    await vi.advanceTimersByTimeAsync(900);
+    // 完成态显示下一步入口 + 统计
+    expect(screen.getByText(/导入完成，共 7 部作品加入书库/)).toBeTruthy();
+    const entry = screen.getByText("去记录第一条回忆");
+    expect(entry).toBeTruthy();
+    fireEvent.click(entry);
+    expect(onRecord).toHaveBeenCalledWith(7);
+  });
+
+  it("Phase 10-1-A-4：未开始导入时不显示记录入口", async () => {
+    global.fetch = vi.fn((u) => {
+      if (String(u).includes("/bangumi/oauth/status")) return ok({ connected: true, config_configured: true });
+      return ok({});
+    });
+    render(<BangumiPanel onRecord={() => {}} />);
+    await waitFor(() => expect(screen.getByText("批量导入我的收藏")).toBeTruthy());
+    expect(screen.queryByText("去记录第一条回忆")).toBeNull();
+  });
 });

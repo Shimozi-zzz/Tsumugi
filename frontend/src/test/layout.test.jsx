@@ -176,3 +176,34 @@ describe("Settings 控件语言（Phase 8-3-A）", () => {
     expect(document.querySelectorAll(".settings-action").length).toBeGreaterThan(0);
   });
 });
+
+describe("Experience Loop（Phase 10-1-A-4）", () => {
+  it("Bangumi 导入完成 → 点击『去记录第一条回忆』→ 书库显示 quiet 记录提示", async () => {
+    global.fetch = vi.fn((u) => {
+      const url = String(u);
+      if (url.includes("/items") && !url.includes("/items/")) return ok({ total: ITEMS.length, items: ITEMS });
+      if (url.includes("/tags")) return ok([{ id: 1, name: "x", count: 0 }]);
+      if (url.includes("/connectors")) return ok([]);
+      if (url.includes("/bangumi/oauth/status")) return ok({ connected: true, config_configured: true });
+      if (url.includes("/bangumi/import/status"))
+        return ok({ job_id: "j1", state: "done", total: 10, current: 10, imported: 7, skipped: 3, failed: 0, failures: [], message: "导入完成" });
+      if (url.includes("/bangumi/import")) return ok({ job_id: "j1" });
+      return ok({});
+    });
+    render(<DesktopView {...PROPS} />);
+    // 进入管理室 → Bangumi tab
+    fireEvent.click(screen.getByTitle("管理室"));
+    await waitFor(() => expect(screen.getByText("外观")).toBeTruthy());
+    fireEvent.click(screen.getByText("Bangumi"));
+    await waitFor(() => expect(screen.getByText("批量导入我的收藏")).toBeTruthy());
+    // 触发导入 → 完成 → 下一步入口
+    fireEvent.click(screen.getByText("批量导入我的收藏"));
+    await waitFor(() => expect(screen.getByText("去记录第一条回忆")).toBeTruthy(), { timeout: 3000 });
+    // 点击 → 导向书库并显示 quiet 提示
+    fireEvent.click(screen.getByText("去记录第一条回忆"));
+    await waitFor(() => expect(screen.getByText(/刚刚导入 7 部作品/)).toBeTruthy());
+    // 收起提示
+    fireEvent.click(screen.getByText("收起"));
+    await waitFor(() => expect(screen.queryByText(/刚刚导入 7 部作品/)).toBeNull());
+  });
+});

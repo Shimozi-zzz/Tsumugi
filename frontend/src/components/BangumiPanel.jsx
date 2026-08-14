@@ -6,7 +6,7 @@ import {
   disconnectBangumi, startBangumiImport, fetchBangumiImportStatus,
 } from "../api.js";
 
-export default function BangumiPanel() {
+export default function BangumiPanel({ onRecord = () => {} }) {
   const [status, setStatus] = useState(null);
   const [cid, setCid] = useState("");
   const [csec, setCsec] = useState("");
@@ -152,6 +152,19 @@ export default function BangumiPanel() {
                     <div className="mt-1 line-clamp-2">{job.failures.slice(0, 2).join("；")}</div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Phase 10-1-A-4：导入完成后的 quiet next step —— 引导留下第一条记录 */}
+            {job && job.state === "done" && (
+              <div className="rounded-xl p-3"
+                style={{ backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid var(--panel-border)" }}>
+                <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                  导入完成，共 {job.imported} 部作品加入书库（跳过重复 {job.skipped} · 失败 {job.failed}）
+                </div>
+                <button type="button" className="settings-action mt-2" onClick={() => onRecord(job.imported)}>
+                  去记录第一条回忆
+                </button>
               </div>
             )}
           </div>
