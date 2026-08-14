@@ -40,6 +40,25 @@ describe("CharacterWall", () => {
     expect(onOpenWork).toHaveBeenCalledWith(WORK_A);
   });
 
+  it("主列表为档案索引条目：mono 编目 + serif 人名 + quiet meta（非 pill/chip 堆叠）", async () => {
+    const { container } = render(<CharacterWall refreshKey={0} onOpenWork={() => {}} />);
+    await waitFor(() => screen.getByText("四宫辉夜"));
+    const entries = container.querySelectorAll("button.char-entry");
+    expect(entries.length).toBe(2);
+    // mono 编目行 + serif 人名 + quiet meta
+    expect(entries[0].querySelector(".char-entry-no")?.textContent).toMatch(/№\s*\d+/);
+    expect(entries[0].querySelector(".char-entry-name")?.textContent).toBe("四宫辉夜");
+    expect(entries[0].querySelector(".char-entry-cv")?.textContent).toContain("声优：");
+    // 档案索引行存在
+    expect(container.querySelector(".char-index")).toBeTruthy();
+    // 条目内无 pill / chip-card（去 SaaS）
+    expect(entries[0].querySelectorAll(".rounded-full, [class*=rounded-full]").length).toBe(0);
+    // 选中详情内声优为 quiet mono 链接（无 pill 背景）
+    fireEvent.click(screen.getByText("四宫辉夜"));
+    await waitFor(() => expect(screen.getByText("古贺葵")).toBeTruthy());
+    expect(screen.getByText("古贺葵").className).toContain("char-detail-actor");
+  });
+
   it("无角色时显示空态引导", async () => {
     global.fetch = vi.fn(() =>
       Promise.resolve({ ok: true, json: () => Promise.resolve({ characters: [] }) })

@@ -1,5 +1,10 @@
-// 角色墙：跨已收藏作品聚合角色，点击角色看关联作品，作品可点回详情
-// ADR 0032：选中角色时给出其声优的"查看声优图谱"入口
+// 人物档案馆 · 档案索引墙（Phase 8-1-A，ADR 0082）
+// 从"SaaS 大圆角人物卡片墙 + pill/chip-card"收敛为"私人人物档案馆·档案索引条目"：
+//  - serif 人名 + mono 编目（№ 序号）+ quiet catalog metadata（来源 · 部数 · 声优）
+//  - portrait 作为档案小像（radius-cover），不是卡片主视觉
+//  - 外层 radius-card / hairline / surface-1；无 pill、无 chip-card、无实心 accent、无渐变
+//  - selected = accent hairline + accent-soft；hover = surface-2
+// 数据/行为冻结：fetchCharacters / onOpenWork / onOpenVoice / 选中态 全保留。
 import React, { useEffect, useState } from "react";
 import { fetchCharacters } from "../api.js";
 
@@ -28,21 +33,27 @@ export default function CharacterWall({ refreshKey, onOpenWork, onOpenVoice }) {
     );
   }
 
+  const portraitOf = (c, cls) =>
+    c.image_url ? (
+      <img src={c.image_url} alt="" loading="lazy" className={cls}
+        onError={(e) => { e.target.style.display = "none"; }} />
+    ) : (
+      <div className={cls + " flex items-center justify-center"}
+        style={{ background: "var(--card-thumb)", color: "var(--accent)", fontSize: 18 }}>
+        {(c.name || "?").charAt(0)}
+      </div>
+    );
+
   return (
-    <div>
+    <div className="char-archive">
+      {/* 选中角色详情（档案卡，非 SaaS 面板） */}
       {selected && (
-        <div className="mb-4 rounded-2xl p-4"
-          style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
+        <div className="char-detail">
           <div className="flex items-center gap-3">
-            {selected.image_url && (
-              <img src={selected.image_url} alt={selected.name}
-                className="w-14 h-19 rounded-lg object-cover shrink-0"
-                style={{ width: 56, aspectRatio: "3/4", background: "var(--card-thumb)" }}
-                onError={(e) => { e.target.style.display = "none"; }} />
-            )}
+            {portraitOf(selected, "char-detail-portrait shrink-0")}
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium" style={{ color: "var(--text)" }}>{selected.name}</div>
-              <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              <div className="char-detail-name">{selected.name}</div>
+              <div className="char-detail-meta">
                 {selected.relation ? `${selected.relation} · ` : ""}{selected.source}
                 {selected.actors && selected.actors.length > 0 ? ` · 声优：${selected.actors.join("、")}` : ""}
               </div>
@@ -50,69 +61,62 @@ export default function CharacterWall({ refreshKey, onOpenWork, onOpenVoice }) {
                 <div className="text-xs mt-1 line-clamp-2" style={{ color: "var(--text-secondary)" }}>{selected.summary}</div>
               )}
             </div>
-            <button onClick={() => setSelected(null)}
-              className="text-xs px-2 py-1 rounded-lg shrink-0"
-              style={{ color: "var(--text-secondary)" }}>收起</button>
+            <button type="button" onClick={() => setSelected(null)}
+              className="char-close shrink-0">收起</button>
           </div>
-          {/* ADR 0032：声优 → 一键跳转声优关系图谱 */}
+          {/* ADR 0032：声优 → 一键跳转声优关系图谱（去 pill：安静 mono 链接） */}
           {selected.actors && selected.actors.length > 0 && (
             <>
-              <div className="text-[11px] mt-3 mb-1.5 tracking-wider" style={{ color: "var(--accent)" }}>声优（点名字看关系图谱）</div>
-              <div className="flex flex-wrap gap-1.5">
-                {(selected.actors || []).map((a) => (
-                  <button key={a} onClick={() => onOpenVoice?.(a)}
-                    className="px-2 py-1 rounded-full text-[11px]"
-                    style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+              <div className="char-detail-label">声优（点名字看关系图谱）</div>
+              <div className="flex flex-wrap gap-1">
+                {selected.actors.map((a) => (
+                  <button type="button" key={a} onClick={() => onOpenVoice?.(a)} className="char-detail-actor">
                     {a}
                   </button>
                 ))}
               </div>
             </>
           )}
-          <div className="text-[11px] mt-3 mb-1.5 tracking-wider" style={{ color: "var(--accent)" }}>出自作品</div>
-          <div className="flex flex-wrap gap-2">
-            {(selected.works || []).map((w) => (
-              <button key={w.item_id} onClick={() => onOpenWork(w)}
-                className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs text-left transition-colors"
-                style={{ backgroundColor: "rgba(255,255,255,0.06)", border: "1px solid var(--panel-border)", color: "var(--text)" }}>
+          <div className="char-detail-label">出自作品</div>
+          <div className="char-detail-works">
+            {selected.works.map((w) => (
+              <button type="button" key={w.item_id} onClick={() => onOpenWork(w)} className="char-detail-work">
                 {w.image_url && (
-                  <img src={w.image_url} alt="" className="w-6 h-8 object-cover rounded"
+                  <img src={w.image_url} alt="" className="char-detail-work-cover"
                     onError={(e) => { e.target.style.display = "none"; }} />
                 )}
-                <span className="max-w-[180px] truncate">{w.title}</span>
+                <span className="truncate">{w.title}</span>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))" }}>
-        {chars.map((c) => {
+      {/* 档案索引行：mono CHARACTER INDEX + 册数 + hairline */}
+      <div className="char-index">
+        <span className="char-index-label">CHARACTER INDEX</span>
+        <span className="char-index-count">{chars.length} 位</span>
+        <span className="char-index-rule" aria-hidden />
+      </div>
+
+      {/* 档案索引条目（radius-card / mono 编目 / serif 人名 / quiet meta） */}
+      <div className="char-grid">
+        {chars.map((c, i) => {
           const active = selected && (c.id ?? c.name) === (selected.id ?? selected.name) && c.source === selected.source;
           return (
-            <button key={`${c.source}-${c.id ?? c.name}`} onClick={() => setSelected(c)}
-              className="text-left transition-colors"
-              style={{
-                borderRadius: 16, overflow: "hidden",
-                border: active ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
-                backgroundColor: "var(--card-bg)",
-              }}>
-              {c.image_url ? (
-                <img src={c.image_url} alt={c.name} loading="lazy"
-                  className="w-full object-cover" style={{ aspectRatio: "3/4", background: "var(--card-thumb)" }}
-                  onError={(e) => { e.target.style.display = "none"; }} />
-              ) : (
-                <div className="w-full flex items-center justify-center text-2xl"
-                  style={{ aspectRatio: "3/4", background: "var(--card-thumb)", color: "var(--accent)" }}>
-                  {(c.name || "?").charAt(0)}
-                </div>
-              )}
-              <div className="px-2 py-1.5">
-                <div className="text-xs font-medium truncate" style={{ color: "var(--card-text)" }}>{c.name}</div>
-                <div className="text-[10px]" style={{ color: "var(--text-secondary)" }}>
+            <button type="button" key={`${c.source}-${c.id ?? c.name}`} onClick={() => setSelected(c)}
+              className={"char-entry" + (active ? " char-entry-active" : "")}>
+              <span className="char-entry-no">№ {String(i + 1).padStart(3, "0")}</span>
+              {portraitOf(c, "char-entry-portrait")}
+              <span className="char-entry-body">
+                <span className="char-entry-name">{c.name}</span>
+                <span className="char-entry-meta">
                   {c.source}{c.works.length > 1 ? ` · ${c.works.length} 部` : ""}
-                </div>
-              </div>
+                </span>
+                <span className="char-entry-cv">
+                  {c.actors && c.actors.length ? `声优：${c.actors.join("、")}` : "声优：—"}
+                </span>
+              </span>
             </button>
           );
         })}

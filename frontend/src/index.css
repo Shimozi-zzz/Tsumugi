@@ -585,6 +585,55 @@ body {
   .shelf-subgroup + .shelf-subgroup { margin-left: 3px; }
 }
 
+/* ---------- 人物档案馆 · 档案索引墙（Phase 8-1-A / ADR 0082）----------
+   从"SaaS 大圆角人物卡片墙 + pill/chip-card"收敛为"私人人物档案馆·档案索引条目"：
+   serif 人名 + mono 编目 + quiet catalog metadata；radius-card / hairline / surface-1；
+   无 pill、无 chip-card、无实心 accent、无渐变。数据/交互冻结。 */
+.char-archive { }
+.char-index { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px 2px; }
+.char-index-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.18em; color: var(--ink-2); }
+.char-index-count { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--ink-2); }
+.char-index-rule { flex: 1 1 auto; height: 1px; align-self: center;
+  background: linear-gradient(90deg, var(--panel-border), transparent); opacity: .75; }
+.char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.char-entry { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 8px;
+  border: 1px solid var(--panel-border); border-radius: var(--radius-card);
+  background: var(--card-bg);
+  transition: background-color var(--dur-enter) var(--ease-standard),
+    border-color var(--dur-enter) var(--ease-standard); }
+.char-entry:hover { background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--panel-border) 70%, transparent); }
+.char-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.char-entry-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+.char-entry-no { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; color: var(--ink-2); }
+.char-entry-portrait { width: 100%; aspect-ratio: 3 / 4; object-fit: cover;
+  border-radius: var(--radius-cover); background: var(--card-thumb); }
+.char-entry-body { display: flex; flex-direction: column; gap: 2px; padding: 0 2px 2px; }
+.char-entry-name { font-family: var(--font-heading); font-size: 14px; letter-spacing: 0.02em; color: var(--text); }
+.char-entry-meta { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.04em; color: var(--ink-2); }
+.char-entry-cv { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.02em; color: var(--ink-2); opacity: .85; }
+/* 选中详情（档案卡）：quiet 而非 SaaS 面板 */
+.char-detail { border: 1px solid var(--panel-border); border-radius: var(--radius-card);
+  background: var(--surface-1); padding: 14px; margin-bottom: 16px; }
+.char-detail-portrait { width: 56px; aspect-ratio: 3 / 4; object-fit: cover;
+  border-radius: var(--radius-cover); background: var(--card-thumb); }
+.char-detail-name { font-family: var(--font-heading); font-size: 16px; letter-spacing: 0.02em; color: var(--text); }
+.char-detail-meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--ink-2); }
+.char-detail-label { margin-top: 12px; margin-bottom: 6px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; color: var(--ink-2); }
+.char-detail-actor { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em;
+  color: var(--accent); padding: 2px 6px; border-radius: var(--radius-control); }
+.char-detail-actor:hover { background: var(--accent-soft); }
+.char-detail-works { display: flex; flex-wrap: wrap; gap: 8px; }
+.char-detail-work { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border: 1px solid var(--panel-border); border-radius: var(--radius-card);
+  background: transparent; color: var(--text); font-size: 12px; max-width: 220px;
+  transition: background-color var(--dur-enter) var(--ease-standard); }
+.char-detail-work:hover { background: var(--surface-2); }
+.char-detail-work-cover { width: 22px; height: 30px; object-fit: cover; border-radius: var(--radius-cover); }
+.char-close { font-size: 11px; color: var(--text-secondary); padding: 2px 6px; border-radius: var(--radius-control); }
+.char-close:hover { background: var(--surface-2); }
+
 /* 本轮（ADR 0053）：关键标题用衬线（排版自信升级）；字号/字重在具体组件 inline 控制 */
 .tsm-heading { font-family: var(--font-heading); letter-spacing: 0.01em; }
 
