@@ -52,7 +52,7 @@ export function bookPose(it) {
 // 视觉合架阈值：册数 ≤ SMALL 的分类合并进共享架（P1），数据分组不变。
 const SMALL_GROUP = 2;
 
-export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, selectedIds, onToggleSelect, onContextMenu }) {
+export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, selectedIds, onToggleSelect, onContextMenu, recordCountOf }) {
   const [hover, setHover] = useState(null); // {it, x, y, rating, loading}
   const [ratings, setRatings] = useState({}); // item_id -> my_rating
   const hoverIdRef = useRef(null);
@@ -116,6 +116,7 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
     const color = spineColorVaried(accent, it);
     const selected = selectedIds && selectedIds.has(it.id);
     const w = bookWidth(it) + pose.wOff;
+    const recCount = recordCountOf ? recordCountOf(it) || 0 : 0;
     return (
       <CoverAmbient key={it.id} src={coverOf(it)} radius={3} blur={10} spread={1} alphaFactor={0.7}>
       <button
@@ -126,6 +127,7 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
         title={it.title}
         aria-pressed={selected || undefined}
         data-narrow={w < 20 ? "1" : undefined}
+        data-record={recCount > 0 ? String(recCount) : undefined}
         className={"shelf-book shrink-0" + (selected ? " shelf-book-selected" : "")}
         style={{
           "--sw": w + "px",
@@ -137,6 +139,9 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
           <span className="shelf-book-mark" data-selected={selected ? "1" : "0"}>
             {selected ? "✓" : ""}
           </span>
+        )}
+        {recCount > 0 && (
+          <span className="shelf-book-record" aria-hidden="true">§{recCount}</span>
         )}
         <span className="shelf-book-title"
           style={{

@@ -24,7 +24,7 @@ export function ArchivePlaceholder({ no }) {
 
 export default function ArchiveCard({
   it, cover, onOpen, onContextMenu, onReview, onDelete,
-  selected = false, selectMode = false, onToggleSelect, onReplaceCover,
+  selected = false, selectMode = false, onToggleSelect, onReplaceCover, recordCountOf,
 }) {
   const no = catalogNo(it);
   const handleClick = () => { if (selectMode) onToggleSelect?.(); else onOpen?.(); };
@@ -71,6 +71,9 @@ export default function ArchiveCard({
           <span>─ 编目号 {no}</span>
           <span>─ 来源 {it.source === "local" ? "本地笔记" : it.source}</span>
           {it.chunks_count != null && <span>─ 记录 {it.chunks_count} 条</span>}
+          {recordCountOf && recordCountOf(it) > 0 && (
+            <span className="archive-card-lines-rec">§ {recordCountOf(it)} 条我的记录</span>
+          )}
         </div>
         <div className="archive-card-actions">
           <span className="archive-card-type">

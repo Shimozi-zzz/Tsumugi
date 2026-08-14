@@ -101,6 +101,24 @@ describe("ArchiveCard", () => {
     render(<ArchiveCard it={{ id: 1, title: "笔记", type: "note", source: "local" }} cover={null} onOpen={() => {}} />);
     expect(screen.queryByText("local")).toBeNull();
   });
+
+  it("Phase 10-1-A-3：有记忆/书评的作品显示『§ N 条我的记录』", () => {
+    render(<ArchiveCard it={ITEM} cover={null} onOpen={() => {}} recordCountOf={() => 2} />);
+    expect(screen.getByText(/§ 2 条我的记录/)).toBeTruthy();
+  });
+
+  it("Phase 10-1-A-3：无记录作品不显示经历标记（且点击行为保持）", () => {
+    const onOpen = vi.fn();
+    const { container } = render(<ArchiveCard it={ITEM} cover={null} onOpen={onOpen} recordCountOf={() => 0} />);
+    expect(screen.queryByText(/条我的记录/)).toBeNull();
+    fireEvent.click(container.querySelector(".archive-card"));
+    expect(onOpen).toHaveBeenCalled();
+  });
+
+  it("Phase 10-1-A-3：未传 recordCountOf（默认）不显示经历标记", () => {
+    render(<ArchiveCard it={ITEM} cover={null} onOpen={() => {}} />);
+    expect(screen.queryByText(/条我的记录/)).toBeNull();
+  });
 });
 
 describe("ArchivePlaceholder 直接渲染", () => {

@@ -552,6 +552,13 @@ body {
 .shelf-book-foot { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
   background: rgba(0,0,0,.16); }
 .shelf-book[data-narrow="1"] .shelf-book-title { display: none; }
+/* Phase 10-1-A-3：书脊"我的记录"极轻 mono 标记（书脊顶部，档案编目感；不覆盖书名/不改布局；
+   窄书与移动端隐藏） */
+.shelf-book-record { position: absolute; top: 6px; left: 0; right: 0; text-align: center;
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--ink-2) 78%, transparent); z-index: 1; pointer-events: none; }
+.shelf-book[data-narrow="1"] .shelf-book-record,
+.shelf-book[data-record="0"] .shelf-book-record { display: none; }
 .shelf-book:hover { transform: rotate(var(--tilt, 0deg)) translateY(-5px); z-index: 3;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,.07), inset 4px 0 5px -3px rgba(255,255,255,.55),
     inset -2px 0 4px -1px rgba(0,0,0,.18), 0 10px 16px -6px rgba(0,0,0,.34); }
@@ -575,6 +582,7 @@ body {
 /* 移动端（P3）：紧凑书架——书高 172±（= --bh − 38px）、单元间距收紧、共享架已有，仍为"书"非细柱 */
 @media (max-width: 640px) {
   .shelf-book { width: max(var(--sw, 24px), 24px); height: calc(var(--bh, 210px) - 38px); }
+  .shelf-book-record { display: none; }
   .shelf-unit { margin-bottom: 18px; }
   .shelf-case { padding: 20px 10px 0; }
   .shelf-case::before { height: 20px; }

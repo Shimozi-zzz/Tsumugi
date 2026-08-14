@@ -3,7 +3,7 @@
 // 设置页分类：外观 / 导航栏 / 数据源（分类筛选在最上方）
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchItems, fetchTags, fetchAllReviews, fetchCollections, streamRag, federatedSearch, searchMy, deleteItem, saveExternal,
+  fetchItems, fetchTags, fetchAllReviews, fetchCollections, fetchMemories, streamRag, federatedSearch, searchMy, deleteItem, saveExternal,
   filePathToUrl, createItem, uploadItem, uploadItemCover,
   fetchConnectors, createDeclarativeConnector, deleteConnector,
   saveConnectorProxy, testConnectorProxy,
@@ -163,6 +163,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   // 最近书评（首页"最近供奉"的文案，ADR 0039）；reviewCount 供猫娘台词里程碑判定
   const [recentReviews, setRecentReviews] = useState([]);
   const [reviewCount, setReviewCount] = useState(null);
+  // Phase 10-1-A-3：全量 memories（浏览面"我的记录"密度信号；个人库规模一次拉取，ADR 惯例 limit=500）
+  const [allMemories, setAllMemories] = useState([]);
   useEffect(() => {
     fetchAllReviews()
       .then((reviews) => {
@@ -170,6 +172,9 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         setReviewCount(reviews.length);
       })
       .catch(() => {});
+    fetchMemories({ limit: 500 })
+      .then(setAllMemories)
+      .catch(() => setAllMemories([]));
     fetchCollections()
       .then((rows) => {
         const map = {};
@@ -989,6 +994,14 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   // 猫娘台词数据（ADR 0040）：最近书评时间 + 收藏数/书评数
   const newestReviewAt = recentReviews.length ? (recentReviews[0].created_at || null) : null;
 
+  // Phase 10-1-A-3：浏览面经历密度（memories + reviews 计数，仅复用现有数据，不新增 API/字段）
+  const recordCountOf = useMemo(() => {
+    const m = new Map();
+    for (const r of recentReviews) m.set(r.item_id, (m.get(r.item_id) || 0) + 1);
+    for (const mem of allMemories) m.set(mem.item_id, (m.get(mem.item_id) || 0) + 1);
+    return (it) => (it && it.id != null ? m.get(it.id) || 0 : 0);
+  }, [recentReviews, allMemories]);
+
   // 问答搜索栏（空态时放入神殿首页作为"祭坛"焦点，有内容时置顶）
   const askSearchBar = (
     <div className="relative w-full max-w-2xl">
@@ -1582,7 +1595,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               <div className="flex-1 min-h-0 overflow-y-auto">
                 <Bookshelf items={libFiltered} coverOf={cardCover} onOpenItem={(it) => openItemDetail(it)}
                   selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={toggleSelect}
-                  onContextMenu={openCtxMenu} />
+                  onContextMenu={openCtxMenu} recordCountOf={recordCountOf} />
               </div>
             ) : (
               <div className="flex-1 min-h-0 overflow-y-auto">
@@ -1600,7 +1613,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                     onDelete={async () => { if (window.confirm(`确认删除「${it.title}」？`)) { try { await deleteItem(it.id); toast.success("已删除"); refresh(); } catch (err) { toast.error(err.message); } } }}
                     selected={selected} selectMode={selectMode}
                     onToggleSelect={() => toggleSelect(it.id)}
-                    onReplaceCover={() => { coverTargetRef.current = it.id; coverFileRef.current?.click(); }} />
+                    onReplaceCover={() => { coverTargetRef.current = it.id; coverFileRef.current?.click(); }}
+                    recordCountOf={recordCountOf} />
                   </CoverAmbient>
                   );
                 })}

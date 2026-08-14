@@ -341,8 +341,7 @@ describe("Bookshelf-2：视觉合架 + 色彩节奏（P1/P2）", () => {
     expect(poses.some((p) => p.tilt !== 0)).toBe(true);
   });
 
-  it("书本姿态应用到渲染：--bh/--tilt/--sw 存在且 deterministic（两次渲染一致）", () => {
-    const items = [{ id: 42, title: "X", tags: ["T"], content: "" }];
+  it("书本姿态应用到渲染：--bh/--tilt/--sw 存在且 deterministic（两次渲染一致）", () => {    const items = [{ id: 42, title: "X", tags: ["T"], content: "" }];
     const r1 = render(<Bookshelf items={items} coverOf={() => null} onOpenItem={() => {}} />);
     const b1 = r1.container.querySelector("button.shelf-book");
     const g1 = {
@@ -370,6 +369,21 @@ describe("Bookshelf-2：视觉合架 + 色彩节奏（P1/P2）", () => {
   it("书籍姿态不影响交互：倾斜书仍可点击进入详情", () => {
     const onOpenItem = vi.fn();
     render(<Bookshelf items={[ITEM_A]} coverOf={() => null} onOpenItem={onOpenItem} />);
+    fireEvent.click(screen.getByTitle("辉夜大小姐"));
+    expect(onOpenItem).toHaveBeenCalledWith(ITEM_A);
+  });
+
+  it("Phase 10-1-A-3：有记录的书脊显示 § 标记，无记录不显示，点击仍进入详情", () => {
+    const onOpenItem = vi.fn();
+    const { container } = render(
+      <Bookshelf items={[ITEM_A, ITEM_B]} coverOf={() => null} onOpenItem={onOpenItem}
+        recordCountOf={(it) => (it.id === 1 ? 3 : 0)} />,
+    );
+    // 有记录（id 1）：§3
+    expect(container.querySelector('button[data-record="3"] .shelf-book-record')?.textContent).toBe("§3");
+    // 无记录（id 2）：无标记
+    expect(container.querySelector('button[data-record="2"]')).toBeNull();
+    // 点击行为保持
     fireEvent.click(screen.getByTitle("辉夜大小姐"));
     expect(onOpenItem).toHaveBeenCalledWith(ITEM_A);
   });
