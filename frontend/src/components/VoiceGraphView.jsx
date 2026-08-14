@@ -314,9 +314,8 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {searchHits.map((a) => (
-                <button key={a.name} onClick={() => { setSelected(a); setMode("ego"); }}
-                  className="px-2.5 py-1 rounded-full text-[11px]"
-                  style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+                <button type="button" key={a.name} onClick={() => { setSelected(a); setMode("ego"); }}
+                  className="voice-actor-link">
                   {a.name} <span className="opacity-70">· {a.work_count} 部</span>
                 </button>
               ))}
