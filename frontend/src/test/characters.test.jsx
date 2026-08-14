@@ -130,6 +130,19 @@ describe("ItemDetailPanel 统一 Work Detail（Phase 3-1 迁移自 ItemDetailMod
     await waitFor(() => expect(screen.queryByText(/还没有你的记录/)).toBeNull());
   });
 
+  it("Phase 10-1-A-2：composerFocusTick 触发时聚焦『我的记忆』输入框（含异步加载后）", async () => {
+    global.fetch = vi.fn((url) => {
+      const u = String(url);
+      if (u.includes("/detail")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: "X", source: "bangumi", characters: [], tags: [], description: "" }) });
+      if (u.includes("/memories")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      if (u.includes("/reviews")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    render(<ItemDetailPanel itemId={1} composerFocusTick={1} />);
+    await waitFor(() => expect(screen.getByPlaceholderText(/写一句此刻的感想/)).toBeTruthy());
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("记下一句此刻的感想");
+  });
+
   it("未收藏时显示收藏按钮，点击触发 onSaveDetail", () => {
     const onSave = vi.fn();
     render(<ItemDetailPanel externalDetail={{ source: "bangumi", title: "X", characters: [] }} onSaveDetail={onSave} />);

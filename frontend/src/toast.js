@@ -11,9 +11,9 @@ function emit(next) {
   listeners.forEach((fn) => fn(next));
 }
 
-export function toast(message, type = "info", duration) {
+export function toast(message, type = "info", duration, action) {
   const id = ++idSeq;
-  const item = { id, message, type };
+  const item = { id, message, type, action };
   const ttl = duration ?? (type === "error" ? 4200 : 2600);
   emit([...current, item]);
   setTimeout(() => {
@@ -22,9 +22,14 @@ export function toast(message, type = "info", duration) {
   return id;
 }
 
-toast.success = (message, duration) => toast(message, "success", duration);
-toast.error = (message, duration) => toast(message, "error", duration);
-toast.info = (message, duration) => toast(message, "info", duration);
+toast.success = (message, duration, action) => toast(message, "success", duration, action);
+toast.error = (message, duration, action) => toast(message, "error", duration, action);
+toast.info = (message, duration, action) => toast(message, "info", duration, action);
+
+/** 立即移除某条 toast（ToastHost 内 action 点击后调用）。 */
+export function dismissToast(id) {
+  emit(current.filter((t) => t.id !== id));
+}
 
 /** 清空当前 toast（测试隔离用）。 */
 export function clearToasts() {

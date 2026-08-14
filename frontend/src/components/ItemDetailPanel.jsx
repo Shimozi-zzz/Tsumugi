@@ -50,6 +50,7 @@ export default function ItemDetailPanel({
   itemId, className = "",
   externalDetail = null, refreshKey = 0,
   onSaveDetail, onShareDetail, onRefreshDetail, onOpenReview,
+  composerFocusTick = 0,
 }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -121,6 +122,10 @@ export default function ItemDetailPanel({
   const [recording, setRecording] = useState(false);
   const [timelineRefresh, setTimelineRefresh] = useState(0);
   const fileInputRef = useRef(null);
+  const composerRef = useRef(null); // Phase 10-1-A-2：收藏后引导聚焦「我的记忆」输入框
+  useEffect(() => {
+    if (composerFocusTick > 0 && composerRef.current) composerRef.current.focus?.();
+  }, [composerFocusTick]);
 
   // Phase 4-3：提交反馈——安静一行（ok 短暂 / error 持续到下次操作 / busy 进行中）
   const [feedback, setFeedback] = useState(null); // { kind: "busy"|"ok"|"error", text } | null
@@ -438,7 +443,11 @@ export default function ItemDetailPanel({
                 </p>
               )}
               {/* 主书写区：textarea 为第一视觉焦点（Phase 4-1「留下这一刻」） */}
-              <textarea value={draft} onChange={(e) => setDraft(e.target.value)}
+              <textarea ref={(el) => {
+                composerRef.current = el;
+                if (el && composerFocusTick > 0) el.focus(); // 收藏引导：挂载即聚焦（含异步加载后）
+              }}
+                value={draft} onChange={(e) => setDraft(e.target.value)}
                 placeholder="写一句此刻的感想…（轻量记录，不写正式书评）"
                 rows={2} className="mc-write"
                 aria-label="记下一句此刻的感想" />

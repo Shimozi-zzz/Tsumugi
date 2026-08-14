@@ -1,6 +1,6 @@
 // Toast 提示宿主：右下角堆叠，自动消失；样式复用主题 token（ADR 0021）
 import React, { useEffect, useState } from "react";
-import { subscribeToast } from "../toast.js";
+import { subscribeToast, dismissToast } from "../toast.js";
 
 const TYPE_COLOR = {
   success: "var(--ok)",
@@ -17,7 +17,7 @@ export default function ToastHost() {
     <div className="fixed bottom-5 right-5 z-[70] flex flex-col gap-2 items-end pointer-events-none">
       {toasts.map((t) => (
         <div key={t.id}
-          className="pointer-events-auto flex items-center gap-2 px-3.5 py-2 text-sm max-w-xs"
+          className="pointer-events-auto flex items-center gap-3 px-3.5 py-2 text-sm max-w-xs"
           style={{
             backgroundColor: "var(--panel)",
             border: "1px solid var(--panel-border)",
@@ -29,6 +29,13 @@ export default function ToastHost() {
           <span className="w-2 h-2 rounded-full shrink-0"
             style={{ backgroundColor: TYPE_COLOR[t.type] || "var(--accent)" }} />
           <span className="leading-snug">{t.message}</span>
+          {t.action && (
+            <button type="button"
+              className="toast-action shrink-0"
+              onClick={() => { t.action.onClick(); dismissToast(t.id); }}>
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>

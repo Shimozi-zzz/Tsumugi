@@ -206,4 +206,37 @@ describe("Experience Loop（Phase 10-1-A-4）", () => {
     fireEvent.click(screen.getByText("收起"));
     await waitFor(() => expect(screen.queryByText(/刚刚导入 7 部作品/)).toBeNull());
   });
+
+  it("Phase 10-1-A-2：Ask 收藏外部结果 → toast 引导 → 点击后聚焦 composer", async () => {
+    global.fetch = vi.fn((u) => {
+      const url = String(u);
+      if (url.includes("/items") && !url.includes("/items/")) return ok({ total: 0, items: [] });
+      if (url.includes("/tags")) return ok([]);
+      if (url.includes("/connectors")) return ok([]);
+      if (url.includes("/search/federated"))
+        return ok({ results: [{ source: "bangumi", external_id: "bgm1", title: "外部作品甲", description: "简介", image_url: null, tags: ["科幻"] }] });
+      if (url.includes("/items/save-external")) return ok({ item_id: 99 });
+      if (url.includes("/rag/query/stream"))
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}), body: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) } });
+      return ok({});
+    });
+    render(<DesktopView {...PROPS} />);
+    // 检索台输入并提交
+    const input = await screen.findByPlaceholderText("搜索知识库并提问…（Enter）");
+    fireEvent.change(input, { target: { value: "命运石之门" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // 外部结果出现 → 点击收藏
+    await waitFor(() => expect(screen.getByText("外部作品甲")).toBeTruthy());
+    fireEvent.click(screen.getByText("收藏"));
+    // toast 引导出现
+    await waitFor(() => expect(screen.getByText("去记录第一条回忆")).toBeTruthy());
+    fireEvent.click(screen.getByText("去记录第一条回忆"));
+    // 详情弹层打开且 composer 输入框获得焦点
+    await waitFor(() => expect(screen.getByText("作品档案")).toBeTruthy());
+    await waitFor(() => {
+      const ta = document.querySelector('textarea[aria-label="记下一句此刻的感想"]');
+      expect(ta).toBeTruthy();
+      expect(document.activeElement).toBe(ta);
+    });
+  });
 });

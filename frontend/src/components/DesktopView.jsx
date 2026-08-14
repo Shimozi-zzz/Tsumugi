@@ -157,6 +157,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   }, [libView]);
   // Phase 10-1-A-4：Bangumi 导入后导向 Library 的 quiet 提示（导入数量）
   const [libRecordHint, setLibRecordHint] = useState(null);
+  // Phase 10-1-A-2：收藏后 toast 引导 → 聚焦「我的记忆」composer（递增触发）
+  const [composerFocusTick, setComposerFocusTick] = useState(0);
   // 主从视图（ADR 0029 分组列表模式）：当前选中浏览的条目 id
   const [detailBrowseId, setDetailBrowseId] = useState(null);
   // 条目 → 追番状态 映射（P2 / ADR 0046：收藏状态源改为 collections 表，不再取书评状态）
@@ -493,13 +495,20 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
 
   async function handleSave(r) {
     try {
-      await saveExternal({
+      const res = await saveExternal({
         source: r.source, external_id: r.external_id, title: r.title,
         description: r.description, image_url: r.image_url, tags: r.tags,
       });
       refresh();
       setCharRefreshKey((k) => k + 1);
-      toast.success(`已收藏「${r.title}」`);
+      // Phase 10-1-A-2：收藏成功 toast 附加 quiet 引导 → 打开详情并聚焦「我的记忆」composer
+      toast.success(`已收藏「${r.title}」`, 5200, {
+        label: "去记录第一条回忆",
+        onClick: () => {
+          setDetailView({ itemId: res.item_id, externalDetail: null, saved: true });
+          setComposerFocusTick((k) => k + 1);
+        },
+      });
     } catch (err) {
       toast.error(err.message);
     }
@@ -553,7 +562,11 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       setDetailView({ itemId: res.item_id, externalDetail: null, saved: true });
       refresh();
       setCharRefreshKey((k) => k + 1);
-      toast.success(`已收藏「${d.title}」`);
+      // Phase 10-1-A-2：详情内收藏后同样附 quiet 引导（聚焦 composer）
+      toast.success(`已收藏「${d.title}」`, 5200, {
+        label: "去记录第一条回忆",
+        onClick: () => setComposerFocusTick((k) => k + 1),
+      });
     } catch (err) {
       toast.error(err.message);
     }
@@ -2273,6 +2286,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               onShareDetail={detailView.saved ? () => setShareItem(detailView.itemId) : null}
               onRefreshDetail={detailView.saved ? handleRefreshExternal : null}
               onOpenReview={(it) => { setDetailView(null); setReviewItem(it); }}
+              composerFocusTick={composerFocusTick}
             />
           </div>
         </div>
