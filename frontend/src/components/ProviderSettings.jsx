@@ -71,10 +71,8 @@ export default function ProviderSettings() {
         <h3 className="text-sm font-medium mb-2">选择模型后端</h3>
         <div className="flex flex-wrap gap-2 mb-3">
           {PRESETS.map((p) => (
-            <button key={p.key} onClick={() => applyPreset(p.key)}
-              className="px-3 py-1.5 rounded-xl text-sm"
-              style={{ backgroundColor: presetKey === p.key ? "var(--accent)" : "var(--accent-soft)",
-                color: presetKey === p.key ? "#fff" : "var(--accent)" }}>
+            <button type="button" key={p.key} onClick={() => applyPreset(p.key)}
+              className={"settings-option" + (presetKey === p.key ? " settings-option-active" : "")}>
               {p.label}
             </button>
           ))}
@@ -107,14 +105,10 @@ export default function ProviderSettings() {
             </>
           )}
           <div className="flex gap-2">
-            <button type="submit" disabled={saving}
-              className="px-3 py-1.5 rounded-xl text-sm font-medium disabled:opacity-40"
-              style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+            <button type="submit" disabled={saving} className="settings-action">
               {saving ? "保存中…" : "保存配置"}
             </button>
-            <button type="button" onClick={handleTest}
-              className="px-3 py-1.5 rounded-xl text-sm"
-              style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+            <button type="button" onClick={handleTest} className="settings-action">
               测试连接
             </button>
           </div>

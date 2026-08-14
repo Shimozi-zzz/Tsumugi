@@ -102,8 +102,7 @@ export default function BangumiPanel() {
                 className="tsm-input border rounded px-2.5 py-2 text-sm" />
               <input placeholder="client_secret" type="password" value={csec} onChange={(e) => setCsec(e.target.value)}
                 className="tsm-input border rounded px-2.5 py-2 text-sm" />
-              <button type="submit" className="px-3 py-1.5 rounded-xl text-sm font-medium self-start"
-                style={{ backgroundColor: "var(--accent)", color: "#fff" }}>保存凭证</button>
+              <button type="submit" className="settings-action self-start">保存凭证</button>
             </form>
           </div>
         )}
@@ -113,9 +112,7 @@ export default function BangumiPanel() {
             <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
               凭证已配置。点击下方按钮前往 Bangumi 授权（回调地址需已在开发者后台登记：{status?.redirect_uri}）。
             </p>
-            <button onClick={connect} disabled={pollingConn}
-              className="px-3 py-1.5 rounded-xl text-sm font-medium disabled:opacity-40"
-              style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+            <button type="button" onClick={connect} disabled={pollingConn} className="settings-action">
               {pollingConn ? "等待授权完成…" : "连接 Bangumi 账号"}
             </button>
           </div>
@@ -135,9 +132,7 @@ export default function BangumiPanel() {
               <button onClick={disconnect} className="text-xs ml-2" style={{ color: "var(--danger)" }}>断开连接</button>
             </div>
 
-            <button onClick={startImport} disabled={importing}
-              className="px-4 py-1.5 rounded-xl text-sm font-medium disabled:opacity-40"
-              style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+            <button type="button" onClick={startImport} disabled={importing} className="settings-action">
               {importing ? "导入中…" : "批量导入我的收藏"}
             </button>
 

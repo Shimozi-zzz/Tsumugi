@@ -682,6 +682,36 @@ svg circle:focus-visible { stroke: var(--accent); stroke-width: 2.5; }
   transition: background-color var(--dur-enter) var(--ease-standard); }
 .voice-actor-link:hover { background: var(--accent-soft); }
 .voice-actor-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* ---------- Settings 控件语言收敛（Phase 8-3-A / ADR 0086）----------
+   分段 tab / 选择项 / 操作按钮从 pill + 白字实心 accent 收敛为 quiet control：
+   radius-control + transparent + hairline；active = accent-soft + accent 文字 + accent 边框；
+   hover surface-2；focus-visible accent outline。数据/表单逻辑冻结。 */
+.settings-tabs { display: flex; gap: 4px; margin-bottom: 16px; padding: 4px;
+  border: 1px solid var(--panel-border); border-radius: var(--radius-control); background: transparent; }
+.settings-tab { flex: 1; padding: 5px 12px; font-size: 13px; color: var(--text-secondary);
+  border: 1px solid transparent; border-radius: var(--radius-control); background: transparent;
+  transition: background-color var(--dur-enter) var(--ease-standard),
+    color var(--dur-enter) var(--ease-standard), border-color var(--dur-enter) var(--ease-standard); }
+.settings-tab:hover { background: var(--surface-2); color: var(--text); }
+.settings-tab-active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.settings-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-option { display: inline-flex; align-items: center; padding: 5px 12px; font-size: 12px;
+  color: var(--text-secondary); border: 1px solid transparent; border-radius: var(--radius-control);
+  background: transparent;
+  transition: background-color var(--dur-enter) var(--ease-standard),
+    color var(--dur-enter) var(--ease-standard), border-color var(--dur-enter) var(--ease-standard); }
+.settings-option:hover { background: var(--surface-2); color: var(--text); }
+.settings-option-active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.settings-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-action { display: inline-flex; align-items: center; padding: 5px 12px; font-size: 12px;
+  color: var(--accent); border: 1px solid var(--panel-border); border-radius: var(--radius-control);
+  background: transparent;
+  transition: background-color var(--dur-enter) var(--ease-standard),
+    border-color var(--dur-enter) var(--ease-standard), color var(--dur-enter) var(--ease-standard); }
+.settings-action:hover { background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-border)); color: var(--accent); }
+.settings-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-action:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 本轮（ADR 0053）：关键标题用衬线（排版自信升级）；字号/字重在具体组件 inline 控制 */
 .tsm-heading { font-family: var(--font-heading); letter-spacing: 0.01em; }

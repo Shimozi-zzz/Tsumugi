@@ -153,3 +153,26 @@ describe("馆内导览 Shell（ADR 0066 夜书房）", () => {
     expect(document.querySelector(".desk-drawer")).toBeNull(); // 抽屉已关闭
   });
 });
+
+describe("Settings 控件语言（Phase 8-3-A）", () => {
+  it("管理室：分段 tab 为 quiet control（settings-tab），active 用 accent-soft 修饰，无 inline 白字实心 accent", async () => {
+    mockFetch();
+    render(<DesktopView {...PROPS} />);
+    fireEvent.click(screen.getByTitle("管理室"));
+    await waitFor(() => expect(screen.getByText("外观")).toBeTruthy());
+    const tabs = document.querySelectorAll(".settings-tab");
+    expect(tabs.length).toBe(7);
+    const active = document.querySelector(".settings-tab-active");
+    expect(active).toBeTruthy();
+    expect(active.textContent).toContain("外观");
+    // quiet control：无 inline 实心 accent / 白字
+    for (const t of tabs) expect(t.getAttribute("style")).toBeNull();
+    expect(active.className).toContain("settings-tab-active");
+    // 选择项（大风格主题/主题/密度）同为 settings-option
+    const options = document.querySelectorAll(".settings-option");
+    expect(options.length).toBeGreaterThan(0);
+    for (const o of options) expect(o.getAttribute("style")).toBeNull();
+    // 操作按钮（导出/导入等）为 settings-action
+    expect(document.querySelectorAll(".settings-action").length).toBeGreaterThan(0);
+  });
+});

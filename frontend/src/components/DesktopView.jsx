@@ -1794,13 +1794,10 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           <div className="max-w-2xl mx-auto mt-6">
             <PageHeader room="管理室" path="OFFICE" />
             {/* 分类 tab 在最上方 */}
-            <div className="flex gap-1 mb-4 p-1 rounded-2xl"
-              style={{ backgroundColor: "rgba(255,255,255,0.06)", border: "1px solid var(--panel-border)" }}>
+            <div className="settings-tabs">
               {settingsTabList.map((t) => (
-                <button key={t.key} onClick={() => setSettingsTab(t.key)}
-                  className="flex-1 px-3 py-1.5 rounded-xl text-sm"
-                  style={{ color: settingsTab === t.key ? "#fff" : "var(--text-secondary)",
-                    backgroundColor: settingsTab === t.key ? "var(--accent)" : "transparent" }}>
+                <button type="button" key={t.key} onClick={() => setSettingsTab(t.key)}
+                  className={"settings-tab" + (settingsTab === t.key ? " settings-tab-active" : "")}>
                   {t.label}
                 </button>
               ))}
@@ -1817,10 +1814,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {STYLE_THEMES.map((s) => (
-                      <button key={s.key} onClick={() => setStyleTheme(s.key)}
-                        className="px-3 py-1.5 rounded-xl text-sm"
-                        style={{ backgroundColor: styleTheme === s.key ? "var(--accent)" : "var(--accent-soft)",
-                          color: styleTheme === s.key ? "#fff" : "var(--accent)" }}>
+                      <button type="button" key={s.key} onClick={() => setStyleTheme(s.key)}
+                        className={"settings-option" + (styleTheme === s.key ? " settings-option-active" : "")}>
                         {s.label}
                       </button>
                     ))}
@@ -1834,10 +1829,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {THEMES.map((t) => (
-                      <button key={t.key} onClick={() => setTheme(t.key)}
-                        className="px-3 py-1.5 rounded-xl text-sm"
-                        style={{ backgroundColor: theme === t.key ? "var(--accent)" : "var(--accent-soft)",
-                          color: theme === t.key ? "#fff" : "var(--accent)" }}>
+                      <button type="button" key={t.key} onClick={() => setTheme(t.key)}
+                        className={"settings-option" + (theme === t.key ? " settings-option-active" : "")}>
                         {t.label}
                       </button>
                     ))}
@@ -1863,10 +1856,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                     <span className="text-xs block mb-2" style={{ color: "var(--text-secondary)" }}>信息密度</span>
                     <div className="flex gap-2">
                       {["comfortable", "compact"].map((d) => (
-                        <button key={d} onClick={() => updateCustom({ density: d })}
-                          className="px-3 py-1.5 rounded-xl text-sm"
-                          style={{ backgroundColor: custom.density === d ? "var(--accent)" : "var(--accent-soft)",
-                            color: custom.density === d ? "#fff" : "var(--accent)" }}>
+                        <button type="button" key={d} onClick={() => updateCustom({ density: d })}
+                          className={"settings-option" + (custom.density === d ? " settings-option-active" : "")}>
                           {d === "comfortable" ? "舒适" : "紧凑"}
                         </button>
                       ))}
@@ -1897,15 +1888,13 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                     在界面上添加自定义文字（如标题、标语），可自由拖动位置、调整大小与颜色。
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => { setOverlayEditMode(true); setSettingsTab("appearance"); }}
-                      className="px-3 py-1.5 rounded-xl text-sm font-medium"
-                      style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                    <button type="button" onClick={() => { setOverlayEditMode(true); setSettingsTab("appearance"); }}
+                      className="settings-action">
                       {overlayEditMode ? "编辑中…" : "编辑文字涂鸦"}
                     </button>
                     {textOverlays.length > 0 && (
-                      <button onClick={() => updateTextOverlays([])}
-                        className="px-3 py-1.5 rounded-xl text-sm"
-                        style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+                      <button type="button" onClick={() => updateTextOverlays([])}
+                        className="settings-action">
                         全部清除（{textOverlays.length}）
                       </button>
                     )}
@@ -1939,7 +1928,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 </p>
                 <ul className="space-y-2">
                   {navOrder.map((k) => (
-                    <li key={k} className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm"
+                    <li key={k} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm"
                       style={{ backgroundColor: "rgba(255,255,255,0.05)" }}>
                       <span className="flex-1 flex items-center gap-2">
                         <span style={{ color: "var(--accent)" }}>{NAV[k].icon}</span>
@@ -1967,9 +1956,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-medium">数据源管理</h3>
-                  <button onClick={() => setShowConnForm((v) => !v)}
-                    className="px-3 py-1 rounded-xl text-xs font-medium"
-                    style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                  <button type="button" onClick={() => setShowConnForm((v) => !v)}
+                    className="settings-action">
                     {showConnForm ? "收起" : "+ 新建数据源"}
                   </button>
                 </div>
@@ -1999,8 +1987,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                     <input placeholder="简介字段" value={connForm.field_map_description}
                       onChange={(e) => setConnForm({ ...connForm, field_map_description: e.target.value })}
                       className="tsm-input border rounded px-2 py-1.5" />
-                    <button type="submit" className="px-3 py-1.5 rounded-xl text-sm font-medium col-span-2 justify-self-start"
-                      style={{ backgroundColor: "var(--accent)", color: "#fff" }}>创建</button>
+                    <button type="submit" className="settings-action col-span-2 justify-self-start">创建</button>
                   </form>
                 )}
                 {connMsg && <p className="mb-2 text-xs" style={{ color: "var(--text-secondary)" }}>{connMsg}</p>}
@@ -2049,9 +2036,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                                 style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
                                 {proxyTesting ? "测试中…" : "测试连接"}
                               </button>
-                              <button onClick={() => handleSaveProxy(c.name)}
-                                className="px-2 py-1 rounded-lg text-xs font-medium"
-                                style={{ backgroundColor: "var(--accent)", color: "#fff" }}>保存</button>
+                              <button type="button" onClick={() => handleSaveProxy(c.name)}
+                                className="settings-action">保存</button>
                               <button onClick={() => setProxyEditName(null)}
                                 className="px-2 py-1 rounded-lg text-xs"
                                 style={{ color: "var(--text-secondary)" }}>取消</button>
@@ -2086,9 +2072,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                       资料库、访问网络）。Tsumugi 不做沙盒隔离，也不会联网下载运行插件——
                       请仅安装你信任来源的插件，安装前建议审查其代码。
                     </p>
-                    <button onClick={handleAcknowledgePlugins}
-                      className="px-3 py-1.5 rounded-xl text-xs font-medium"
-                      style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                    <button type="button" onClick={handleAcknowledgePlugins}
+                      className="settings-action">
                       我已了解，不再提示
                     </button>
                   </div>
@@ -2168,9 +2153,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                     生成一个 JSON 备份文件（含笔记 / 书评 / 条目元数据（含已下载的百科资料）/
                     标签 / 数据源配置（不含明文密钥））。向量库不导出，导入时从内容重建。
                   </p>
-                  <button onClick={handleExportBackup} disabled={backupState.exporting}
-                    className="px-4 py-2 rounded-xl text-xs font-medium disabled:opacity-40"
-                    style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                  <button type="button" onClick={handleExportBackup} disabled={backupState.exporting}
+                    className="settings-action">
                     {backupState.exporting ? "正在生成…" : "导出图书馆数据"}
                   </button>
                 </div>
@@ -2185,10 +2169,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   </p>
                   <input ref={backupFileRef} type="file" accept=".json,application/json" className="hidden"
                     onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; handleImportFile(f); }} />
-                  <button onClick={() => backupFileRef.current?.click()} disabled={backupState.importing}
-                    className="px-4 py-2 rounded-xl text-xs font-medium disabled:opacity-40"
-                    style={{ backgroundColor: backupState.importing ? "var(--surface-2)" : "var(--accent)",
-                      color: backupState.importing ? "var(--text-secondary)" : "#fff" }}>
+                  <button type="button" onClick={() => backupFileRef.current?.click()} disabled={backupState.importing}
+                    className="settings-action">
                     {backupState.importing ? "正在导入…" : "选择备份文件导入"}
                   </button>
                   {backupState.importing && (
@@ -2218,9 +2200,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               设置已保存 ✓
             </div>
           )}
-          <button onClick={handleSaveSettings}
-            className="fixed bottom-6 right-6 z-40 px-5 py-2 rounded-full text-sm font-medium transition-transform hover:scale-105"
-            style={{ backgroundColor: "var(--accent)", color: "#fff", boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}>
+          <button type="button" onClick={handleSaveSettings}
+            className="settings-action fixed bottom-6 right-6 z-40 font-medium">
             保存设置
           </button>
         </>
