@@ -970,6 +970,8 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 
 /* Memory Composer「留下这一刻」（Phase 4-1/4-2）：书写区最大面积、辅助安静、主操作唯一 accent */
 .mc { margin-bottom: var(--sp-5); }
+.mc-empty-hint { margin: 0 0 var(--sp-3); font-family: var(--font-heading); font-size: 12px;
+  letter-spacing: 0.02em; color: var(--ink-2); }
 .mc-write {
   width: 100%; min-height: 64px; resize: vertical;
   padding: var(--sp-3) var(--sp-4);

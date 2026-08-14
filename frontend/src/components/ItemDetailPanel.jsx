@@ -139,11 +139,18 @@ export default function ItemDetailPanel({
   // 同一份 memories 同时供给 MemoryTimeline（避免重复请求）。
   const [reviews, setReviews] = useState([]);
   const [memories, setMemories] = useState([]);
+  const [memReady, setMemReady] = useState(false); // 记录数据就绪（防空态引导闪烁）
   useEffect(() => {
-    if (itemId == null) { setReviews([]); setMemories([]); return; }
+    if (itemId == null) { setReviews([]); setMemories([]); setMemReady(false); return; }
     let cancelled = false;
-    fetchItemReviews(itemId).then((r) => { if (!cancelled) setReviews(Array.isArray(r) ? r : []); }).catch(() => {});
-    fetchItemMemories(itemId).then((m) => { if (!cancelled) setMemories(Array.isArray(m) ? m : []); }).catch(() => {});
+    setMemReady(false);
+    Promise.all([
+      fetchItemReviews(itemId).then((r) => (Array.isArray(r) ? r : [])).catch(() => []),
+      fetchItemMemories(itemId).then((m) => (Array.isArray(m) ? m : [])).catch(() => []),
+    ]).then(([r, m]) => {
+      if (cancelled) return;
+      setReviews(r); setMemories(m); setMemReady(true);
+    });
     return () => { cancelled = true; };
   }, [itemId, timelineRefresh]);
 
@@ -424,6 +431,12 @@ export default function ItemDetailPanel({
           <div className="wd-chapter-rule" />
           {detail.source !== "local" && (
             <div className="mc mb-5">
+              {/* Phase 10-1-A-1：零记录空态引导——把"这里可以留下第一条记录"显性化 */}
+              {memReady && memories.length === 0 && reviews.length === 0 && (
+                <p className="mc-empty-hint">
+                  这部作品还没有你的记录——写一句此刻的感想即可，之后它会出现在时间轴与往年今日里。
+                </p>
+              )}
               {/* 主书写区：textarea 为第一视觉焦点（Phase 4-1「留下这一刻」） */}
               <textarea value={draft} onChange={(e) => setDraft(e.target.value)}
                 placeholder="写一句此刻的感想…（轻量记录，不写正式书评）"
