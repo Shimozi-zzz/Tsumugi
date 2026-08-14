@@ -1754,14 +1754,12 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           <div className="max-w-4xl mx-auto mt-6">
             <PageHeader room="人物档案" path="ARCHIVE">
               <div className="flex items-center gap-2">
-                <button onClick={() => { setVoiceFocus(null); setSection("voice"); }}
-                  className="px-3 py-1.5 rounded-xl text-xs"
-                  style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                <button type="button" onClick={() => { setVoiceFocus(null); setSection("voice"); }}
+                  className="character-archive-action character-archive-action-accent">
                   声优关系
                 </button>
-                <button onClick={() => setCharRefreshKey((k) => k + 1)}
-                  className="px-3 py-1.5 rounded-xl text-xs"
-                  style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>刷新</button>
+                <button type="button" onClick={() => setCharRefreshKey((k) => k + 1)}
+                  className="character-archive-action">刷新</button>
               </div>
             </PageHeader>
             <CharacterWall refreshKey={charRefreshKey} onOpenWork={openWorkDetail}
