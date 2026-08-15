@@ -11,6 +11,7 @@ docs/decisions/0025-external-reference-rag.md。
   保证主观问题优先命中用户自己的内容，外部百科只作事实性补充；
 - 支持按 source_types 硬过滤（如只看用户自己的内容）。
 """
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
 from sqlalchemy import func
@@ -46,6 +47,67 @@ def detect_query_intent(query: str) -> QueryIntent:
         temporal=any(t in q for t in _TEMPORAL_TERMS),
         recommendation=any(t in q for t in _RECOMMEND_TERMS),
     )
+
+
+# ---------------------------------------------------------------- 时间信号（Phase 10-1-B-6）
+# 时间型个人问题使用 occurred_at metadata 做时间命中调整（非文本关键词判断）。
+# 原则：只对明确时间边界生效；unknown/缺失不报错、不加不减、不伪装命中；external 不加分。
+# 时间窗口与 boost 数值均为保守、可解释的固定值（additive，避免 multiplicative 失真）。
+
+TEMPORAL_BONUS = 0.15   # 明确时间范围内命中的个人 chunk 加分
+TEMPORAL_PENALTY = 0.05  # 明确位于范围外的个人 chunk 减分
+RECENT_WINDOW_DAYS = 30  # 「最近」固定窗口（项目无既有定义，采用 30 天）
+
+
+def _current_time() -> datetime:
+    """可注入的当前时间（production 用系统时间；tests monkeypatch 固定，避免随机器日期漂移）。"""
+    return datetime.now()
+
+
+def _explicit_temporal_range(query: str, now: datetime) -> Optional[tuple]:
+    """由查询中的明确时间词计算 [start, end]（naive datetime 闭区间）。
+
+    模糊词（以前/之前/那时候/当时）无明确边界 → None（不虚构、不硬过滤）。
+    """
+    q = query or ""
+    y = now.year
+    if "前年" in q:
+        return (datetime(y - 2, 1, 1), datetime(y - 2, 12, 31, 23, 59, 59))
+    if "去年" in q:
+        return (datetime(y - 1, 1, 1), datetime(y - 1, 12, 31, 23, 59, 59))
+    if "今年" in q:
+        return (datetime(y, 1, 1), datetime(y, 12, 31, 23, 59, 59))
+    if "上个月" in q:
+        first_this = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end_prev = first_this - timedelta(days=1)
+        return (end_prev.replace(day=1), end_prev.replace(hour=23, minute=59, second=59))
+    if "上周" in q:
+        this_monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        prev_monday = this_monday - timedelta(days=7)
+        return (prev_monday, prev_monday + timedelta(days=6, hours=23, minutes=59, seconds=59))
+    if "昨天" in q:
+        d = (now - timedelta(days=1)).date()
+        return (datetime(d.year, d.month, d.day), datetime(d.year, d.month, d.day, 23, 59, 59))
+    if "最近" in q:
+        d = now.date()
+        return (datetime(d.year, d.month, d.day) - timedelta(days=RECENT_WINDOW_DAYS),
+                datetime(d.year, d.month, d.day, 23, 59, 59))
+    return None
+
+
+def _parse_occurred_at(value) -> Optional[datetime]:
+    """解析 B-5 写入的 ISO-8601 occurred_at（date/datetime、可含时区）。None/非法/缺失 → None。"""
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        try:
+            d = date.fromisoformat(str(value))
+            parsed = datetime(d.year, d.month, d.day)
+        except ValueError:
+            return None
+    return parsed.replace(tzinfo=None)  # 统一 naive 墙钟比较（SQLite 存 naive，墙钟即项目惯例）
 
 
 def _resolve_item_meta(
@@ -202,6 +264,7 @@ def _retrieve(
     source_map = _resolve_chunk_sources(db, list(ids))
 
     hits: List[RetrievedChunk] = []
+    occ_by_content: Dict[str, str] = {}  # content -> occurred_at（B-5 新 metadata；旧向量无键）
     for ref, doc, meta, dist in zip(ids, docs, metas, dists):
         if not doc or not meta:
             continue
@@ -215,6 +278,8 @@ def _retrieve(
             db_st, db_conn = source_map.get(ref, (None, None))
             source_type = db_st or ("review" if review_id is not None else "note")
             connector = connector or db_conn
+        if meta.get("occurred_at"):
+            occ_by_content[doc] = meta["occurred_at"]
         hits.append(
             RetrievedChunk(
                 content=doc,
@@ -243,6 +308,23 @@ def _retrieve(
     elif source_types:
         allowed = set(source_types)
         hits = [h for h in hits if h.source_type in allowed]
+
+    # Phase 10-1-B-6：temporal intent + 明确时间范围 → occurred_at 时间信号调整（仅个人来源，
+    # 在内容去重 / per-item cap 之前生效；unknown 不加不减；external 不加分）
+    if intent.temporal:
+        trange = _explicit_temporal_range(query, _current_time())
+        if trange is not None:
+            start, end = trange
+            for h in hits:
+                if h.source_type not in ("memory", "review", "note"):
+                    continue
+                occ = _parse_occurred_at(occ_by_content.get(h.content))
+                if occ is None:
+                    continue  # 历史向量缺 occurred_at：视为 unknown，不伪装时间命中
+                if start <= occ <= end:
+                    h.score = round(h.score + TEMPORAL_BONUS, 4)
+                else:
+                    h.score = round(max(h.score - TEMPORAL_PENALTY, 0.0), 4)
 
     # 1) 内容去重
     seen_content = set()

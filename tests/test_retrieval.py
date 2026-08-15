@@ -1,10 +1,14 @@
 """retrieval 模块测试：排序、去重、tag 过滤、top_k、来源区分（ADR 0025）"""
 import math
+from datetime import datetime
 
 import pytest
 
 from app.models import Chunk, Item, Tag
-from app.retrieval import detect_query_intent, retrieve_chunks
+from app.retrieval import (
+    _current_time, _explicit_temporal_range, _parse_occurred_at,
+    detect_query_intent, retrieve_chunks,
+)
 
 QUERY_VEC = [1.0, 0, 0, 0, 0, 0, 0, 0]
 
@@ -177,6 +181,109 @@ def _add_source_item(db, col, title, source_type, content, sim):
             metadatas=[{"item_id": item.id, "chunk_index": 0, "source_type": source_type}])
     db.commit()
     return item
+
+
+def _add_memory_item(db, col, title, content, sim, occurred_at):
+    """创建带 occurred_at metadata 的 memory chunk（B-5 形态；None → 省略该键=旧向量）。"""
+    item = Item(title=title, type="note", source="local")
+    db.add(item)
+    db.flush()
+    ref = f"item{item.id}_chunk0"
+    db.add(Chunk(item_id=item.id, content=content, chunk_index=0, embedding_ref=ref,
+                 source_type="memory"))
+    meta = {"item_id": item.id, "chunk_index": 0, "source_type": "memory"}
+    if occurred_at:
+        meta["occurred_at"] = occurred_at
+    col.add(ids=[ref], embeddings=[vec_with_similarity(sim)], documents=[content], metadatas=[meta])
+    db.commit()
+    return item
+
+
+class TestTemporalRange:
+    def test_calendar_year_ranges(self):
+        now = datetime(2026, 8, 15, 12, 0, 0)
+        assert _explicit_temporal_range("去年我看了什么", now) == (datetime(2025, 1, 1), datetime(2025, 12, 31, 23, 59, 59))
+        assert _explicit_temporal_range("今年我记录了什么", now) == (datetime(2026, 1, 1), datetime(2026, 12, 31, 23, 59, 59))
+        assert _explicit_temporal_range("前年我看了什么", now) == (datetime(2024, 1, 1), datetime(2024, 12, 31, 23, 59, 59))
+
+    def test_month_week_yesterday_recent(self):
+        now = datetime(2026, 8, 15, 12, 0, 0)
+        start, end = _explicit_temporal_range("上个月我记录了什么", now)
+        assert start == datetime(2026, 7, 1) and end == datetime(2026, 7, 31, 23, 59, 59)
+        start, end = _explicit_temporal_range("上周我记录了什么", now)
+        assert start == datetime(2026, 8, 3) and end == datetime(2026, 8, 9, 23, 59, 59)  # ISO 周一
+        start, end = _explicit_temporal_range("昨天我记录了什么", now)
+        assert start == datetime(2026, 8, 14) and end == datetime(2026, 8, 14, 23, 59, 59)
+        start, end = _explicit_temporal_range("最近我记录了什么", now)
+        assert start == datetime(2026, 7, 16) and end == datetime(2026, 8, 15, 23, 59, 59)  # 30 天窗口
+
+    def test_vague_temporal_has_no_explicit_range(self):
+        now = datetime(2026, 8, 15)
+        for q in ["以前我记录过哪些作品", "之前我看了什么", "那时候的事", "当时"]:
+            assert _explicit_temporal_range(q, now) is None
+
+    def test_parse_occurred_at(self):
+        assert _parse_occurred_at("2025-06-01T10:00:00") == datetime(2025, 6, 1, 10, 0, 0)
+        assert _parse_occurred_at("2025-06-01") == datetime(2025, 6, 1)
+        assert _parse_occurred_at("2025-06-01T10:00:00+08:00") == datetime(2025, 6, 1, 10, 0, 0)  # 墙钟
+        assert _parse_occurred_at(None) is None
+        assert _parse_occurred_at("not-a-date") is None
+
+
+class TestTemporalRetrieval:
+    def _freeze_now(self, monkeypatch, dt):
+        monkeypatch.setattr("app.retrieval._current_time", lambda: dt)
+
+    def test_temporal_hit_ranks_above_unknown_and_outside(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """去年：时间命中(2025) > 时间未知 > 时间不匹配(2026)；external 不加分。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        _add_memory_item(db, fake_collection, "去年记忆", "去年冬天看完了这部作品。", 0.5, "2025-12-01T10:00:00")
+        _add_memory_item(db, fake_collection, "未知记忆", "一条没有时间的旧记忆。", 0.5, None)  # 无 occurred_at（旧向量）
+        _add_memory_item(db, fake_collection, "今年记忆", "今年才补看的。", 0.5, "2026-06-01T10:00:00")
+        _add_external_item(db, fake_collection, "百科", "bangumi", "作品设定。", 0.8)
+        results = retrieve_chunks("去年我看了什么", top_k=5, max_chunks_per_item=5, db=db)
+        order = [r.item_title for r in results]
+        assert order.index("去年记忆") < order.index("未知记忆") < order.index("今年记忆"), order
+        # 时间命中分 > 未知分；外部不加时间分
+        by_title = {r.item_title: r.score for r in results}
+        assert by_title["去年记忆"] > by_title["未知记忆"] > by_title["今年记忆"]
+        assert "百科" in order  # 个人不足场景 external 兜底（本测试个人≥5 则无；此处 3 个人 → 兜底）
+
+    def test_outside_range_not_masked_as_hit(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        _add_memory_item(db, fake_collection, "2025", "去年内容。", 0.5, "2025-06-01")
+        _add_memory_item(db, fake_collection, "2026", "今年内容。", 0.5, "2026-06-01")
+        results = retrieve_chunks("去年我看了什么", top_k=5, max_chunks_per_item=5, db=db)
+        assert [r.item_title for r in results][0] == "2025"
+
+    def test_old_metadata_unknown_still_retrieves_no_error(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """历史向量无 occurred_at：不报错、仍进入结果、不加时间分。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        _add_memory_item(db, fake_collection, "旧记忆", "没有时间元数据的旧记忆。", 0.6, None)
+        results = retrieve_chunks("去年我看了什么", top_k=5, max_chunks_per_item=5, db=db)
+        assert any(r.item_title == "旧记忆" for r in results)
+
+    def test_personal_non_temporal_zero_regression(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """「我为什么喜欢这部作品」：B-6 引入时间信号不应改变既有 personal 策略。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        for i in range(3):
+            _add_memory_item(db, fake_collection, f"记忆{i}", f"关于这部作品的记忆{i}", 0.5, "2025-01-01")
+        for i in range(2):
+            add_item(db, fake_collection, f"笔记{i}", [], [(f"我的感想{i}", 0.5)])
+        _add_external_item(db, fake_collection, "百科", "bangumi", "高相关外部。", 0.95)
+        results = retrieve_chunks("我为什么喜欢这部作品", top_k=5, max_chunks_per_item=5, db=db)
+        assert all(h.source_type in ("note", "memory") for h in results)  # personal 优先保持
+        assert [r.score for r in results] == sorted([r.score for r in results], reverse=True)
+
+    def test_recommendation_no_temporal_boost(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """纯推荐 query 不自动时间加分（除非含 temporal intent）。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        _add_memory_item(db, fake_collection, "旧年记忆", "很久以前的记忆。", 0.5, "2025-01-01")
+        _add_memory_item(db, fake_collection, "今年记忆", "今年的记忆。", 0.5, "2026-06-01")
+        results = retrieve_chunks("推荐几部作品", top_k=5, max_chunks_per_item=5, db=db)
+        by = {r.item_title: r.score for r in results}
+        # 无 temporal intent → 无时间加分 → 同相似度下 0.5 平分（无 bonus/penalty）
+        assert abs(by["旧年记忆"] - by["今年记忆"]) < 1e-6
 
 
 class TestIntentStrategy:
