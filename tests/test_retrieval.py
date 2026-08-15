@@ -208,6 +208,133 @@ def _add_memory_item_full(db, col, title, content, sim, occurred_at=None, emotio
     return item
 
 
+def _mk_plain_item(db, title="作品"):
+    item = Item(title=title, type="note", source="local")
+    db.add(item)
+    db.flush()
+    db.commit()
+    return item
+
+
+def _add_chunk(db, col, item, content, sim, source_type, review_id=None, memory_id=None,
+               occurred_at=None, emotion=None, milestone=None):
+    """向已有 item 追加一个带可选身份/信号 metadata 的 chunk（B-9）。"""
+    idx = sum(1 for k in col.vectors if str(k).startswith(f"item{item.id}_"))
+    ref = f"item{item.id}_chunk{idx}"
+    db.add(Chunk(item_id=item.id, content=content, chunk_index=0, embedding_ref=ref,
+                 source_type=source_type))
+    meta = {"item_id": item.id, "chunk_index": 0, "source_type": source_type}
+    if review_id is not None:
+        meta["review_id"] = review_id
+    if memory_id is not None:
+        meta["memory_id"] = memory_id
+    if occurred_at:
+        meta["occurred_at"] = occurred_at
+    if emotion:
+        meta["emotion"] = emotion
+    if milestone is not None:
+        meta["milestone"] = milestone
+    col.add(ids=[ref], embeddings=[vec_with_similarity(sim)], documents=[content], metadatas=[meta])
+    db.commit()
+    return item
+
+
+class TestSourceAwareCap:
+    """Phase 10-1-B-9：entity-aware per-item cap（personal 深度 2、其它 1）。"""
+
+    def test_same_review_multichunk_only_one(self, db, fake_collection, fixed_query_embedding):
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "书评片段0", 0.9, "review", review_id=7)
+        _add_chunk(db, fake_collection, item, "书评片段1", 0.88, "review", review_id=7)
+        results = retrieve_chunks("我对这部作品的记录", top_k=5, db=db)
+        assert len([h for h in results if h.item_id == item.id]) == 1  # 同一 review 只 1 个
+
+    def test_same_memory_multichunk_only_one(self, db, fake_collection, fixed_query_embedding):
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "记忆片段0", 0.9, "memory", memory_id=12)
+        _add_chunk(db, fake_collection, item, "记忆片段1", 0.88, "memory", memory_id=12)
+        results = retrieve_chunks("我对这部作品的记录", top_k=5, db=db)
+        assert len([h for h in results if h.item_id == item.id]) == 1
+
+    def test_memory_plus_review_same_item_coexist(self, db, fake_collection, fixed_query_embedding):
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "记忆内容", 0.82, "memory", memory_id=12)
+        _add_chunk(db, fake_collection, item, "书评内容", 0.9, "review", review_id=7)
+        results = retrieve_chunks("我对这部作品的记录", top_k=5, db=db)
+        item_chunks = [h for h in results if h.item_id == item.id]
+        assert len(item_chunks) == 2  # memory + review 共存
+        assert {h.source_type for h in item_chunks} == {"memory", "review"}
+
+    def test_review_plus_note_same_item_coexist(self, db, fake_collection, fixed_query_embedding):
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "书评内容", 0.9, "review", review_id=7)
+        _add_chunk(db, fake_collection, item, "笔记内容", 0.85, "note")
+        results = retrieve_chunks("我对这部作品的记录", top_k=5, db=db)
+        item_chunks = [h for h in results if h.item_id == item.id]
+        assert len(item_chunks) == 2
+        assert {h.source_type for h in item_chunks} == {"review", "note"}
+
+    def test_three_personal_entities_max_two(self, db, fake_collection, fixed_query_embedding):
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "记忆", 0.95, "memory", memory_id=1)
+        _add_chunk(db, fake_collection, item, "书评", 0.9, "review", review_id=2)
+        _add_chunk(db, fake_collection, item, "笔记", 0.85, "note")
+        results = retrieve_chunks("我对这部作品的记录", top_k=5, db=db)
+        assert len([h for h in results if h.item_id == item.id]) == 2  # 最多 2 实体
+
+    def test_neutral_same_item_still_one(self, db, fake_collection, fixed_query_embedding):
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "记忆", 0.95, "memory", memory_id=1)
+        _add_chunk(db, fake_collection, item, "书评", 0.9, "review", review_id=2)
+        results = retrieve_chunks("这部作品是什么", top_k=5, db=db)
+        assert len([h for h in results if h.item_id == item.id]) <= 1
+
+    def test_recommendation_same_item_one_and_breadth(self, db, fake_collection, fixed_query_embedding):
+        for i in range(5):
+            it = _mk_plain_item(db, f"作品{i}")
+            _add_chunk(db, fake_collection, it, f"记忆{i}", 0.6, "memory", memory_id=100 + i)
+        rich = _mk_plain_item(db, "富作品")
+        _add_chunk(db, fake_collection, rich, "富记忆1", 0.95, "memory", memory_id=200)
+        _add_chunk(db, fake_collection, rich, "富记忆2", 0.9, "memory", memory_id=201)
+        results = retrieve_chunks("推荐几个我可能想重温的作品", top_k=5, db=db)
+        assert len({h.item_id for h in results}) == 5  # 跨作品广度保持
+        assert len([h for h in results if h.item_id == rich.id]) == 1  # 富作品只占 1
+
+    def test_temporal_personal_memory_review_coexist(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        monkeypatch.setattr("app.retrieval._current_time", lambda: datetime(2026, 8, 15))
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "去年记忆", 0.8, "memory", memory_id=12, occurred_at="2025-06-01")
+        _add_chunk(db, fake_collection, item, "去年书评", 0.8, "review", review_id=7, occurred_at="2025-06-02")
+        results = retrieve_chunks("去年我看了什么", top_k=5, db=db)
+        assert len([h for h in results if h.item_id == item.id]) == 2  # temporal+personal 深度 2
+
+    def test_external_does_not_consume_personal_depth(self, db, fake_collection, fixed_query_embedding):
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "记忆", 0.95, "memory", memory_id=1)
+        _add_chunk(db, fake_collection, item, "书评", 0.9, "review", review_id=2)
+        _add_chunk(db, fake_collection, item, "外部", 0.85, "external_reference")
+        results = retrieve_chunks("我对这部作品的记录", top_k=5, db=db)
+        item_chunks = [h for h in results if h.item_id == item.id]
+        assert len(item_chunks) == 2
+        assert "external_reference" not in {h.source_type for h in item_chunks}  # 不占个人深度
+
+    def test_legacy_missing_identity_no_error(self, db, fake_collection, fixed_query_embedding):
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "无id记忆", 0.9, "memory")
+        _add_chunk(db, fake_collection, item, "无id书评", 0.88, "review")
+        results = retrieve_chunks("我对这部作品的记录", top_k=5, db=db)
+        assert len(results) > 0  # 不报错、可返回
+        assert len([h for h in results if h.item_id == item.id]) == 2  # 保守：memory/review 各 1
+
+    def test_regression_neutral_old_behavior(self, db, fake_collection, fixed_query_embedding):
+        """neutral：同作品仍 1，行为与 B-8 一致（显式 cap 路径未启用 entity 规则）。"""
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "记忆", 0.95, "memory", memory_id=1)
+        _add_chunk(db, fake_collection, item, "书评", 0.9, "review", review_id=2)
+        results = retrieve_chunks("这部作品什么时候播出", top_k=5, max_chunks_per_item=5, db=db)
+        assert len([h for h in results if h.item_id == item.id]) == 2  # 显式 cap=5 → 不启用 entity 规则
+
+
 class TestTemporalRange:
     def test_calendar_year_ranges(self):
         now = datetime(2026, 8, 15, 12, 0, 0)

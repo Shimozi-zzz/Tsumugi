@@ -288,6 +288,32 @@ def retrieve_chunks(
             db.close()
 
 
+def _passes_item_cap(item_id, source_type, memory_id, review_id, kept, allow_depth):
+    """source-aware per-item cap（Phase 10-1-B-9）。
+
+    - 同一来源实体（memory#memory_id / review#review_id / note / external）最多 1 个 chunk；
+    - 身份缺失（历史向量无 memory_id/review_id）→ 按 (source_type, item_id) 保守合并，
+      不跨来源合并、不猜测同一性；
+    - allow_depth（personal/temporal 默认路径）：同一 item 最多 2 个不同来源实体；
+    - 否则（recommendation/neutral 默认路径）：同一 item 最多 1 个 chunk。
+
+    返回 (allowed, entity_key)；kept = 该 item 已保留的 entity_key 列表。
+    """
+    if source_type == "memory":
+        entity_key = ("memory", memory_id if memory_id is not None else item_id)
+    elif source_type == "review":
+        entity_key = ("review", review_id if review_id is not None else item_id)
+    elif source_type == "note":
+        entity_key = ("note", item_id)
+    else:
+        entity_key = ("external", item_id)
+    if entity_key in kept:
+        return False, entity_key
+    if allow_depth:
+        return len(kept) < 2, entity_key
+    return len(kept) == 0, entity_key
+
+
 def _retrieve(
     db: Session,
     query: str,
@@ -338,6 +364,7 @@ def _retrieve(
     occ_by_content: Dict[str, str] = {}  # content -> occurred_at（B-5 新 metadata；旧向量无键）
     emo_by_content: Dict[str, str] = {}  # content -> emotion（B-5；B-8 使用）
     mil_by_content: Dict[str, bool] = {}  # content -> milestone（B-5；B-8 使用）
+    memid_by_content: Dict[str, int] = {}  # content -> memory_id（B-5；B-9 source-aware cap）
     for ref, doc, meta, dist in zip(ids, docs, metas, dists):
         if not doc or not meta:
             continue
@@ -357,6 +384,8 @@ def _retrieve(
             emo_by_content[doc] = meta["emotion"]
         if meta.get("milestone") is not None:
             mil_by_content[doc] = meta["milestone"]
+        if meta.get("memory_id") is not None:
+            memid_by_content[doc] = meta["memory_id"]
         hits.append(
             RetrievedChunk(
                 content=doc,
@@ -407,14 +436,29 @@ def _retrieve(
     # 2) 排序（final score 降序）
     unique_hits.sort(key=lambda h: h.score, reverse=True)
 
-    # 3) 按 item 去重
-    cap = max_chunks_per_item if max_chunks_per_item is not None else settings.max_chunks_per_item
-    per_item: Dict[int, int] = {}
+    # 3) 按 item 去重（Phase 10-1-B-9：默认路径 source-aware；显式 max_chunks_per_item 保持旧行为）
+    cap_explicit = max_chunks_per_item is not None
+    cap = max_chunks_per_item if cap_explicit else settings.max_chunks_per_item
+    # personal/temporal 默认路径允许同作品最多 2 个不同个人来源实体（memory+review / review+note）；
+    # recommendation/neutral 默认保持 1；显式 cap 一律按 cap 计（不启用 entity 规则）
+    allow_depth = (not cap_explicit) and (intent.personal or intent.temporal)
+    per_item: Dict[int, list] = {}
     deduped: List[RetrievedChunk] = []
     for h in unique_hits:
-        if per_item.get(h.item_id, 0) < cap:
-            per_item[h.item_id] = per_item.get(h.item_id, 0) + 1
-            deduped.append(h)
+        item_id = h.item_id
+        if cap_explicit:
+            if len(per_item.get(item_id, [])) < cap:
+                per_item.setdefault(item_id, []).append(None)
+                deduped.append(h)
+        else:
+            allowed, key = _passes_item_cap(
+                item_id, h.source_type,
+                memid_by_content.get(h.content), h.review_id,
+                per_item.get(item_id, []), allow_depth,
+            )
+            if allowed:
+                per_item.setdefault(item_id, []).append(key)
+                deduped.append(h)
         if len(deduped) >= top_k:
             break
 
