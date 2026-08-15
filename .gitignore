@@ -82,3 +82,9 @@ plugins/*
 # 开发提示词/agent 配置（私有，不随仓库上传）：00-03 号提示词、AGENTS.md、AGENT_UI.md 等
 prompts/
 
+# 开发流程文档（私有，不随仓库上传；仅保留 README.md + 代码对外）：
+# 开发流程简报 / 根级 AGENTS.md / 产品与技术文档目录 docs/（ADR 决策记录 / 审计 / 产品简报 / 人设等）
+开发流程简报.md
+/AGENTS.md
+docs/
+
