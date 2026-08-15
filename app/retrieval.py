@@ -110,6 +110,34 @@ def _parse_occurred_at(value) -> Optional[datetime]:
     return parsed.replace(tzinfo=None)  # 统一 naive 墙钟比较（SQLite 存 naive，墙钟即项目惯例）
 
 
+def _compute_retrieval_score(
+    semantic_score: float,
+    source_type: str,
+    occurred_at: Optional[str] = None,
+    temporal_range: Optional[tuple] = None,
+) -> tuple:
+    """构造最终检索 score（Phase 10-1-B-7 统一 rerank 层）。
+
+    base = semantic × _source_weight（保持 B-3 语义：memory/review/note=1.0，external=0.4）
+    temporal adjustment：仅当提供 temporal_range 时对 personal source 生效——
+      within +TEMPORAL_BONUS / outside -TEMPORAL_PENALTY / occurred_at 缺失或非法 0；
+      external 不获得 temporal 调整。
+    返回 (final_score, temporal_adj)。独立、可测试；未来可在此层安全加入 emotion/milestone
+    signal（本阶段不启用）。
+    """
+    temporal_adj = 0.0
+    if temporal_range is not None and source_type in ("memory", "review", "note"):
+        occ = _parse_occurred_at(occurred_at)
+        if occ is not None:
+            start, end = temporal_range
+            if start <= occ <= end:
+                temporal_adj = TEMPORAL_BONUS
+            else:
+                temporal_adj = -TEMPORAL_PENALTY
+    base = semantic_score * _source_weight(source_type)
+    return round(base + temporal_adj, 4), round(temporal_adj, 4)
+
+
 def _resolve_item_meta(
     db: Session, item_ids: List[int]
 ) -> Dict[int, tuple[str, List[str]]]:
@@ -309,22 +337,13 @@ def _retrieve(
         allowed = set(source_types)
         hits = [h for h in hits if h.source_type in allowed]
 
-    # Phase 10-1-B-6：temporal intent + 明确时间范围 → occurred_at 时间信号调整（仅个人来源，
-    # 在内容去重 / per-item cap 之前生效；unknown 不加不减；external 不加分）
-    if intent.temporal:
-        trange = _explicit_temporal_range(query, _current_time())
-        if trange is not None:
-            start, end = trange
-            for h in hits:
-                if h.source_type not in ("memory", "review", "note"):
-                    continue
-                occ = _parse_occurred_at(occ_by_content.get(h.content))
-                if occ is None:
-                    continue  # 历史向量缺 occurred_at：视为 unknown，不伪装时间命中
-                if start <= occ <= end:
-                    h.score = round(h.score + TEMPORAL_BONUS, 4)
-                else:
-                    h.score = round(max(h.score - TEMPORAL_PENALTY, 0.0), 4)
+    # Phase 10-1-B-7：metadata rerank（统一构造最终 score；当前仅 occurred_at temporal signal）。
+    # 模糊时间词（以前/之前/那时候/当时）→ temporal_range=None → 不加不减；普通问题亦如此。
+    temporal_range = _explicit_temporal_range(query, _current_time()) if intent.temporal else None
+    for h in hits:
+        h.score, _ = _compute_retrieval_score(
+            h.score, h.source_type, occ_by_content.get(h.content), temporal_range,
+        )
 
     # 1) 内容去重
     seen_content = set()
@@ -334,9 +353,7 @@ def _retrieve(
             seen_content.add(h.content)
             unique_hits.append(h)
 
-    # 2) 来源加权 + 排序（相似度 × 权重 降序）
-    for h in unique_hits:
-        h.score = round(h.score * _source_weight(h.source_type), 4)
+    # 2) 排序（final score 降序）
     unique_hits.sort(key=lambda h: h.score, reverse=True)
 
     # 3) 按 item 去重

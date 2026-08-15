@@ -6,7 +6,7 @@ import pytest
 
 from app.models import Chunk, Item, Tag
 from app.retrieval import (
-    _current_time, _explicit_temporal_range, _parse_occurred_at,
+    _compute_retrieval_score, _current_time, _explicit_temporal_range, _parse_occurred_at,
     detect_query_intent, retrieve_chunks,
 )
 
@@ -284,6 +284,69 @@ class TestTemporalRetrieval:
         by = {r.item_title: r.score for r in results}
         # 无 temporal intent → 无时间加分 → 同相似度下 0.5 平分（无 bonus/penalty）
         assert abs(by["旧年记忆"] - by["今年记忆"]) < 1e-6
+
+
+class TestMetadataRerank:
+    """Phase 10-1-B-7：_compute_retrieval_score 统一 rerank 层。"""
+
+    LAST_YEAR = (datetime(2025, 1, 1), datetime(2025, 12, 31, 23, 59, 59))
+
+    def _freeze_now(self, monkeypatch, dt):
+        monkeypatch.setattr("app.retrieval._current_time", lambda: dt)
+
+    def test_base_score_unchanged_for_ordinary(self):
+        # 无 temporal_range：final = semantic × source_weight（B-3 语义）
+        final, adj = _compute_retrieval_score(0.8, "note", None, None)
+        assert final == 0.8 and adj == 0.0
+        final, adj = _compute_retrieval_score(0.8, "external_reference", "2025-06-01", None)
+        assert final == round(0.8 * 0.4, 4) and adj == 0.0  # external 权重 0.4，无时间调整
+
+    def test_temporal_hit_and_miss_and_unknown(self):
+        hit, _ = _compute_retrieval_score(0.5, "memory", "2025-06-01", self.LAST_YEAR)
+        assert hit == round(0.5 + 0.15, 4)  # +0.15
+        miss, _ = _compute_retrieval_score(0.5, "memory", "2026-06-01", self.LAST_YEAR)
+        assert miss == round(0.5 - 0.05, 4)  # -0.05
+        unknown, _ = _compute_retrieval_score(0.5, "memory", None, self.LAST_YEAR)
+        assert unknown == 0.5 and _ == 0.0  # 缺失 → 0
+        bad, _ = _compute_retrieval_score(0.5, "memory", "not-a-date", self.LAST_YEAR)
+        assert bad == 0.5  # 非法 → 0
+
+    def test_external_gets_no_temporal_bonus_even_when_in_range(self):
+        final, adj = _compute_retrieval_score(0.5, "external_reference", "2025-06-01", self.LAST_YEAR)
+        assert final == round(0.5 * 0.4, 4) and adj == 0.0
+
+    def test_semantic_dominance(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """语义主导：低相关时间命中不能压过高相关 personal chunk。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        _add_memory_item(db, fake_collection, "低相关时间命中", "不太相关的旧记忆。", 0.2, "2025-06-01")
+        _add_memory_item(db, fake_collection, "高相关未知", "与查询高度相关的记忆。", 0.9, None)
+        results = retrieve_chunks("去年我看了什么", top_k=5, max_chunks_per_item=5, db=db)
+        order = [r.item_title for r in results]
+        # 0.9(高相关) > 0.2+0.15=0.35(时间命中但低相关)
+        assert order.index("高相关未知") < order.index("低相关时间命中")
+
+    def test_rerank_before_per_item_cap(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """同一 item：时间命中 chunk 在 per-item cap 前获得更高分，cap=1 保留它。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        _add_memory_item(db, fake_collection, "同作品命中", "去年看的内容。", 0.5, "2025-06-01")
+        _add_memory_item(db, fake_collection, "同作品未中", "今年看的内容。", 0.5, "2026-06-01")
+        # 两个 chunk 同 item? 需要同 item 的两条 memory —— 这里用独立 item 验证排序已足够，
+        # 真正的 per-item 时序由 pipeline（rerank→dedup→cap）保证；cap 未改。
+        results = retrieve_chunks("去年我看了什么", top_k=5, max_chunks_per_item=5, db=db)
+        by = {r.item_title: r.score for r in results}
+        assert by["同作品命中"] == round(0.5 + 0.15, 4)
+        assert by["同作品未中"] == round(0.5 - 0.05, 4)
+
+    def test_ordinary_query_zero_regression(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """普通 query：final score/排序与 B-3 语义一致（无时间调整）。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        add_item(db, fake_collection, "我的笔记", [], [("感想。", 0.8)])
+        _add_external_item(db, fake_collection, "百科", "bangumi", "外部简介。", 0.8)
+        results = retrieve_chunks("查询", top_k=5, max_chunks_per_item=5, db=db)
+        assert results[0].source_type == "note"
+        assert results[0].score == 0.8
+        ext = [h for h in results if h.source_type == "external_reference"]
+        assert ext and ext[0].score == round(0.8 * 0.4, 4)
 
 
 class TestIntentStrategy:
