@@ -46,7 +46,7 @@ class TestIpLiteral:
             check_ssrf_target(url, resolve=False)
 
     def test_allows_public_ip(self):
-        check_ssrf_target("http://8.8.8.8/x", resolve=False)  # 公网 IP 放行
+        check_ssrf_target("http://8.8.8.8/x", resolve=False)
 
     def test_allows_public_domain(self):
         # 创建时 resolve=False 对域名不做解析，直接放行（请求时才解析）

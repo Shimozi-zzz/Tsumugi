@@ -77,7 +77,6 @@ export default function CommandPalette({ open, onClose, ctx, commands }) {
           animation: "var(--motion-open)",
           animationName: "cp-enter",
         }}>
-        {/* 卡头：馆藏检索 */}
         <div className="px-5 pt-4 pb-3 border-b" style={{ borderColor: "var(--panel-border)" }}>
           <div className="flex items-baseline gap-3">
             <span className="tsm-heading" style={{ color: "var(--text)", fontSize: 16, fontWeight: 600, letterSpacing: "0.04em" }}>

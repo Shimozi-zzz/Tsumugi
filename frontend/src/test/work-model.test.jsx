@@ -69,7 +69,7 @@ describe("详情页内联编辑（外部世界区）", () => {
     render(<ItemDetailPanel itemId={1} />);
     await waitFor(() => expect(screen.getByText("空之境界")).toBeTruthy());
     const sel = screen.getByTitle("作品类型（可手动修正）");
-    expect(sel.value).toBe("anime");
+    await waitFor(() => expect(sel.value).toBe("anime"));
     fireEvent.change(sel, { target: { value: "galgame" } });
     await waitFor(() => expect(sel.value).toBe("galgame"));
     const patchCall = global.fetch.mock.calls.find((c) => String(c[0]).includes("/work"));
@@ -91,7 +91,7 @@ describe("详情页内联编辑（外部世界区）", () => {
     // 收藏时间展示
     expect(screen.getByText(/收藏于 2026-08-01/)).toBeTruthy();
     const sel = screen.getByTitle("收藏状态（可手动修正）");
-    expect(sel.value).toBe("看完");
+    await waitFor(() => expect(sel.value).toBe("看完"));
     fireEvent.change(sel, { target: { value: "搁置" } });
     await waitFor(() => expect(sel.value).toBe("搁置"));
     const patchCall = global.fetch.mock.calls.find((c) => String(c[0]).includes("/collection"));

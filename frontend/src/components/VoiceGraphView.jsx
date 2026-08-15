@@ -120,7 +120,6 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
 
   return (
     <div className={className}>
-      {/* 顶部：搜索框 + 概览入口 */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="voice-search-control flex items-center gap-2 px-3.5 py-2 flex-1 min-w-[220px]"
           style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--input-border)" }}>
@@ -241,7 +240,6 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
                 </g>
               );
             })}
-            {/* 作品节点 */}
             {egoGraph.works.map((w) => (
               <g key={w.item_id} onClick={() => onOpenWork?.(w.item_id)} style={{ cursor: "pointer" }}
                 role="button" tabIndex={0} aria-label={w.title}
@@ -255,7 +253,6 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
                 )}
               </g>
             ))}
-            {/* 角色小圆点 */}
             {egoGraph.chars.map((ch, i) => (
               <circle key={"ch" + i} cx={ch.x} cy={ch.y} r="3" fill="var(--tag-bg)" stroke="var(--tag-text)"
                 strokeWidth="1" onClick={() => onOpenWork?.(ch.work_id)} style={{ cursor: "pointer" }}
@@ -264,7 +261,6 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
                 <title>{`${ch.name}（${egoGraph.actor.name} 配音）`}</title>
               </circle>
             ))}
-            {/* 共同出演声优（外环） */}
             {egoGraph.coActors.map((c) => (
               <g key={c.name} onClick={() => selectActorByName(c.name)} style={{ cursor: "pointer" }}
                 role="button" tabIndex={0} aria-label={`声优：${c.name}`}
@@ -279,7 +275,6 @@ export default function VoiceGraphView({ focusActor, onOpenWork, className = "" 
                 )}
               </g>
             ))}
-            {/* 中心声优 */}
             <circle cx={egoGraph.actor.x} cy={egoGraph.actor.y} r="26" fill="var(--accent)" stroke="var(--accent-hover)" strokeWidth="2">
               <title>{`${egoGraph.actor.name}：配音 ${egoGraph.actor.work_count} 部作品`}</title>
             </circle>

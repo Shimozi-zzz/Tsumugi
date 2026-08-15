@@ -125,7 +125,6 @@ export default function YearlySummary({ year: propYear, className = "" }) {
       <div className="border p-3 overflow-x-auto mt-3"
         style={{ backgroundColor: "var(--surface-1)", borderColor: "var(--panel-border)", borderRadius: "var(--radius-card)" }}>
         <svg width={grid.cols * sw} height={height + 18} viewBox={`0 0 ${grid.cols * sw} ${height + 18}`} role="img" aria-label={`${year} 年活跃度热力图`}>
-          {/* 月份标签 */}
           {Object.entries(grid.monthCol).map(([m, col]) => (
             <text key={m} x={col * sw + CELL / 2} y={10} fontSize="9" textAnchor="middle"
               fill="var(--text-secondary)">{m}</text>

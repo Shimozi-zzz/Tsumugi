@@ -276,7 +276,7 @@ class TestMemoryVectorMetadata:
         item = _mk_item(db, title="作品")
         mem = memories.create_direct_memory(item.id, ("这是一个很长的记忆片段，用于触发多个向量分块。" * 40), "text", db=db)  # 无 emotion
         metas = self._memory_metas(fake_collection, mem)
-        assert len(metas) > 1  # 多 chunk
+        assert len(metas) > 1
         for m in metas:
             assert "emotion" not in m
             assert "occurred_at" in m
@@ -359,9 +359,7 @@ class TestSearchMy:
         assert any(w["title"] == "孤独笔记" for w in body["works"])
         assert any(rev["title"] == "孤独有感" for rev in body["reviews"])
         assert any(m["id"] == mem.id for m in body["memories"])
-        # 空查询 → 全空
         assert client.get("/api/search/my", params={"q": ""}).json() == {"works": [], "reviews": [], "memories": []}
-        # 无命中
         assert client.get("/api/search/my", params={"q": "不存在的词xyz"}).json() == {"works": [], "reviews": [], "memories": []}
 
     def test_memories_search_text_filter(self, client, db, fake_collection, patch_embeddings):
@@ -395,7 +393,7 @@ class TestBackfill:
 
     def test_backfill_skips_reviews_already_having_memory(self, db, fake_collection, patch_embeddings):
         item = _mk_item(db, content="内容B" * 20)
-        r = reviews.create_review(item.id, "新书评内容" * 5, db=db)  # 已有 Memory
+        r = reviews.create_review(item.id, "新书评内容" * 5, db=db)
         assert memories.backfill_reviews(db.bind) == 0
         assert db.query(Memory).filter(Memory.source_ref == r.id).count() == 1
 
@@ -486,7 +484,6 @@ class TestApi:
         client.patch(f"/api/reviews/{rev_id}", json={"title": "改后标题"})
         assert client.get(f"/api/items/{item.id}/memories").json()[0]["summary"] == "改后标题"
 
-        # 全局查询
         g = client.get("/api/memories?item_id={}".format(item.id)).json()
         assert len(g) == 1
 

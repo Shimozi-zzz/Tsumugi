@@ -124,7 +124,6 @@ export default function InspectorPanel() {
   return (
     <div className="desk-askbar rounded-2xl p-5"
       style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
-      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-medium tracking-wide">Text &amp; Vector Storage Inspector</h3>
         <div className="flex items-center gap-2">
@@ -140,7 +139,6 @@ export default function InspectorPanel() {
 
       {error && <p className="text-xs mb-3" style={{ color: "var(--danger)" }}>{error}</p>}
 
-      {/* Top Row: 4 metric cards */}
       <div className="grid grid-cols-4 gap-3 mb-4">
         {cards.length === 0
           ? Array.from({ length: 4 }).map((_, i) => (
@@ -160,7 +158,6 @@ export default function InspectorPanel() {
             ))}
       </div>
 
-      {/* Bottom: donut + bars */}
       {data && (
         <div className="grid grid-cols-2 gap-4">
           <div>

@@ -150,7 +150,6 @@ export default function ReviewPanel({ item, onClose, refreshItems }) {
       <div className="desk-askbar flex flex-col w-full max-w-3xl max-h-[86vh]"
         onClick={(e) => e.stopPropagation()}
         style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
-        {/* header */}
         <div className="flex items-center justify-between px-6 py-4 border-b"
           style={{ borderColor: "var(--panel-border)" }}>
           <div className="min-w-0">
@@ -183,10 +182,8 @@ export default function ReviewPanel({ item, onClose, refreshItems }) {
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           {error && <p className="text-xs" style={{ color: "var(--danger)" }}>{error}</p>}
 
-          {/* 文档式书写区 */}
           {showForm && (
             <div className="doc-editor" style={{ maxWidth: "70ch", margin: "0 auto" }}>
-              {/* 标题：文档标题样式 */}
               <input
                 placeholder="标题（可选）"
                 value={form.title}
@@ -194,7 +191,6 @@ export default function ReviewPanel({ item, onClose, refreshItems }) {
                 className="w-full bg-transparent outline-none font-semibold"
                 style={{ fontSize: 20, color: "var(--text)", borderBottom: "1px solid var(--panel-border)", paddingBottom: 10, marginBottom: 12 }}
               />
-              {/* 编辑器工具栏：字号 + Markdown 格式 */}
               <div className="flex items-center gap-1 flex-wrap mb-2 pb-2"
                 style={{ borderBottom: "1px solid var(--panel-border)" }}>
                 <select
@@ -216,7 +212,6 @@ export default function ReviewPanel({ item, onClose, refreshItems }) {
                   Markdown · 支持 # 标题、**加粗**、- 列表等
                 </span>
               </div>
-              {/* 正文：写/预览 */}
               {preview ? (
                 <div className="doc rounded-xl px-5 py-4 min-h-[40vh]"
                   style={{ backgroundColor: "var(--input-bg)", border: "1px solid var(--panel-border)", fontSize: `${form.font_size}px` }}
@@ -234,7 +229,6 @@ export default function ReviewPanel({ item, onClose, refreshItems }) {
                   }}
                 />
               )}
-              {/* 元信息 + 操作条 */}
               <div className="flex items-center gap-3 mt-4 flex-wrap">
                 <label className="flex items-center gap-1 text-xs" style={{ color: "var(--text-secondary)" }}>
                   评分
@@ -278,7 +272,6 @@ export default function ReviewPanel({ item, onClose, refreshItems }) {
             </div>
           )}
 
-          {/* 列表：Markdown 渲染成文档 */}
           {reviews.length === 0 && !showForm && (
             <div className="text-center py-10 text-sm" style={{ color: "var(--text-secondary)" }}>
               还没有书评
@@ -344,7 +337,6 @@ export default function ReviewPanel({ item, onClose, refreshItems }) {
           })}
         </div>
 
-        {/* footer */}
         <div className="px-6 py-3 border-t flex justify-end"
           style={{ borderColor: "var(--panel-border)" }}>
           {!showForm && (

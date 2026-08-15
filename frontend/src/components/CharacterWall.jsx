@@ -92,14 +92,12 @@ export default function CharacterWall({ refreshKey, onOpenWork, onOpenVoice }) {
         </div>
       )}
 
-      {/* 档案索引行：mono CHARACTER INDEX + 册数 + hairline */}
       <div className="char-index">
         <span className="char-index-label">CHARACTER INDEX</span>
         <span className="char-index-count">{chars.length} 位</span>
         <span className="char-index-rule" aria-hidden />
       </div>
 
-      {/* 档案索引条目（radius-card / mono 编目 / serif 人名 / quiet meta） */}
       <div className="char-grid">
         {chars.map((c, i) => {
           const active = selected && (c.id ?? c.name) === (selected.id ?? selected.name) && c.source === selected.source;

@@ -170,7 +170,7 @@ def _ingest_sync(
                     db, ingest.compute_bytes_hash(raw_bytes)
                 )
                 if existing is not None:
-                    return _ingest_response(existing, duplicated=True)  # 不写重复文件
+                    return _ingest_response(existing, duplicated=True)
             os.makedirs(settings.upload_dir, exist_ok=True)
             saved_name = f"{uuid.uuid4().hex}{ext}"
             file_path = os.path.join(settings.upload_dir, saved_name)

@@ -165,7 +165,6 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
       {units.map((unit) => (
         unit.shared ? (
           <div key="__shared" className="shelf-unit shelf-unit-shared" data-testid="shelf-shared">
-            {/* 共享架主索引：serif + mono 册数 + hairline */}
             <div className="shelf-index">
               <span className="shelf-index-name">零散藏书</span>
               <span className="shelf-index-count">{unit.groups.reduce((n, sg) => n + sg.items.length, 0)} 册</span>
@@ -191,7 +190,6 @@ export default function Bookshelf({ items, coverOf, onOpenItem, selectMode, sele
           </div>
         ) : (
           <div key={unit.group.tag} className="shelf-unit" data-testid="shelf-group">
-            {/* 分类索引：serif 分类名 + mono 册数 + hairline 延伸线（比书安静） */}
             <div className="shelf-index" data-testid="shelf-label">
               <span className="shelf-index-name">{unit.group.tag}</span>
               <span className="shelf-index-count">{unit.group.items.length} 册</span>

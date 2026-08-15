@@ -104,7 +104,6 @@ export function buildShareCardSvg({
   const titleLines = wrapText(String(title || "未命名"), 16).slice(0, 2);
   const titleY = 524;
 
-  // 评分区
   let ratingBlock = "";
   if (typeof rating === "number") {
     ratingBlock = [
@@ -114,7 +113,6 @@ export function buildShareCardSvg({
     ].join("\n");
   }
 
-  // 短评区
   let quoteBlock = "";
   if (quote) {
     const lines = wrapText(quote, 20).slice(0, 3);

@@ -39,7 +39,6 @@ export function buildCommands(ctx) {
     });
   }
 
-  // 预定义动作
   commands.push(
     { id: "note-new", group: "动作", title: "新建笔记", icon: "＋", keywords: ["新建笔记", "创建笔记", "笔记", "导入", "添加"],
       run: () => ctx.openImport() },
@@ -77,7 +76,6 @@ export function buildCommands(ctx) {
     });
   }
 
-  // 标签跳转
   for (const t of ctx.tags || []) {
     const name = typeof t === "string" ? t : t.name;
     if (!name) continue;

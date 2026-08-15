@@ -17,7 +17,6 @@ import app.models  # noqa: F401  确保 ORM 模型注册到 metadata
 # 使环境变量占位符 {VAR} 在重启后仍能解析（pydantic-settings 只读 Settings 字段）
 load_dotenv()
 
-# 确保数据目录存在
 os.makedirs(settings.upload_dir, exist_ok=True)
 os.makedirs(settings.chroma_persist_directory, exist_ok=True)
 os.makedirs(settings.thumbnails_dir, exist_ok=True)

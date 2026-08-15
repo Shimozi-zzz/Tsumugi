@@ -45,7 +45,7 @@ class TestValidateProxy:
             validate_proxy_url("http://127.0.0.1:7890", allow_loopback=False)
 
     def test_allows_public_ip_proxy(self):
-        validate_proxy_url("http://8.8.8.8:8080")  # 公网 IP 放行
+        validate_proxy_url("http://8.8.8.8:8080")
 
     def test_allows_public_domain_proxy(self, monkeypatch):
         import socket
@@ -185,7 +185,7 @@ class TestSharedInfra:
         b.acquire()  # 不抛错即可
 
     def test_https_public_proxy_allowed(self):
-        validate_proxy_url("https://8.8.8.8:8080")  # https 公网代理放行
+        validate_proxy_url("https://8.8.8.8:8080")
 
 
 # ---------------------------------------------------------------- API（保存/测试代理）

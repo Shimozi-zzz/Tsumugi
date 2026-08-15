@@ -303,7 +303,6 @@ export default function ReviewStudio({ item, onClose, refreshItems }) {
     <div className={`review-studio fixed inset-0 z-50 overflow-hidden${closing ? " closing" : ""}`}>
       {cover && <div className="rs-bg" style={{ backgroundImage: `url(${cover})` }} />}
       <div className="relative h-full w-full flex flex-col" style={{ padding: 18 }}>
-        {/* 顶部栏 */}
         <div className="rs-panel flex items-center gap-3 px-4 py-2.5 mb-3">
           <button onClick={handleClose} className="text-sm px-2 py-1 rounded-lg hover:opacity-75"
             style={{ color: "var(--text-secondary)" }}>← 返回</button>
@@ -323,7 +322,6 @@ export default function ReviewStudio({ item, onClose, refreshItems }) {
         </div>
 
         <div className="grid gap-3 flex-1 min-h-0" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.15fr)" }}>
-          {/* 左：参考区 */}
           <div className="rs-panel flex flex-col min-h-0">
             <div className="flex gap-1 px-3 pt-3 pb-2 border-b" style={{ borderColor: "var(--panel-border)" }}>
               {TABS.map((t) => (
@@ -485,7 +483,6 @@ export default function ReviewStudio({ item, onClose, refreshItems }) {
             </div>
           </div>
 
-          {/* 右：编辑器 */}
           <div className="rs-panel relative flex flex-col min-h-0">
             <div className="px-5 pt-4 pb-2" style={{ maxWidth: READ_WIDTH, margin: "0 auto", width: "100%" }}>
               <input
@@ -538,12 +535,10 @@ export default function ReviewStudio({ item, onClose, refreshItems }) {
                 )}
               </div>
             </div>
-            {/* 浮动引用卡 */}
             <div className="rs-quote">
               <div className="text-[10px] mb-1" style={{ color: "var(--accent)" }}>引用卡</div>
               <div className="line-clamp-3">“{quote || "在正文里用 > 写一句引用，会浮现到这里" }”</div>
             </div>
-            {/* 底部：评分/状态/操作 */}
             <div className="px-5 py-3 border-t" style={{ borderColor: "var(--panel-border)" }}>
               {error && <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>{error}</p>}
               <div className="flex items-center gap-3 flex-wrap">

@@ -65,7 +65,6 @@ export default function ProviderSettings() {
 
   return (
     <div className="space-y-4">
-      {/* 预设选择 */}
       <div className="desk-askbar rounded-2xl p-5"
         style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
         <h3 className="text-sm font-medium mb-2">选择模型后端</h3>
@@ -78,7 +77,6 @@ export default function ProviderSettings() {
           ))}
         </div>
 
-        {/* 表单 */}
         <form onSubmit={handleSave} className="flex flex-col gap-2.5">
           <input placeholder="配置名称（如 deepseek / ollama）" value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -115,7 +113,6 @@ export default function ProviderSettings() {
         </form>
       </div>
 
-      {/* Ollama 引导 */}
       <div className="desk-askbar rounded-2xl p-5"
         style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
         <h3 className="text-sm font-medium mb-2">Ollama 本地方案</h3>
@@ -151,7 +148,6 @@ export default function ProviderSettings() {
         )}
       </div>
 
-      {/* 已保存配置列表 */}
       <div className="desk-askbar rounded-2xl p-5"
         style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
         <h3 className="text-sm font-medium mb-2">已保存配置</h3>

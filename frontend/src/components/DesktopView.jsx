@@ -582,7 +582,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     }
   }
 
-  // ---- 批量选择 ----
   function toggleSelect(id) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -628,7 +627,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     }
   }
 
-  // ---- 右键菜单 ----
   function openCtxMenu(e, it) {
     e.preventDefault();
     if (selectMode) return; // 选择模式下右键不干扰
@@ -1936,7 +1934,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   </p>
                 </div>
 
-                {/* 文字涂鸦（自定义位置） */}
                 <div className="desk-askbar p-5">
                   <h3 className="text-sm font-medium mb-3">文字涂鸦</h3>
                   <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
@@ -1963,12 +1960,10 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               </div>
             )}
 
-            {/* 模型 Provider */}
             {settingsTab === "model" && (
               <ProviderSettings />
             )}
 
-            {/* Bangumi 连接 + 批量导入 */}
             {settingsTab === "bangumi" && (
               <BangumiPanel onRecord={(n) => {
                 setSection("library");
@@ -2009,7 +2004,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               </div>
             )}
 
-            {/* 数据源 */}
             {settingsTab === "sources" && (
               <div className="desk-askbar rounded-2xl p-5"
                 style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
@@ -2138,7 +2132,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   </div>
                 )}
 
-                {/* 插件列表 */}
                 <div className="desk-askbar rounded-2xl p-5"
                   style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)" }}>
                   <div className="flex items-center justify-between mb-1">
@@ -2270,7 +2263,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       <input ref={coverFileRef} type="file" accept="image/*" className="hidden"
         onChange={handleCoverFile} />
 
-      {/* 书评工作室 */}
       {reviewItem && (
         <ReviewStudio
           item={reviewItem}
@@ -2310,7 +2302,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         <ShareCardModal item={{ id: shareItem }} onClose={() => setShareItem(null)} />
       )}
 
-      {/* 右键上下文菜单 */}
       {ctxMenu && (
         <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={ctxItems()} onClose={() => setCtxMenu(null)} />
       )}
@@ -2326,13 +2317,11 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           memory={openMem.memory} onClose={() => setOpenMem(null)} />
       )}
 
-      {/* 快捷键说明 */}
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
 
       {/* 命令面板（ADR 0031：Ctrl/Cmd+K） */}
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} ctx={cmdCtx} />
 
-      {/* 新建分组浮层 */}
       {showGroupModal && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(10,12,20,0.45)" }}
@@ -2390,7 +2379,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 className="text-xs px-2 py-0.5 rounded-lg"
                 style={{ color: "var(--text-secondary)" }}>✕</button>
             </div>
-            {/* tab：文件 / 笔记 */}
             <div className="flex gap-1 mb-4 p-1 rounded-xl"
               style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
               {[["file", "上传文件"], ["note", "创建笔记"]].map(([k, label]) => (
@@ -2459,7 +2447,6 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         })}
       </nav>
     </div>
-      {/* 全局 toast */}
       <ToastHost />
     </>
   );

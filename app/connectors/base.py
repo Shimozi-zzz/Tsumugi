@@ -295,7 +295,7 @@ class DeclarativeConnector:
             base_url=str(config.get("base_url", "")),
             capabilities=["search"],
         )
-        self._bucket = None  # 复用 base 的限流？此处用简单节流
+        self._bucket = None
         # 出站代理（可选，None=直连）；也可由 registry.apply_settings 注入
         self.proxy_url = config.get("proxy_url") or None
         self._validate()

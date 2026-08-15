@@ -107,7 +107,6 @@ export function pickLabels(candidates, forcedKeys = []) {
   return new Set(accepted.map((a) => a.key));
 }
 
-/** 截断文本。 */
 export function shortText(s, max) {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }

@@ -86,7 +86,7 @@ export async function deleteItem(id) {
   if (!resp.ok) throw new Error("删除失败");
 }
 
-// ---- 批量操作 / 单条标签（交互打磨）----
+// ---- 批量操作 / 单条标签 ----
 export async function batchTagItems(itemIds, tagNames, mode = "add") {
   const resp = await fetch(`${API_BASE}/items/batch/tags`, {
     method: "POST",
@@ -209,7 +209,6 @@ export async function fetchBangumiImportStatus(jobId) {
   return body;
 }
 
-// 上传条目封面图
 export async function uploadItemCover(id, file) {
   const fd = new FormData();
   fd.append("file", file);
