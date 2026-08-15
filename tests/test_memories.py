@@ -82,7 +82,7 @@ class TestReviewCreateAutoMemory:
         assert len(mem.summary) <= 41  # 40 字 + 省略号
         assert mem.summary.endswith("…")
 
-    def test_review_embedding_failure_rolls_back_memory(self, db, fake_collection, monkeypatch):
+    def test_review_embedding_failure_rolls_back_memory(self, db, fake_collection, patch_embeddings, monkeypatch):
         from app.embeddings import EmbeddingError
         item = _mk_item(db)
         def boom(texts):
@@ -183,20 +183,20 @@ class TestOnThisDay:
 class TestDirectMemory:
     """P3 / ADR 0047：轻量文字/里程碑 Memory 直接创建、情绪、媒体附件。"""
 
-    def test_create_text_memory(self, db):
+    def test_create_text_memory(self, db, fake_collection, patch_embeddings):
         item = _mk_item(db)
         mem = memories.create_direct_memory(item.id, "今天把这段重新看了一遍。", "text", emotion="感动", db=db)
         assert mem.source_type == "text"
         assert mem.emotion == "感动"
         assert mem.summary == "今天把这段重新看了一遍。"
 
-    def test_create_milestone(self, db):
+    def test_create_milestone(self, db, fake_collection, patch_embeddings):
         item = _mk_item(db)
         mem = memories.create_direct_memory(item.id, "完成了这部作品。", "milestone", db=db)
         assert mem.source_type == "milestone"
         assert mem.emotion is None
 
-    def test_invalid(self, db):
+    def test_invalid(self, db, fake_collection, patch_embeddings):
         item = _mk_item(db)
         with pytest.raises(ValueError):
             memories.create_direct_memory(item.id, "x", "review", db=db)  # review 不允许直接建
@@ -205,7 +205,7 @@ class TestDirectMemory:
         with pytest.raises(ValueError):
             memories.create_direct_memory(99999, "x", "text", db=db)
 
-    def test_delete_direct_only(self, db):
+    def test_delete_direct_only(self, db, fake_collection, patch_embeddings):
         item = _mk_item(db)
         mem = memories.create_direct_memory(item.id, "一条轻量记录", "text", db=db)
         assert memories.delete_direct_memory(mem.id, db=db) is True
