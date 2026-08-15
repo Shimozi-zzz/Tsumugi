@@ -57,6 +57,39 @@ def detect_query_intent(query: str) -> QueryIntent:
 TEMPORAL_BONUS = 0.15   # 明确时间范围内命中的个人 chunk 加分
 TEMPORAL_PENALTY = 0.05  # 明确位于范围外的个人 chunk 减分
 RECENT_WINDOW_DAYS = 30  # 「最近」固定窗口（项目无既有定义，采用 30 天）
+EMOTION_BONUS = 0.08     # 情绪意图 + 匹配 emotion → 小幅加分（B-8）
+MILESTONE_BONUS = 0.08   # 里程碑意图 + milestone=true → 小幅加分（B-8）
+
+# B-8：确定性情绪 / 里程碑意图关键词（不引入 LLM；保守弱信号）
+EMOTION_KEYWORDS = ("印象", "难忘", "喜欢", "讨厌", "感动", "开心", "难过", "震撼", "怀念", "情绪", "感受", "感想")
+MILESTONE_KEYWORDS = ("第一次", "第一个", "初次", "入坑", "开始", "起点", "纪念", "里程碑")
+_EMOTION_GROUPS = (
+    ("感动", "震撼", "难忘", "打动"),
+    ("开心", "喜欢", "快乐"),
+    ("怀念", "印象", "想念"),
+    ("难过", "遗憾", "伤心", "讨厌"),
+    ("平静", "治愈"),
+)
+
+
+def _emotion_intent(query: str) -> bool:
+    return any(k in (query or "") for k in EMOTION_KEYWORDS)
+
+
+def _milestone_intent(query: str) -> bool:
+    return any(k in (query or "") for k in MILESTONE_KEYWORDS)
+
+
+def _emotion_matches(query: str, emotion) -> bool:
+    """确定性情绪匹配：query 含情绪意图，且 chunk 的 emotion 值与 query 落在同一情绪组。
+    未知/空/非法 emotion → 不匹配（保守，无虚假 boost）；泛化情绪词（情绪/感受/感想）对
+    未知情绪值视为匹配。"""
+    if not emotion or not _emotion_intent(query):
+        return False
+    for group in _EMOTION_GROUPS:
+        if emotion in group:
+            return any(k in query for k in group)
+    return any(k in query for k in ("情绪", "感受", "感想"))
 
 
 def _current_time() -> datetime:
@@ -115,15 +148,19 @@ def _compute_retrieval_score(
     source_type: str,
     occurred_at: Optional[str] = None,
     temporal_range: Optional[tuple] = None,
+    emotion: Optional[str] = None,
+    milestone: Optional[bool] = None,
+    query: str = "",
 ) -> tuple:
-    """构造最终检索 score（Phase 10-1-B-7 统一 rerank 层）。
+    """构造最终检索 score（Phase 10-1-B-7/8 统一 rerank 层）。
 
-    base = semantic × _source_weight（保持 B-3 语义：memory/review/note=1.0，external=0.4）
-    temporal adjustment：仅当提供 temporal_range 时对 personal source 生效——
-      within +TEMPORAL_BONUS / outside -TEMPORAL_PENALTY / occurred_at 缺失或非法 0；
-      external 不获得 temporal 调整。
-    返回 (final_score, temporal_adj)。独立、可测试；未来可在此层安全加入 emotion/milestone
-    signal（本阶段不启用）。
+    final = base(semantic × _source_weight) + temporal_adj + metadata_adj
+    - temporal：仅提供 temporal_range 时对 personal source 生效（+0.15/−0.05/缺失 0）
+    - metadata（B-8）：仅 personal source——
+      emotion：query 情绪意图且 emotion 值匹配 → +EMOTION_BONUS（缺失/未知/非法 0）
+      milestone：query 里程碑意图且 milestone=true → +MILESTONE_BONUS（false/缺失 0）
+    - external_reference 永不获得 temporal/emotion/milestone 调整，也不因缺 metadata 被罚。
+    返回 (final_score, total_adjustment)。独立、可测试；未来可在此层继续叠加信号。
     """
     temporal_adj = 0.0
     if temporal_range is not None and source_type in ("memory", "review", "note"):
@@ -134,8 +171,14 @@ def _compute_retrieval_score(
                 temporal_adj = TEMPORAL_BONUS
             else:
                 temporal_adj = -TEMPORAL_PENALTY
+    metadata_adj = 0.0
+    if source_type in ("memory", "review", "note"):
+        if _emotion_matches(query, emotion):
+            metadata_adj += EMOTION_BONUS
+        if _milestone_intent(query) and milestone is True:
+            metadata_adj += MILESTONE_BONUS
     base = semantic_score * _source_weight(source_type)
-    return round(base + temporal_adj, 4), round(temporal_adj, 4)
+    return round(base + temporal_adj + metadata_adj, 4), round(temporal_adj + metadata_adj, 4)
 
 
 def _resolve_item_meta(
@@ -293,6 +336,8 @@ def _retrieve(
 
     hits: List[RetrievedChunk] = []
     occ_by_content: Dict[str, str] = {}  # content -> occurred_at（B-5 新 metadata；旧向量无键）
+    emo_by_content: Dict[str, str] = {}  # content -> emotion（B-5；B-8 使用）
+    mil_by_content: Dict[str, bool] = {}  # content -> milestone（B-5；B-8 使用）
     for ref, doc, meta, dist in zip(ids, docs, metas, dists):
         if not doc or not meta:
             continue
@@ -308,6 +353,10 @@ def _retrieve(
             connector = connector or db_conn
         if meta.get("occurred_at"):
             occ_by_content[doc] = meta["occurred_at"]
+        if meta.get("emotion"):
+            emo_by_content[doc] = meta["emotion"]
+        if meta.get("milestone") is not None:
+            mil_by_content[doc] = meta["milestone"]
         hits.append(
             RetrievedChunk(
                 content=doc,
@@ -337,12 +386,14 @@ def _retrieve(
         allowed = set(source_types)
         hits = [h for h in hits if h.source_type in allowed]
 
-    # Phase 10-1-B-7：metadata rerank（统一构造最终 score；当前仅 occurred_at temporal signal）。
-    # 模糊时间词（以前/之前/那时候/当时）→ temporal_range=None → 不加不减；普通问题亦如此。
+    # Phase 10-1-B-7/8：metadata rerank（统一构造最终 score；temporal + emotion + milestone）。
+    # 模糊时间词（以前/之前/那时候/当时）→ temporal_range=None → 时间不加不减；普通问题亦如此。
     temporal_range = _explicit_temporal_range(query, _current_time()) if intent.temporal else None
     for h in hits:
         h.score, _ = _compute_retrieval_score(
-            h.score, h.source_type, occ_by_content.get(h.content), temporal_range,
+            h.score, h.source_type,
+            occ_by_content.get(h.content), temporal_range,
+            emo_by_content.get(h.content), mil_by_content.get(h.content), query,
         )
 
     # 1) 内容去重

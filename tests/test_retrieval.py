@@ -185,6 +185,11 @@ def _add_source_item(db, col, title, source_type, content, sim):
 
 def _add_memory_item(db, col, title, content, sim, occurred_at):
     """创建带 occurred_at metadata 的 memory chunk（B-5 形态；None → 省略该键=旧向量）。"""
+    return _add_memory_item_full(db, col, title, content, sim, occurred_at, None, None)
+
+
+def _add_memory_item_full(db, col, title, content, sim, occurred_at=None, emotion=None, milestone=None):
+    """创建带 emotion / milestone / occurred_at metadata 的 memory chunk（B-5/B-8 形态）。"""
     item = Item(title=title, type="note", source="local")
     db.add(item)
     db.flush()
@@ -194,6 +199,10 @@ def _add_memory_item(db, col, title, content, sim, occurred_at):
     meta = {"item_id": item.id, "chunk_index": 0, "source_type": "memory"}
     if occurred_at:
         meta["occurred_at"] = occurred_at
+    if emotion:
+        meta["emotion"] = emotion
+    if milestone is not None:
+        meta["milestone"] = milestone
     col.add(ids=[ref], embeddings=[vec_with_similarity(sim)], documents=[content], metadatas=[meta])
     db.commit()
     return item
@@ -347,6 +356,84 @@ class TestMetadataRerank:
         assert results[0].score == 0.8
         ext = [h for h in results if h.source_type == "external_reference"]
         assert ext and ext[0].score == round(0.8 * 0.4, 4)
+
+
+class TestEmotionMilestoneSignals:
+    """Phase 10-1-B-8：emotion / milestone 确定性信号（经 _compute_retrieval_score）。"""
+
+    def _freeze_now(self, monkeypatch, dt):
+        monkeypatch.setattr("app.retrieval._current_time", lambda: dt)
+
+    def test_emotion_intent_and_matching_emotion_boost(self):
+        final, _ = _compute_retrieval_score(0.5, "memory", None, None,
+                                            emotion="怀念", milestone=None, query="哪些作品让我印象深刻")
+        assert final == round(0.5 + 0.08, 4)  # 印象 ∈ 怀念组 → +0.08
+
+    def test_emotion_intent_and_nonmatching_emotion_no_boost(self):
+        final, _ = _compute_retrieval_score(0.5, "memory", None, None,
+                                            emotion="平静", milestone=None, query="哪些作品让我印象深刻")
+        assert final == 0.5  # 平静组无 query 关键词 → 不加
+
+    def test_no_emotion_intent_zero(self):
+        final, _ = _compute_retrieval_score(0.5, "memory", None, None,
+                                            emotion="怀念", milestone=None, query="这部作品是什么")
+        assert final == 0.5
+
+    def test_missing_and_invalid_emotion_zero(self):
+        assert _compute_retrieval_score(0.5, "memory", None, None, None, None, "印象最深")[0] == 0.5
+        assert _compute_retrieval_score(0.5, "memory", None, None, "zzz", None, "印象最深")[0] == 0.5
+
+    def test_milestone_intent_and_true_boost(self):
+        final, _ = _compute_retrieval_score(0.5, "memory", None, None, None, True, "第一次看这部作品")
+        assert final == round(0.5 + 0.08, 4)
+
+    def test_milestone_intent_false_and_missing_zero(self):
+        assert _compute_retrieval_score(0.5, "memory", None, None, None, False, "第一次看这部作品")[0] == 0.5
+        assert _compute_retrieval_score(0.5, "memory", None, None, None, None, "第一次看这部作品")[0] == 0.5
+
+    def test_no_milestone_intent_zero(self):
+        assert _compute_retrieval_score(0.5, "memory", None, None, None, True, "这部作品是什么")[0] == 0.5
+
+    def test_external_never_gets_metadata_boost(self):
+        final, _ = _compute_retrieval_score(0.5, "external_reference", None, None,
+                                            emotion="怀念", milestone=True, query="印象最深的第一次")
+        assert final == round(0.5 * 0.4, 4)  # external 权重 0.4，无 emotion/milestone 加分
+
+    def test_temporal_plus_emotion_stack(self):
+        final, _ = _compute_retrieval_score(0.5, "memory", "2025-06-01", (datetime(2025, 1, 1), datetime(2025, 12, 31, 23, 59, 59)),
+                                            emotion="怀念", milestone=None, query="去年印象最深")
+        assert final == round(0.5 + 0.15 + 0.08, 4)
+
+    def test_emotion_plus_milestone_stack(self):
+        final, _ = _compute_retrieval_score(0.5, "memory", None, None,
+                                            emotion="感动", milestone=True, query="第一次看很感动")
+        assert final == round(0.5 + 0.08 + 0.08, 4)
+
+    def test_semantic_still_dominant(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """低相关三信号命中（+0.31）不能压过高相关无信号 personal。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        _add_memory_item_full(db, fake_collection, "低相关三命中", "不太相关。", 0.3, "2025-06-01", "怀念", True)
+        _add_memory_item(db, fake_collection, "高相关", "与查询高度相关的内容。", 0.9, None)
+        results = retrieve_chunks("去年印象最深的第一次", top_k=5, max_chunks_per_item=5, db=db)
+        order = [r.item_title for r in results]
+        assert order.index("高相关") < order.index("低相关三命中")  # 0.9 > 0.3+0.31=0.61
+
+    def test_old_metadata_missing_all_still_retrieves(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """历史向量无 occurred_at/emotion/milestone：emotion/milestone query 仍正常返回、不加分。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        add_item(db, fake_collection, "旧笔记", [], [("旧内容。", 0.5)])
+        results = retrieve_chunks("印象最深", top_k=5, max_chunks_per_item=5, db=db)
+        assert any(r.item_title == "旧笔记" for r in results)
+        assert [r for r in results if r.item_title == "旧笔记"][0].score == 0.5  # 无 metadata 加分
+
+    def test_recommendation_no_metadata_boost(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """推荐 query 不因 metadata 自动改变（无 emotion/milestone intent）。"""
+        self._freeze_now(monkeypatch, datetime(2026, 8, 15))
+        _add_memory_item_full(db, fake_collection, "带情绪记忆", "记忆内容。", 0.5, None, "感动", True)
+        _add_memory_item(db, fake_collection, "普通记忆", "另一条记忆。", 0.5, None)
+        results = retrieve_chunks("推荐几部作品", top_k=5, max_chunks_per_item=5, db=db)
+        by = {r.item_title: r.score for r in results}
+        assert abs(by["带情绪记忆"] - by["普通记忆"]) < 1e-6  # 无加分
 
 
 class TestIntentStrategy:
