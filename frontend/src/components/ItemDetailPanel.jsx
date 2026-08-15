@@ -436,10 +436,11 @@ export default function ItemDetailPanel({
           <div className="wd-chapter-rule" />
           {detail.source !== "local" && (
             <div className="mc mb-5">
-              {/* Phase 10-1-A-1：零记录空态引导——把"这里可以留下第一条记录"显性化 */}
+              {/* Phase 10-1-A-1 / C-1：零记录空态引导——说明记录的去处与 Ask 回想价值 */}
               {memReady && memories.length === 0 && reviews.length === 0 && (
                 <p className="mc-empty-hint">
-                  这部作品还没有你的记录——写一句此刻的感想即可，之后它会出现在时间轴与往年今日里。
+                  这部作品还没有你的记录——写一句此刻的感想即可，之后它会出现在时间轴与往年今日里，
+                  也会成为 Ask 回想你与它经历的线索。
                 </p>
               )}
               {/* 主书写区：textarea 为第一视觉焦点（Phase 4-1「留下这一刻」） */}
@@ -466,6 +467,10 @@ export default function ItemDetailPanel({
                   {draftFile ? "已附图 ✓" : "附一张图"}
                 </button>
               </div>
+              {/* Phase 10-1-C-1：价值说明——极轻一行，解释情绪/里程碑的去处（非 CTA） */}
+              <p className="mc-value-hint">
+                情绪和里程碑，会帮助时间轴与 Ask 回想这是怎样的一刻。
+              </p>
               {/* 主操作：唯一实心 accent（Phase 4-2 独立成行，视觉最明确） */}
               <div className="mc-actions">
                 <button onClick={() => submitDirect("text", draft)} disabled={!draft.trim() || recording}

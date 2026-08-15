@@ -103,7 +103,7 @@ describe("ItemDetailPanel 统一 Work Detail（Phase 3-1 迁移自 ItemDetailMod
     expect(screen.queryByText("收藏入库")).toBeNull();
   });
 
-  it("Phase 10-1-A-1：零记录作品显示第一条记录引导", async () => {
+  it("Phase 10-1-A-1/C-1：零记录作品显示第一条记录引导（含时间轴与 Ask 回想价值）", async () => {
     global.fetch = vi.fn((url) => {
       const u = String(url);
       if (u.includes("/detail")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: "X", source: "bangumi", characters: [], tags: [], description: "" }) });
@@ -112,9 +112,33 @@ describe("ItemDetailPanel 统一 Work Detail（Phase 3-1 迁移自 ItemDetailMod
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
     });
     render(<ItemDetailPanel itemId={1} />);
-    await waitFor(() => expect(screen.getByText(/还没有你的记录/)).toBeTruthy());
+    const hint = await screen.findByText(/还没有你的记录/);
+    // C-1：价值说明——时间轴用途 + Ask 回想个人经历语义（"线索"，非营销承诺）
+    expect(hint.textContent).toContain("时间轴");
+    expect(hint.textContent).toContain("Ask");
+    expect(hint.textContent).toMatch(/回想你与它经历的线索/);
     // composer 仍在
     expect(screen.getByPlaceholderText(/写一句此刻的感想/)).toBeTruthy();
+  });
+
+  it("Phase 10-1-C-1：composer 价值提示存在且现有控件不变", async () => {
+    global.fetch = vi.fn((url) => {
+      const u = String(url);
+      if (u.includes("/detail")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: "X", source: "bangumi", characters: [], tags: [], description: "" }) });
+      if (u.includes("/memories")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      if (u.includes("/reviews")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByPlaceholderText(/写一句此刻的感想/)).toBeTruthy());
+    // 价值提示（quiet mono，非 CTA）
+    expect(screen.getByText(/情绪和里程碑，会帮助时间轴与 Ask 回想/)).toBeTruthy();
+    // 现有控件全部保留：情绪 select / 附图 / 记录这一刻 / 完成了 / 重新打开
+    expect(screen.getByLabelText("情绪")).toBeTruthy();
+    expect(screen.getByLabelText("附一张图片")).toBeTruthy();
+    expect(screen.getByText("记录这一刻")).toBeTruthy();
+    expect(screen.getByText(/完成了/)).toBeTruthy();
+    expect(screen.getByText(/重新打开/)).toBeTruthy();
   });
 
   it("Phase 10-1-A-1：已有书评时不显示第一条记录引导", async () => {

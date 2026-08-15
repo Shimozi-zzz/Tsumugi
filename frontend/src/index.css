@@ -989,6 +989,9 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
 .mc { margin-bottom: var(--sp-5); }
 .mc-empty-hint { margin: 0 0 var(--sp-3); font-family: var(--font-heading); font-size: 12px;
   letter-spacing: 0.02em; color: var(--ink-2); }
+/* Phase 10-1-C-1：composer 价值说明——极轻 mono 一行，不参与交互、无背景/边框/阴影 */
+.mc-value-hint { margin: var(--sp-3) 0 0; font-family: var(--font-mono); font-size: 10px;
+  line-height: 1.6; letter-spacing: 0.02em; color: var(--ink-2); }
 .mc-write {
   width: 100%; min-height: 64px; resize: vertical;
   padding: var(--sp-3) var(--sp-4);
