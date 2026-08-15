@@ -88,3 +88,6 @@ prompts/
 /AGENTS.md
 docs/
 
+# 浏览器验证/审计截图（本地产物，不随仓库上传）：frontend/ 根目录下的验证 PNG
+frontend/*.png
+
