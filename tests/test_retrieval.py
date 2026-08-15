@@ -334,6 +334,22 @@ class TestSourceAwareCap:
         results = retrieve_chunks("这部作品什么时候播出", top_k=5, max_chunks_per_item=5, db=db)
         assert len([h for h in results if h.item_id == item.id]) == 2  # 显式 cap=5 → 不启用 entity 规则
 
+    def test_provenance_fields_flow_to_chunk(self, db, fake_collection, fixed_query_embedding):
+        """Phase 10-1-B-9：memory 的 occurred_at/emotion/milestone 进入 RetrievedChunk 并随 dump 透传。"""
+        item = _mk_plain_item(db, "作品A")
+        _add_chunk(db, fake_collection, item, "带信号的记忆", 0.9, "memory",
+                   memory_id=12, occurred_at="2025-08-12T10:00:00", emotion="怀念", milestone=True)
+        _add_chunk(db, fake_collection, item, "无信号书评", 0.8, "review", review_id=7)
+        results = retrieve_chunks("印象最深的第一次", top_k=5, max_chunks_per_item=5, db=db)
+        mem = [h for h in results if h.source_type == "memory"]
+        assert mem and mem[0].occurred_at == "2025-08-12T10:00:00"
+        assert mem[0].emotion == "怀念" and mem[0].milestone is True
+        # model_dump 向后兼容：新字段存在、旧字段保留；无信号的 chunk 字段为 None
+        dump = results[0].model_dump()
+        assert "occurred_at" in dump and "emotion" in dump and "milestone" in dump
+        rev = [h for h in results if h.source_type == "review"]
+        assert rev and rev[0].occurred_at is None and rev[0].emotion is None and rev[0].milestone is None
+
 
 class TestTemporalRange:
     def test_calendar_year_ranges(self):

@@ -48,6 +48,16 @@ function sourceTypeLabel(s) {
   return "知识库";
 }
 
+// Phase 10-1-B-9：来源 provenance——仅 memory 的真实 metadata（occurred_at/emotion/milestone）
+function sourceProvenance(s) {
+  if (!s || s.source_type !== "memory") return "";
+  const parts = [];
+  if (s.occurred_at) parts.push(String(s.occurred_at).slice(0, 10));
+  if (s.emotion) parts.push(s.emotion);
+  if (s.milestone) parts.push("里程碑");
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
 // 可排序的功能按钮（settings 固定底部、ask 固定顶部，不可移）
 const NAV = {
   ask: { key: "ask", label: "问答", icon: (
@@ -1764,6 +1774,9 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                       {sources.map((s, i) => (
                         <div key={i} className="ask-source-row">
                           <span className="ask-source-label">{sourceTypeLabel(s)}</span>
+                          {sourceProvenance(s) && (
+                            <span className="ask-source-provenance">{sourceProvenance(s)}</span>
+                          )}
                           <span className="ask-source-title">{s.item_title}</span>
                           <span className="ask-source-score">{s.score.toFixed(2)}</span>
                         </div>

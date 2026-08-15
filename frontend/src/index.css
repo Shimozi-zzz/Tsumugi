@@ -979,6 +979,8 @@ html[data-style-theme="catalog-drawer"] .archive-ph-no {
   border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 45%, transparent);
 }
 .ask-source-label { color: var(--ink-1); width: 88px; flex-shrink: 0; }
+.ask-source-provenance { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.03em;
+  color: var(--ink-2); flex-shrink: 0; white-space: nowrap; }
 .ask-source-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ask-source-score { color: var(--ink-2); }
 .ask-answer { font-size: 14px; line-height: 1.8; color: var(--ink-0); white-space: pre-wrap; font-family: var(--font-body); }

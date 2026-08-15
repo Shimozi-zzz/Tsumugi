@@ -344,6 +344,11 @@ class RetrievedChunk(BaseModel):
     # external_reference 的来源 Connector（bangumi/moegirl/vndb...），用于
     # "这段内容来自XX"展示与按数据源区分
     connector: Optional[str] = None
+    # Phase 10-1-B-9：来源 provenance（仅真实存在的 metadata）——occurred_at ISO 字符串 /
+    # emotion / milestone；不存在时为 None，前端按存在性渲染，不为 review/note/external 虚构。
+    occurred_at: Optional[str] = None
+    emotion: Optional[str] = None
+    milestone: Optional[bool] = None
 
 
 class SearchResponse(BaseModel):

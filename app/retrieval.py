@@ -386,6 +386,13 @@ def _retrieve(
             mil_by_content[doc] = meta["milestone"]
         if meta.get("memory_id") is not None:
             memid_by_content[doc] = meta["memory_id"]
+        prov = {}
+        if meta.get("occurred_at"):
+            prov["occurred_at"] = meta["occurred_at"]
+        if meta.get("emotion"):
+            prov["emotion"] = meta["emotion"]
+        if meta.get("milestone") is not None:
+            prov["milestone"] = meta["milestone"]
         hits.append(
             RetrievedChunk(
                 content=doc,
@@ -396,6 +403,7 @@ def _retrieve(
                 source_type=source_type or "note",
                 review_id=int(review_id) if review_id is not None else None,
                 connector=connector,
+                **prov,
             )
         )
 
