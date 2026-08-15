@@ -23,6 +23,31 @@ from app.models import Chunk, Item, Tag, item_tag_association
 from app.schemas import RetrievedChunk
 
 
+# ---------------------------------------------------------------- 轻量意图识别（Phase 10-1-B-3）
+# 确定性关键词规则，不引入 LLM。仅用于选择检索策略（来源优先 / 候选池），不改数据/权重/排序。
+
+_PERSONAL_TERMS = ("我的", "我喜欢", "我想", "我和", "我的经历", "回忆", "记得", "记录", "留下", "评价", "感想", "看完", "看过", "看了", "喜欢")
+_TEMPORAL_TERMS = ("去年", "以前", "今年", "最近", "那时候", "当时", "前年", "之前", "上个月", "上周", "昨天")
+_RECOMMEND_TERMS = ("推荐", "想重温", "想看", "类似", "哪些作品", "什么作品", "值得")
+
+
+class QueryIntent:
+    def __init__(self, personal=False, temporal=False, recommendation=False):
+        self.personal = personal
+        self.temporal = temporal
+        self.recommendation = recommendation
+
+
+def detect_query_intent(query: str) -> QueryIntent:
+    """确定性关键词意图识别（不引入 LLM 分类）。"""
+    q = query or ""
+    return QueryIntent(
+        personal=any(t in q for t in _PERSONAL_TERMS),
+        temporal=any(t in q for t in _TEMPORAL_TERMS),
+        recommendation=any(t in q for t in _RECOMMEND_TERMS),
+    )
+
+
 def _resolve_item_meta(
     db: Session, item_ids: List[int]
 ) -> Dict[int, tuple[str, List[str]]]:
@@ -138,9 +163,18 @@ def _retrieve(
     max_chunks_per_item: Optional[int],
     tag_match: str = "any",
     source_types: Optional[List[str]] = None,
+    candidate_pool: Optional[int] = None,
 ) -> List[RetrievedChunk]:
     if not query or not query.strip():
         return []
+    # Phase 10-1-B-3：轻量意图 → 检索策略
+    # - personal/temporal：个人来源优先（external 兜底补位），避免百科抢占个人问题
+    # - recommendation/temporal：扩大候选池，提升多作品覆盖
+    intent = detect_query_intent(query)
+    prefer_personal = source_types is None and (intent.personal or intent.temporal)
+    n_results = candidate_pool or max(top_k * 6, 40)
+    if intent.recommendation or intent.temporal:
+        n_results = max(n_results, 80)
     if tags:
         item_ids = _select_item_ids_by_tags(db, tags, match_all=(tag_match == "all"))
         if not item_ids:
@@ -152,8 +186,6 @@ def _retrieve(
     q_vector = embeddings.embed_query(query)  # 可能抛 EmbeddingError
     collection = vectorstore.get_collection()
 
-    # 多取一些候选：既给去重留余地，也补偿"外部百科被加权压低后"的用户内容召回
-    n_results = max(top_k * 6, 40)
     result = collection.query(
         query_embeddings=[q_vector],
         n_results=n_results,
@@ -201,8 +233,14 @@ def _retrieve(
     if spoilered:
         hits = [h for h in hits if h.review_id not in spoilered]
 
-    # 按来源类型硬过滤（ADR 0025：如只读用户自己的内容）
-    if source_types:
+    # 按来源类型过滤（ADR 0025）
+    # - 显式 source_types：硬过滤（保持原行为）
+    # - 个人/时间意图（未显式指定）：个人来源优先；个人内容不足时外部百科兜底补位
+    if prefer_personal:
+        personal = [h for h in hits if h.source_type in ("memory", "review", "note")]
+        external = [h for h in hits if h.source_type == "external_reference"]
+        hits = personal if len(personal) >= top_k else personal + external
+    elif source_types:
         allowed = set(source_types)
         hits = [h for h in hits if h.source_type in allowed]
 

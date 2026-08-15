@@ -4,7 +4,7 @@ import math
 import pytest
 
 from app.models import Chunk, Item, Tag
-from app.retrieval import retrieve_chunks
+from app.retrieval import detect_query_intent, retrieve_chunks
 
 QUERY_VEC = [1.0, 0, 0, 0, 0, 0, 0, 0]
 
@@ -143,6 +143,95 @@ def _add_external_item(db, col, title, source, content, sim):
                         "source_type": "external_reference", "connector": source}])
     db.commit()
     return item
+
+
+class TestQueryIntent:
+    def test_personal_query(self):
+        assert detect_query_intent("我为什么喜欢这部作品").personal is True
+        assert detect_query_intent("我为什么喜欢这部作品").recommendation is False
+
+    def test_temporal_query_is_personal_too(self):
+        it = detect_query_intent("去年我看了什么")
+        assert it.personal is True
+        assert it.temporal is True
+
+    def test_recommendation_query_is_personal_too(self):
+        it = detect_query_intent("推荐几个我想重温的作品")
+        assert it.recommendation is True
+        assert it.personal is True
+
+    def test_plain_query_has_no_intent(self):
+        it = detect_query_intent("什么是RAG？")
+        assert not it.personal and not it.temporal and not it.recommendation
+
+
+def _add_source_item(db, col, title, source_type, content, sim):
+    """创建带指定 source_type 的 chunk（memory / review / note 等）。"""
+    item = Item(title=title, type="note", source="local")
+    db.add(item)
+    db.flush()
+    ref = f"item{item.id}_chunk0"
+    db.add(Chunk(item_id=item.id, content=content, chunk_index=0, embedding_ref=ref,
+                 source_type=source_type))
+    col.add(ids=[ref], embeddings=[vec_with_similarity(sim)], documents=[content],
+            metadatas=[{"item_id": item.id, "chunk_index": 0, "source_type": source_type}])
+    db.commit()
+    return item
+
+
+class TestIntentStrategy:
+    def test_personal_intent_excludes_external_when_personal_sufficient(
+        self, db, fake_collection, fixed_query_embedding
+    ):
+        """个人问题：个人内容足够（≥top_k）时，外部百科即使相似度更高也被排除。"""
+        for i in range(3):
+            _add_source_item(db, fake_collection, f"记忆{i}", "memory", f"关于这部作品的记忆片段{i}", 0.5)
+        for i in range(2):
+            add_item(db, fake_collection, f"笔记{i}", [], [(f"我的感想片段{i}", 0.5)])
+        _add_external_item(db, fake_collection, "百科", "bangumi", "作品的完整背景设定。", 0.95)
+        results = retrieve_chunks("我为什么喜欢这部作品", top_k=5, max_chunks_per_item=5, db=db)
+        assert len(results) == 5
+        assert all(h.source_type in ("note", "memory") for h in results), "个人充足时应排除外部抢占"
+        assert results[0].item_title.startswith(("记忆", "笔记"))
+
+    def test_personal_intent_external_fallback_when_personal_insufficient(
+        self, db, fake_collection, fixed_query_embedding
+    ):
+        """个人问题：个人内容不足时，外部百科兜底补位（仍排在个人之后）。"""
+        _add_source_item(db, fake_collection, "记忆", "memory", "一条个人记忆。", 0.5)
+        _add_external_item(db, fake_collection, "百科", "bangumi", "高相关外部资料。", 0.95)
+        results = retrieve_chunks("我为什么喜欢这部作品", top_k=5, max_chunks_per_item=5, db=db)
+        sources = [h.source_type for h in results]
+        assert "memory" in sources
+        assert "external_reference" in sources, "个人不足时应外部兜底"
+        assert sources.index("memory") < sources.index("external_reference")
+
+    def test_recommendation_expands_candidate_pool(self, db, fake_collection, fixed_query_embedding, monkeypatch):
+        """推荐/时间意图扩大候选池（40→80）；普通问题不扩大。"""
+        add_item(db, fake_collection, "文档", [], [("内容", 0.9)])
+        calls = []
+        orig = fake_collection.query
+
+        def spy(*a, **k):
+            calls.append(k.get("n_results"))
+            return orig(*a, **k)
+
+        monkeypatch.setattr(fake_collection, "query", spy)
+        retrieve_chunks("推荐几部作品", top_k=5, db=db)
+        assert calls and calls[0] >= 80, "推荐意图应扩大候选池到 80"
+        calls.clear()
+        retrieve_chunks("查询", top_k=5, db=db)
+        assert calls and calls[0] < 80, "普通问题候选池保持默认（40）"
+
+    def test_plain_query_unchanged(self, db, fake_collection, fixed_query_embedding):
+        """普通问题：行为与策略前一致（个人/外部混合按权重排序）。"""
+        add_item(db, fake_collection, "我的笔记", [], [("感想。", 0.8)])
+        _add_external_item(db, fake_collection, "百科", "bangumi", "外部简介。", 0.8)
+        results = retrieve_chunks("查询", top_k=5, max_chunks_per_item=5, db=db)
+        assert results[0].source_type == "note"
+        assert results[0].score == 0.8
+        ext = [h for h in results if h.source_type == "external_reference"]
+        assert ext and ext[0].score == round(0.8 * 0.4, 4)
 
 
 class TestSourceTypeRanking:
