@@ -165,6 +165,17 @@ class TestSearch:
         conn.search("辉夜", type=2)
         assert captured["json_body"]["filter"] == {"type": [2]}
 
+    def test_cache_creates_missing_chroma_dir(self, monkeypatch, tmp_path):
+        # 回归（CI）：全新环境没有 data/chroma 目录时，构造 Connector 应自动建目录，
+        # 否则 RequestCache 的 sqlite3.connect 报 "unable to open database file"
+        missing_dir = tmp_path / "fresh" / "chroma"
+        monkeypatch.setattr("app.connectors.base.settings.chroma_persist_directory",
+                            str(missing_dir))
+        conn = BangumiConnector()
+        assert missing_dir.exists()
+        assert conn._cache.get("probe", ttl_seconds=600) is None
+        assert (missing_dir / ".connector_cache.db").exists()
+
 
 class TestBangumiDetailCharacters:
     """get_detail 应拉取 /characters 并把角色规范化进 metadata（角色图鉴数据来源）。"""

@@ -4,6 +4,7 @@
 不改动核心检索编排代码。详见 docs/decisions/0007-connector-architecture.md。
 """
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -151,6 +152,12 @@ class RequestCache:
         return conn
 
     def _init(self):
+        # 缓存库路径的父目录可能不存在（全新环境/CI 无 data/chroma），
+        # sqlite3.connect 不会自动建目录，必须先创建，否则报
+        # "unable to open database file"
+        parent = os.path.dirname(self.db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with self._conn() as conn:
             conn.execute(
                 """
