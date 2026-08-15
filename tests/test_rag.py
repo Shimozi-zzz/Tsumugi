@@ -29,6 +29,48 @@ class TestPrompt:
         assert "参考资料" in prompt
         assert "不要编造" in prompt or "不编造" in prompt
 
+    def test_system_prompt_defines_personal_record_sources(self):
+        """Phase 10-1-B-1：个人来源统一定义为 我的记忆/我的书评/我的笔记。"""
+        prompt = build_system_prompt()
+        assert "我的记忆" in prompt
+        assert "我的书评" in prompt
+        assert "我的笔记" in prompt
+        assert "百科资料" in prompt
+
+    def test_system_prompt_prioritizes_personal_records(self):
+        """Phase 10-1-B-1：个人相关问题优先参考 我的记忆→我的书评→我的笔记。"""
+        prompt = build_system_prompt()
+        for keyword in ["我为什么喜欢", "和我的关系", "我的经历", "去年", "想重温", "推荐我"]:
+            assert keyword in prompt
+        # 优先级顺序与"没有找到个人记录"回退
+        assert prompt.index("我的记忆") < prompt.index("我的书评") < prompt.index("我的笔记")
+        assert "没有找到你关于这一点的个人记录" in prompt
+
+    def test_system_prompt_distinguishes_sources_in_answer(self):
+        """Phase 10-1-B-1：回答区分『你的记录中……』与『资料显示……』。"""
+        prompt = build_system_prompt()
+        assert "你的记录中" in prompt
+        assert "资料显示" in prompt
+
+    def test_context_prompt_labels_memory_review_external(self):
+        """Phase 10-1-B-1 回归：build_context_prompt 的来源标签不变化（我的记忆/我的书评/百科资料）。"""
+        from app.rag import build_context_prompt as bcp
+        from app.schemas import RetrievedChunk as RC
+
+        def mk(source_type, **kw):
+            base = dict(content="片段", item_title="标题", item_id=1, score=0.9, source_type=source_type)
+            base.update(kw)
+            return RC(**base)
+
+        text = bcp([
+            mk("memory"),
+            mk("review", review_title="无题"),
+            mk("external_reference", connector="bangumi"),
+        ], max_context_length=10000)
+        assert "我的记忆" in text
+        assert "我的书评" in text
+        assert "百科资料" in text
+
     def test_context_prompt_format(self):
         chunks = [chunk("内容一", item_title="文档A"), chunk("内容二", item_title="文档B")]
         text = build_context_prompt(chunks, max_context_length=10000)
