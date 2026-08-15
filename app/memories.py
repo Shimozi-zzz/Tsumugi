@@ -96,6 +96,42 @@ def _memory_chunk_ids(mem: Memory, n: int) -> List[str]:
     return [f"memory{mem.id}_chunk{i}" for i in range(n)]
 
 
+def _meta_primitive(value):
+    """Chroma 安全 metadata 原语：datetime→ISO-8601 字符串；str/int/float/bool 保持；
+    None/空 由调用方省略；复杂对象转 str（不把不可序列化对象塞进 metadata）。"""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _memory_vector_meta(mem: Memory, chunk_index: int) -> dict:
+    """Memory 的向量 metadata：保留既有键 + 记忆级信号（occurred_at / emotion / milestone）。
+
+    Phase 10-1-B-5：为后续时间/情绪/里程碑检索铺设 metadata 基础。只写入已有数据，
+    不新增字段；None/空省略该键；同一 memory 的多 chunk 共享同一组记忆级 metadata
+    （chunk_index 除外）。历史向量缺这些键仍可正常检索（retrieval 不依赖它们）。
+    """
+    meta = {
+        "item_id": mem.item_id,
+        "memory_id": mem.id,
+        "chunk_index": chunk_index,
+        "source_type": "memory",
+    }
+    occurred = _meta_primitive(mem.occurred_at)
+    if occurred is not None:
+        meta["occurred_at"] = occurred
+    emotion = _meta_primitive(mem.emotion)
+    if emotion:
+        meta["emotion"] = emotion
+    if mem.source_type == "milestone":
+        meta["milestone"] = True
+    return meta
+
+
 def _write_memory_vectors(db: Session, mem: Memory) -> None:
     """把直接 Memory（text/milestone）的 summary 切分 → embedding → Chroma + Chunk 行。
 
@@ -107,13 +143,7 @@ def _write_memory_vectors(db: Session, mem: Memory) -> None:
         return
     vectors = embeddings.embed_texts(chunks)  # 可能抛 EmbeddingError
     ids = _memory_chunk_ids(mem, len(chunks))
-    metadatas = [
-        {
-            "item_id": mem.item_id, "memory_id": mem.id, "chunk_index": i,
-            "source_type": "memory",
-        }
-        for i in range(len(chunks))
-    ]
+    metadatas = [_memory_vector_meta(mem, i) for i in range(len(chunks))]
     vectorstore.get_collection().add(
         ids=ids, embeddings=vectors, documents=chunks, metadatas=metadatas,
     )

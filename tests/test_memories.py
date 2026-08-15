@@ -243,6 +243,59 @@ class TestDirectMemory:
         assert db.query(Chunk).filter(Chunk.memory_id == mem.id).count() >= 1
 
 
+class TestMemoryVectorMetadata:
+    """Phase 10-1-B-5：Memory 向量 metadata 补充 occurred_at / emotion / milestone。"""
+
+    def _memory_metas(self, fake_collection, mem):
+        return [fake_collection.metas[k] for k in fake_collection.vectors
+                if k.startswith(f"memory{mem.id}_")]
+
+    def test_metadata_includes_occurred_at_emotion(self, db, fake_collection, patch_embeddings):
+        item = _mk_item(db, title="作品")
+        mem = memories.create_direct_memory(item.id, "感动到说不出话。" + "还是想写点什么。" * 6, "text",
+                                            emotion="感动", db=db)
+        metas = self._memory_metas(fake_collection, mem)
+        assert len(metas) >= 1
+        for m in metas:
+            assert m["occurred_at"], "occurred_at 应为 ISO 字符串"
+            assert m["emotion"] == "感动"
+            assert "milestone" not in m  # text 非 milestone
+            # 既有键保留
+            assert m["item_id"] == item.id and m["memory_id"] == mem.id
+            assert m["source_type"] == "memory"
+
+    def test_metadata_milestone_flag(self, db, fake_collection, patch_embeddings):
+        item = _mk_item(db)
+        mem = memories.create_direct_memory(item.id, "完成了这部作品。", "milestone", db=db)
+        metas = self._memory_metas(fake_collection, mem)
+        assert metas
+        assert all(m.get("milestone") is True for m in metas)
+
+    def test_metadata_none_and_multi_chunk_shared(self, db, fake_collection, patch_embeddings):
+        """None/空不写该键且不失败；多 chunk 共享记忆级 metadata、chunk_index 各异。"""
+        item = _mk_item(db, title="作品")
+        mem = memories.create_direct_memory(item.id, ("这是一个很长的记忆片段，用于触发多个向量分块。" * 40), "text", db=db)  # 无 emotion
+        metas = self._memory_metas(fake_collection, mem)
+        assert len(metas) > 1  # 多 chunk
+        for m in metas:
+            assert "emotion" not in m
+            assert "occurred_at" in m
+        assert len({m["occurred_at"] for m in metas}) == 1  # 共享
+        assert len({m["chunk_index"] for m in metas}) == len(metas)
+
+    def test_review_vector_metadata_does_not_invent_signals(self, db, fake_collection, patch_embeddings):
+        """Review 无 occurred_at/emotion/milestone 字段 → 向量 metadata 不新增这些键。"""
+        from app import reviews
+        item = _mk_item(db)
+        r = reviews.create_review(item.id, "这部作品让我想起了很多。" * 6, db=db)
+        metas = [fake_collection.metas[k] for k in fake_collection.vectors
+                 if k.startswith(f"review{r.id}_")]
+        assert metas
+        for m in metas:
+            assert "occurred_at" not in m and "emotion" not in m and "milestone" not in m
+            assert m["source_type"] == "review" and m["review_id"] == r.id
+
+
 class TestApiMemory:
     """P3：直接 Memory 的 API（含媒体上传）。"""
 

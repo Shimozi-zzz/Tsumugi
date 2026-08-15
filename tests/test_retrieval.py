@@ -233,6 +233,14 @@ class TestIntentStrategy:
         ext = [h for h in results if h.source_type == "external_reference"]
         assert ext and ext[0].score == round(0.8 * 0.4, 4)
 
+    def test_old_metadata_missing_signals_still_retrieves(self, db, fake_collection, fixed_query_embedding):
+        """Phase 10-1-B-5：旧向量缺少 occurred_at/emotion/milestone metadata 仍可正常检索。"""
+        add_item(db, fake_collection, "旧文档", [], [("没有新信号字段的旧内容。", 0.9)])
+        _add_external_item(db, fake_collection, "旧百科", "bangumi", "旧外部内容。", 0.85)
+        results = retrieve_chunks("查询", top_k=5, max_chunks_per_item=5, db=db)
+        assert any(h.item_title == "旧文档" for h in results)
+        assert any(h.source_type == "external_reference" for h in results)
+
 
 class TestSourceTypeRanking:
     def test_external_reference_penalized_behind_user_content(self, db, fake_collection, fixed_query_embedding):
