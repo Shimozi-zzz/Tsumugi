@@ -173,4 +173,35 @@ describe("ItemDetailPanel 统一 Work Detail（Phase 3-1 迁移自 ItemDetailMod
     fireEvent.click(screen.getByText("收藏入库"));
     expect(onSave).toHaveBeenCalled();
   });
+
+  it("Phase 10-1-C-2：状态=看完 时显示记录此刻的 quiet 提示（含时间轴/Ask/线索）", async () => {
+    global.fetch = vi.fn((url) => {
+      const u = String(url);
+      if (u.includes("/detail")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: "X", source: "bangumi", collection_status: "看完", characters: [], tags: [], description: "" }) });
+      if (u.includes("/memories")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      if (u.includes("/reviews")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    render(<ItemDetailPanel itemId={1} />);
+    const hint = await screen.findByText(/刚看完的话/);
+    expect(hint.textContent).toContain("时间轴");
+    expect(hint.textContent).toContain("Ask");
+    expect(hint.textContent).toMatch(/回想这一刻的线索/);
+    // composer 与 C-1 价值提示保持
+    expect(screen.getByPlaceholderText(/写一句此刻的感想/)).toBeTruthy();
+    expect(screen.getByText(/情绪和里程碑，会帮助时间轴与 Ask 回想/)).toBeTruthy();
+  });
+
+  it("Phase 10-1-C-2：状态≠看完 时不显示该提示", async () => {
+    global.fetch = vi.fn((url) => {
+      const u = String(url);
+      if (u.includes("/detail")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: "X", source: "bangumi", collection_status: "在看", characters: [], tags: [], description: "" }) });
+      if (u.includes("/memories")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      if (u.includes("/reviews")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("我与它")).toBeTruthy());
+    expect(screen.queryByText(/刚看完的话/)).toBeNull();
+  });
 });

@@ -351,6 +351,12 @@ export default function ItemDetailPanel({
                   </select>
                 </div>
               </div>
+              {/* Phase 10-1-C-2：看完 = 记录此刻的自然时机——就近 quiet 提示（非 CTA，仅状态=看完） */}
+              {colStatus === "看完" && (
+                <p className="wd-hint" style={{ marginTop: "var(--sp-2)" }}>
+                  刚看完的话，写一句此刻的感想——它会进入时间轴，成为 Ask 回想这一刻的线索。
+                </p>
+              )}
               <div className="wd-relation-row">
                 <span className="wd-catalog-label">我的态度</span>
                 <div className="wd-relation-value">
