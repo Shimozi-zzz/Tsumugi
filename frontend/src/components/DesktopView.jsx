@@ -1105,7 +1105,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     </div>
   );
 
-  // 馆内导览导航项（ADR 0066）：馆室 serif+编号，工具 sans；保留长按/拖拽排序
+  // 主导航项（Desktop Sidebar）：icon + sans 标签；active = accent 左条 + 浅染 + 加粗
   const renderNavItem = (k, opts = {}) => {
     const meta = ROOM_META[k];
     const tool = TOOL_META[k];
@@ -1131,22 +1131,14 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
           saveNavOrder(next);
         }}
         title={navRearrangeMode ? "拖动调整位置" : label}
-        className="flex items-center gap-2 px-2 py-1.5 rounded text-left transition-colors shrink-0 w-full"
+        className={`tsm-nav-item shrink-0 w-full ${section === k ? "tsm-nav-item-active" : ""}`}
         style={{
-          color: section === k ? "var(--accent)" : "var(--text-secondary)",
-          backgroundColor: section === k ? "var(--accent-soft)" : "transparent",
           cursor: navRearrangeMode ? "grab" : "pointer",
           outline: navRearrangeMode ? "1px dashed var(--accent)" : "none",
           ...opts.style,
         }}>
-        <span className="text-[9px] w-4 shrink-0 text-center"
-          style={{ fontFamily: "var(--font-mono)", color: section === k ? "var(--accent)" : "var(--ink-2)" }}>
-          {isRoom ? meta.no : "·"}
-        </span>
-        <span className="text-[12px] truncate"
-          style={{ fontFamily: isRoom ? "var(--font-heading)" : "var(--font-body)", letterSpacing: isRoom ? "0.06em" : "0", fontWeight: isRoom ? 500 : 400 }}>
-          {label}
-        </span>
+        <span className="shrink-0" style={{ display: "inline-flex" }}>{NAV[k]?.icon}</span>
+        <span className="truncate">{label}</span>
       </button>
     );
   };
@@ -1220,25 +1212,19 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         </div>
       )}
 
-      {/* 1. 馆内导览（ADR 0066）：纸感馆室列表，serif 馆室 + mono 编号（lg 以上显示） */}
-      <nav className="desk-nav flex-col py-4 px-2.5 gap-1 z-10 shrink-0 hidden lg:flex"
+      {/* 1. 主导航（Desktop Sidebar）：icon 导航项（品牌统一在应用标题栏） */}
+      <nav className="desk-nav flex-col py-3 px-2 gap-0.5 z-10 shrink-0 hidden lg:flex"
         style={{ width: 176, backgroundColor: "var(--rail-bg)", borderRight: "1px solid var(--panel-border)" }}
         data-testid="left-nav">
-        <div className="px-2 mb-4">
-          <div className="tsm-heading text-lg leading-none" style={{ color: "var(--accent)" }}>紬</div>
-          <div className="text-[9px] tracking-[0.3em] mt-1" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>TSUMUGI</div>
-        </div>
         {renderNavItem("ask")}
-        <div className="px-2 mt-2 mb-1 text-[9px] tracking-[0.2em]" style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>馆室 ROOMS</div>
         {sortedNavKeys.filter((k) => ROOM_META[k]).map((k) => renderNavItem(k))}
-        <div className="px-2 mt-3 mb-1 text-[9px] tracking-[0.2em]" style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>工具 TOOLS</div>
         {sortedNavKeys.filter((k) => TOOL_META[k]).map((k) => renderNavItem(k))}
         <div className="flex-1" />
         {renderNavItem("settings")}
         <button onClick={() => setShowShortcuts(true)} title="快捷键 (?)"
-          className="flex items-center gap-2 px-2 py-1.5 rounded text-[12px] transition-colors"
+          className="tsm-nav-item shrink-0 w-full"
           style={{ color: "var(--text-secondary)" }}>
-          <span className="text-[9px] w-4 shrink-0 text-center" style={{ fontFamily: "var(--font-mono)" }}>?</span>
+          <span className="shrink-0 text-[11px] w-[18px] inline-flex justify-center">?</span>
           <span>快捷键</span>
         </button>
       </nav>
@@ -1247,20 +1233,14 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       {navDrawer && (
         <div className="desk-drawer-mask" onClick={() => setNavDrawer(false)}>
           <div className="desk-drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 pt-4 pb-2.5 border-b"
+            <div className="flex items-center justify-end px-3 pt-3 pb-2 border-b"
               style={{ borderColor: "var(--panel-border)" }}>
-              <div>
-                <div className="tsm-heading text-base leading-none" style={{ color: "var(--accent)" }}>紬</div>
-                <div className="text-[9px] tracking-[0.3em] mt-1" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>TSUMUGI</div>
-              </div>
               <button onClick={() => setNavDrawer(false)} title="关闭" className="text-sm px-1"
                 style={{ color: "var(--text-secondary)" }}>✕</button>
             </div>
-            <div className="p-2.5 flex flex-col gap-1 overflow-y-auto h-full">
+            <div className="p-2.5 flex flex-col gap-0.5 overflow-y-auto h-full">
               {renderNavItem("ask", { onClick: () => setNavDrawer(false) })}
-              <div className="px-2 mt-2 mb-1 text-[9px] tracking-[0.2em]" style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>馆室 ROOMS</div>
               {sortedNavKeys.filter((k) => ROOM_META[k]).map((k) => renderNavItem(k, { onClick: () => setNavDrawer(false) }))}
-              <div className="px-2 mt-3 mb-1 text-[9px] tracking-[0.2em]" style={{ color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>工具 TOOLS</div>
               {sortedNavKeys.filter((k) => TOOL_META[k]).map((k) => renderNavItem(k, { onClick: () => setNavDrawer(false) }))}
               {renderNavItem("settings", { onClick: () => setNavDrawer(false) })}
             </div>
@@ -1459,8 +1439,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               <path d="M4 7h16M4 12h16M4 17h16" />
             </svg>
           </button>
-          <span className="text-[10px] tracking-[0.2em] truncate"
-            style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+          <span className="text-[12px] truncate"
+            style={{ color: "var(--text-secondary)" }}>
             {ROOM_META[section] ? `${ROOM_META[section].room} / ${ROOM_META[section].en}` : (NAV[section]?.label || section)}
           </span>
           <div className="flex-1" />

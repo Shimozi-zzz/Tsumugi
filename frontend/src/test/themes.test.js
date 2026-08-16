@@ -137,15 +137,15 @@ describe("theme system", () => {
     expect(root).toContain("--ambient-alpha: 0.14;");
   });
 
-  it("编目抽屉默认色板（ADR 0056）：纸感底色/分层 + --font-mono + 近直角圆角 token", () => {
+  it("默认色板（Desktop 中性）：中性灰底/分层 + --font-mono + 收敛圆角 token", () => {
     const css = fs.readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
     const root = css.slice(0, css.indexOf("html[data-theme"));
-    expect(root).toContain("--bg: #f4efe3;");          // 米黄纸底
-    expect(root).toContain("--surface-0: #efe8d8;");   // 纸感分层
-    expect(root).toContain("--surface-1: #faf5ea;");
-    expect(root).toContain("--surface-2: #e9dfca;");
+    expect(root).toContain("--bg: #F5F4F2;");          // 中性暖灰底
+    expect(root).toContain("--surface-0: #F7F7F6;");   // 中性灰阶分层
+    expect(root).toContain("--surface-1: #FFFFFF;");
+    expect(root).toContain("--surface-2: #F0EFED;");
     expect(root).toContain("--font-mono:");            // 等宽编号字体 token
-    expect(root).toContain("--radius-lg: 10px;");      // 近直角（原 16px）
+    expect(root).toContain("--radius-lg: 8px;");       // 收敛圆角（Desktop）
     expect(root).toContain("--radius-sm: 4px;");
   });
 

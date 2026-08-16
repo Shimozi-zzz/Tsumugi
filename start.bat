@@ -57,12 +57,12 @@ echo [INFO] Web mode: backend + vite + browser
 echo [INFO] Starting backend on http://localhost:%TSUMUGI_PORT%
 start "Tsumugi Backend" cmd /k "chcp 65001>nul && set TSUMUGI_PORT=%TSUMUGI_PORT% && .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port %TSUMUGI_PORT%"
 
-echo [INFO] Starting frontend on http://localhost:5173
+echo [INFO] Starting frontend on http://localhost:4173
 start "Tsumugi Frontend" cmd /k "chcp 65001>nul && set TSUMUGI_PORT=%TSUMUGI_PORT% && cd /d frontend && npm run dev"
 
 rem Open browser
 timeout /t 3 /nobreak >nul
-start "" "http://localhost:5173"
+start "" "http://localhost:4173"
 
 echo.
 echo [INFO] Tsumugi started (web mode). Keep the two console windows open.

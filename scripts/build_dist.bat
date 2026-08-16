@@ -44,6 +44,10 @@ popd
 
 rem ---- 4. electron-builder ----
 echo [INFO] Step 3/3: electron-builder...
+rem 未配置代码签名证书，关闭签名自动发现（否则可能因签名工具下载失败）
+set CSC_IDENTITY_AUTO_DISCOVERY=false
+rem 工具下载走国内镜像，避免 GitHub 超时
+set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
 pushd frontend
 call npm run dist
 if errorlevel 1 (

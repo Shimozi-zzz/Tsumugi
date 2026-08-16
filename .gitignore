@@ -69,6 +69,8 @@ htmlcov/
 # Frontend
 node_modules/
 frontend/dist/
+frontend/release*/
+frontend/tmp_verify/
 
 # Docker
 .connector_cache.db

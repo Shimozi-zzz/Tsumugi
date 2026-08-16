@@ -1,20 +1,20 @@
 // Electron 主进程：加载前端页面 + 自动管理后端服务（uvicorn / 打包后端）
 //
 // 模式说明：
-// - 未打包（npm run electron）：优先连接 Vite dev server(5173)，失败则回退
+// - 未打包（npm run electron）：优先连接 Vite dev server(4173)，失败则回退
 //   到 dist 静态包；后端用项目内 .venv 的 python 启动 uvicorn。
 // - 打包发布（electron-builder 产物）：加载 dist/index.html；后端用
 //   electron-builder 附带打包的 tsumugi-backend.exe（PyInstaller 产物，
 //   见 scripts/backend.spec）。
 // - 环境变量 TSUMUGI_SMOKE=1 时自动退出（用于自动化冒烟测试）。
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 const { spawn } = require("child_process");
 const net = require("net");
 const path = require("path");
 const fs = require("fs");
 
 const ROOT_DIR = path.resolve(__dirname, "..", ".."); // frontend/electron -> 项目根
-const VITE_URL = "http://localhost:5173";
+const VITE_URL = "http://127.0.0.1:4173";
 // 端口统一走环境变量 TSUMUGI_PORT（与后端 config.py / vite 一致）
 const BACKEND_PORT = Number(process.env.TSUMUGI_PORT || 8001);
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
@@ -91,12 +91,18 @@ async function createWindow() {
     width: 1280,
     height: 820,
     title: "Tsumugi 知识库",
+    // 无边框窗口：标题栏由渲染层绘制（与 Tsumugi UI 统一），窗口控制走 IPC
+    frame: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+
+  // 最大化/还原状态同步给渲染层（标题栏按钮图标切换）
+  win.on("maximize", () => win.webContents.send("window:maximized", true));
+  win.on("unmaximize", () => win.webContents.send("window:maximized", false));
 
   // 开发模式：优先连 Vite（与浏览器体验完全一致）；回退到 dist 静态包
   try {
@@ -109,8 +115,24 @@ async function createWindow() {
   await win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
 }
 
+// 窗口控制 IPC（Renderer → preload → main → BrowserWindow）
+ipcMain.on("window:minimize", (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.minimize();
+});
+ipcMain.on("window:toggle-maximize", (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win) return;
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+});
+ipcMain.on("window:close", (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.close();
+});
+
 // ---------------------------------------------------------------- 生命周期
 app.whenReady().then(async () => {
+  // 关闭 Electron 默认原生菜单（File/Edit/View/Window），与 Tsumugi UI 统一
+  Menu.setApplicationMenu(null);
   const { started, alreadyRunning } = await ensureBackend();
   if (!started && !alreadyRunning) {
     console.error("[electron] 后端启动失败：请确认 .venv 与 8001 端口可用。");

@@ -47,12 +47,12 @@ function coverOf(it) {
   return it.image_url || null;
 }
 
-// 极简鸟居轮廓线（几何符号，点到为止，非写实场景；低对比贴合纸感底色）
+// 极简几何符号（保留品牌意象，尺寸收敛为紧凑空态图标）
 function ToriiOutline() {
   return (
-    <svg viewBox="0 0 200 160" width={150} height={120} className="shrine-item"
-      aria-hidden fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-      style={{ color: "var(--text-secondary)", opacity: 0.3 }}>
+    <svg viewBox="0 0 200 160" width={64} height={52} className="shrine-item"
+      aria-hidden fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"
+      style={{ color: "var(--text-secondary)", opacity: 0.35 }}>
       <path d="M38 50 Q100 38 162 50" />   {/* 笠木（微翘） */}
       <path d="M34 76 H166" />              {/* 贯 */}
       <path d="M54 50 V146 M146 50 V146" /> {/* 柱 */}
@@ -190,16 +190,15 @@ export default function HomeShrine({
       {/* 环境光（封面取色） */}
       <div className="absolute inset-0 pointer-events-none"
         style={{ opacity: palette ? 1 : 0, transition: "opacity 0.8s ease", background: ambientBg, zIndex: 0 }} />
-      {/* 内容：纵轴构图 */}
-      <div className="relative z-1 h-full flex flex-col items-center justify-center px-6" style={{ paddingBottom: "6vh" }}>
+      {/* 内容：紧凑居中的 Desktop 空态 */}
+      <div className="relative z-1 h-full flex flex-col items-center justify-center px-6" style={{ paddingBottom: "4vh" }}>
         <ToriiOutline />
-        <div className="shrine-item mt-6 w-full max-w-xl">
+        <div className="shrine-item mt-5 w-full max-w-xl">
           {children}
         </div>
-        {/* 看守猫娘台词（ADR 0040 / Phase E 往年今日）：搜索栏（祭坛）与供奉之间
-            的一行轻语，随仪式渐次呈现；往年今日命中时可点击查看那段记忆 */}
+        {/* 看守猫娘台词（ADR 0040 / Phase E 往年今日）：搜索栏与供奉之间的一行轻语 */}
         {mascotLine && (
-          <div className="shrine-item tsm-heading mt-5 max-w-md text-center text-[13px] leading-relaxed"
+          <div className="shrine-item tsm-heading mt-4 max-w-md text-center text-[13px] leading-relaxed"
             style={{ color: "var(--text-secondary)", transitionDelay: "0.22s", fontWeight: 500 }}>
             {mascotScene?.scene === "on_this_day" ? (
               <>
@@ -221,7 +220,7 @@ export default function HomeShrine({
             )}
           </div>
         )}
-        <div className="mt-7">
+        <div className="mt-5">
           <RecentOfferings items={recentItems} recentReviews={recentReviews} onOpenWork={onOpenWork} />
         </div>
         {ritual && !revealed && (

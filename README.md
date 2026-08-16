@@ -69,7 +69,7 @@ cd frontend && npm install
 **启动**
 
 ```bash
-start.bat          # Web：后端(8001) + Vite(5173) + 打开浏览器
+start.bat          # Web：后端(8001) + Vite(4173) + 打开浏览器
 start.bat electron # 客户端模式（Electron）
 ```
 

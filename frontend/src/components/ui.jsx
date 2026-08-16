@@ -89,12 +89,11 @@ export const MEMORY_TYPE_LABEL = { review: "书评", text: "记录", milestone: 
 export function PageHeader({ room, path, children }) {
   return (
     <header className="page-header" data-testid="page-header">
-      <div className="flex items-baseline gap-3 min-w-0">
+      <div className="flex items-center gap-2.5 min-h-[44px] min-w-0">
         <h1 className="page-header-room">{room}</h1>
         {path ? <div className="page-header-path">{path}</div> : null}
+        {children ? <div className="page-header-extra">{children}</div> : null}
       </div>
-      <div className="page-header-rule" aria-hidden />
-      {children ? <div className="page-header-extra">{children}</div> : null}
     </header>
   );
 }

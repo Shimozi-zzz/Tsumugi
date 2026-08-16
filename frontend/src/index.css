@@ -18,21 +18,19 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  /* ---- 圆角（编目抽屉版式：近直角为主；--radius-lg 为主表面，自定义可 inline 覆盖） ---- */
+  /* ---- 圆角（Desktop 收敛：面板/卡片 6-8，控件/按钮/输入 6） ---- */
   --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
 
-  /* ---- 圆角语义（Phase 2-5 / ADR 0072）：纸面层级，非统一值 ----
-     Surface 最克制 → Card 略圆 → Cover 轻微 → Control 温和 → Chip 胶囊 → Floating 最大。
-     数值沿用既有语言（4/6/4/8/999/14），只为"为什么不同圆角"建立语义与单一来源。 ---- */
+  /* ---- 圆角语义 ---- */
   --radius-surface: 4px;
   --radius-card: 6px;
   --radius-cover: 4px;
-  --radius-control: 8px;
+  --radius-control: 6px;
   --radius-chip: 999px;
-  --radius-floating: 14px;
+  --radius-floating: 10px;
 
   /* ---- 阴影（克制：分隔用边框，阴影仅用于浮起/浮层） ---- */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -46,39 +44,39 @@
   --d-grid-min: 190px;          /* 索书卡（编目抽屉）：密集元数据行需更宽列 */
   --d-font: 14px;
 
-  /* ---- 表面层级（ADR 0030 / ADR 0056 纸感）：--surface-0 最暗最外层 / --surface-1 面板卡片 /
-        --surface-2 悬浮与选中态更亮一档。默认主题为米黄纸分层，其余主题在下方各块定义。 ---- */
-  --surface-0: #efe8d8;
-  --surface-1: #faf5ea;
-  --surface-2: #e9dfca;
+  /* ---- 表面层级（Desktop 中性灰阶）：--surface-0 最暗最外层 / --surface-1 面板卡片 /
+        --surface-2 悬浮与选中态。边框分隔为主，克制阴影。 ---- */
+  --surface-0: #F7F7F6;
+  --surface-1: #FFFFFF;
+  --surface-2: #F0EFED;
 
-  /* ---- 封面氛围色强度（ADR 0034 / ADR 0060）：默认纸感主题 0.14（极柔和，保可读性） ---- */
+  /* ---- 封面氛围色强度（ADR 0034 / ADR 0060） ---- */
   --ambient-alpha: 0.14;
 
-  /* ---- 字体 token（ADR 0020 / ADR 0056）：关键标题衬线、正文系统无衬线、编号等宽 ---- */
-  --font-heading: Georgia, "Songti SC", "Noto Serif SC", "STSong", serif;
+  /* ---- 字体 token：标题/正文统一系统无衬线（衬线仅保留在少量内容语义场景） ---- */
+  --font-heading: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Courier New", monospace;
 
-  /* ---- 编目抽屉（默认主题，ADR 0056 纸感档案色板）：米黄纸底 + 暖橙强调 ---- */
-  --bg: #f4efe3;
-  --panel: #faf5ea;
-  --panel-border: #dcd0b6;
-  --text: #2b241a;
-  --text-secondary: #7a6d57;
+  /* ---- 中性 Desktop palette（品牌暖橙仅作强调色） ---- */
+  --bg: #F5F4F2;
+  --panel: #FFFFFF;
+  --panel-border: #E3E1DD;
+  --text: #252525;
+  --text-secondary: #6E6E6E;
   --accent: #b25b36;
   --accent-hover: #9c4c2c;
   --accent-soft: #f9ede5;
-  --danger: #c0392b;
-  --ok: #3d7a4f;
-  --tag-bg: #eae1cd;
-  --tag-text: #5a4a30;
-  --input-bg: #faf5ea;
-  --input-border: #d8c9ab;
-  --rail-bg: #efe8d8;
-  --card-bg: #faf5ea;
-  --card-thumb: linear-gradient(150deg, #ece3cf, #e1d4b8);
-  --card-text: #2b241a;
+  --danger: #C0392B;
+  --ok: #3D7A4F;
+  --tag-bg: #EFEEEC;
+  --tag-text: #57534E;
+  --input-bg: #FFFFFF;
+  --input-border: #D6D3D0;
+  --rail-bg: #EFEEEC;
+  --card-bg: #FFFFFF;
+  --card-thumb: linear-gradient(150deg, #EFEDEA, #E1DED9);
+  --card-text: #252525;
 
   /* ============================================================
      夜书房 · Visual Novel Archive（ADR 0066）Design Tokens
@@ -148,23 +146,47 @@
 }
 
 /* ============================================================
-   夜书房 Shell（ADR 0066）：统一页面头 = serif 房间名 + hairline + mono 路径
+   页面工具栏（Desktop App）：紧凑 sans 标题 + mono 路径 + 右对齐操作
    ============================================================ */
-.page-header { margin-bottom: var(--sp-6); animation: var(--motion-enter); animation-name: ph-enter; }
+.page-header { margin-bottom: var(--sp-4); border-bottom: 1px solid var(--panel-border); padding-bottom: var(--sp-2); }
 .page-header-room {
-  font-family: var(--font-heading); font-size: var(--fs-heading);
-  font-weight: 600; letter-spacing: var(--tracking-serif); color: var(--ink-0); line-height: 1.2;
+  font-family: var(--font-body); font-size: 15px;
+  font-weight: 600; letter-spacing: 0; color: var(--ink-0); line-height: 1.2;
 }
 .page-header-path {
-  font-family: var(--font-mono); font-size: var(--fs-micro);
-  letter-spacing: var(--tracking-mono); color: var(--ink-1); white-space: nowrap; overflow: hidden;
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.06em; color: var(--ink-1); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis;
 }
 .page-header-rule {
   height: 1px; margin-top: var(--sp-2);
   background: linear-gradient(to right, var(--panel-border), color-mix(in srgb, var(--panel-border) 40%, transparent));
 }
-.page-header-extra { margin-top: var(--sp-3); }
+.page-header-extra { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
+
+/* 主导航项（Desktop Sidebar）：icon + sans 标签；active = accent 左条 + 浅染 + 加粗 */
+.tsm-nav-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 8px; border-radius: var(--radius-control);
+  border-left: 2.5px solid transparent;
+  font-size: 12.5px; color: var(--text-secondary); text-align: left;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.tsm-nav-item:hover { background-color: var(--surface-2); color: var(--text); }
+.tsm-nav-item-active,
+.tsm-nav-item-active:hover {
+  background-color: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent); font-weight: 600; border-left-color: var(--accent);
+}
+
+/* ============================================================
+   自定义标题栏（Desktop Shell）：拖拽区 + 窗口控制
+   与 Tsumugi 视觉统一：panel 底 / hairline / 无圆角 / 无阴影
+   ============================================================ */
+.app-titlebar { -webkit-app-region: drag; user-select: none; }
+.app-titlebar .win-ctl { -webkit-app-region: no-drag; }
+.app-titlebar .win-ctl:hover { background-color: var(--surface-2); color: var(--text); }
+.app-titlebar .win-ctl.app-titlebar-close:hover { background-color: var(--danger); color: #ffffff; }
 
 @keyframes ph-enter {
   from { opacity: 0; transform: translateY(8px); }
@@ -206,7 +228,7 @@ body {
 .desk-card {
   background: var(--card-bg);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
@@ -222,7 +244,7 @@ body {
 .desk-searchbar {
   background: var(--panel);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-sm);
 }
 
@@ -466,12 +488,12 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: rgba(30, 20, 15, 0.55);   /* 暖暗帷幕（贴合纸感主题） */
+  background: transparent;
   opacity: 0;
-  transition: opacity 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 0.4s ease;
   z-index: 2;
 }
-.shrine.shrine-ritual:not(.shrine-revealed) .shrine-veil { opacity: 0.55; }
+.shrine.shrine-ritual:not(.shrine-revealed) .shrine-veil { opacity: 0; }
 .shrine.shrine-ritual.shrine-revealed .shrine-veil { opacity: 0; }
 .shrine .shrine-item {
   opacity: 1;
