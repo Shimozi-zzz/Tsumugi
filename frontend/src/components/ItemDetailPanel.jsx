@@ -12,7 +12,7 @@
 // - `refreshKey` 用于"刷新资料"后重取详情。
 import React, { useEffect, useRef, useState } from "react";
 import { fetchItemDetail, fetchItemReviews, fetchItemMemories, filePathToUrl, updateWorkColumns, updateCollection, createDirectMemory } from "../api.js";
-import { TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL, COLLECTION_STATUSES, MEMORY_EMOTIONS } from "./ui.jsx";
+import { TagCapsule, itemInfoRows, WORK_TYPES, WORK_TYPE_LABEL, COLLECTION_STATUSES, MEMORY_EMOTIONS, ProviderBadge, PROVIDER_LABELS } from "./ui.jsx";
 import { extractPalette } from "../ambient.js";
 import MemoryTimeline from "./MemoryTimeline.jsx";
 import { buildEncounterEvents } from "../encounter.js";
@@ -51,6 +51,7 @@ export default function ItemDetailPanel({
   externalDetail = null, refreshKey = 0,
   onSaveDetail, onShareDetail, onRefreshDetail, onOpenReview,
   composerFocusTick = 0,
+  onOpenRelated, // Phase 12-D：点击本地关系作品（target_item_id）
 }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -245,11 +246,30 @@ export default function ItemDetailPanel({
             {data.id != null && (
               <div className="wd-meta mt-1.5">NO. {String(data.id).padStart(4, "0")}</div>
             )}
-            <div className="wd-meta mt-1.5">
-              {data.source || "本地"}
-              {data.rating != null && <span> · 大众 ★{data.rating}</span>}
-              {data.my_rating != null && <span> · 我的平均 ★{data.my_rating}</span>}
+            {data.alternative_title ? (
+              <div className="wd-meta mt-1" style={{ fontSize: 13, letterSpacing: "0.04em" }}>{data.alternative_title}</div>
+            ) : null}
+            {/* Phase 11-D：年份 · 类型 · 状态 · 集数（空字段隐藏） */}
+            {[
+              data.release_date ? String(data.release_date).slice(0, 4) : null,
+              data.work_type ? WORK_TYPE_LABEL[data.work_type] : null,
+              data.status || null,
+              data.episodes != null ? `${data.episodes} 集` : null,
+            ].filter(Boolean).length > 0 && (
+              <div className="wd-meta mt-1.5">
+                {[data.release_date ? String(data.release_date).slice(0, 4) : null,
+                  data.work_type ? WORK_TYPE_LABEL[data.work_type] : null,
+                  data.status || null,
+                  data.episodes != null ? `${data.episodes} 集` : null].filter(Boolean).join(" · ")}
+              </div>
+            )}
+            <div className="wd-meta mt-1">
+              {data.rating != null && <span>大众 ★{data.rating}</span>}
+              {data.my_rating != null && <span>{data.rating != null ? " · " : ""}我的平均 ★{data.my_rating}</span>}
             </div>
+            {(data.sources && data.sources.length > 0) ? (
+              <div className="mt-2"><ProviderBadge source={data.source} sources={data.sources} count /></div>
+            ) : null}
           </div>
         </div>
 
@@ -286,18 +306,167 @@ export default function ItemDetailPanel({
             </div>
           )}
 
+          {data.background && (
+            <div style={{ marginTop: 10, borderRadius: "var(--radius-cover)", overflow: "hidden", height: 72, background: "var(--card-thumb)" }}>
+              <img src={data.background} alt="" loading="lazy"
+                onError={(e) => { e.target.style.visibility = "hidden"; }}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            </div>
+          )}
+
+          {/* Phase 11-A/B + 12-C：丰富媒体元数据（可选字段，空则隐藏） */}
+          {(data.genres?.length || data.themes?.length || data.demographics?.length || data.status
+            || data.episodes != null || data.duration || data.season || data.studios?.length) && (
+            <div className="wd-catalog" style={{ marginTop: 10 }}>
+              {(data.genres?.length || data.themes?.length || data.demographics?.length) ? (
+                <div className="wd-catalog-row"><span className="wd-catalog-label">题材</span>
+                  <span className="wd-catalog-value">{[...(data.genres || []), ...(data.themes || []), ...(data.demographics || [])].join(" / ")}</span></div>
+              ) : null}
+              {data.status ? (
+                <div className="wd-catalog-row"><span className="wd-catalog-label">状态</span><span className="wd-catalog-value">{data.status}</span></div>
+              ) : null}
+              {data.episodes != null ? (
+                <div className="wd-catalog-row"><span className="wd-catalog-label">集数</span><span className="wd-catalog-value">{data.episodes}</span></div>
+              ) : null}
+              {data.duration ? (
+                <div className="wd-catalog-row"><span className="wd-catalog-label">时长</span><span className="wd-catalog-value">{data.duration}</span></div>
+              ) : null}
+              {data.season ? (
+                <div className="wd-catalog-row"><span className="wd-catalog-label">季度</span><span className="wd-catalog-value">{data.season}</span></div>
+              ) : null}
+              {data.studios?.length ? (
+                <div className="wd-catalog-row"><span className="wd-catalog-label">制作</span><span className="wd-catalog-value">{data.studios.join(" / ")}</span></div>
+              ) : null}
+            </div>
+          )}
+          {/* Phase 12-D：Staff 列表（按 credit_order 排序，同人合并角色徽标） */}
+          {(data.staff || []).length > 0 && (() => {
+            const merged = [];
+            for (const s of (data.staff || [])) {
+              const prev = merged.find((x) => x.name === s.name);
+              if (prev) { prev.roles.push(s.role); } else { merged.push({ name: s.name, roles: s.role ? [s.role] : [], source: s.source }); }
+            }
+            return (
+              <div className="wd-chars">
+                <div className="wd-chars-title">Staff · {data.staff.length}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {merged.slice(0, 24).map((s, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 11 }}>
+                      <span className="tsm-tag" style={{ flexShrink: 0, fontSize: 10, padding: "0 6px", borderRadius: "var(--radius-control)" }}>
+                        {s.roles.length ? s.roles.join(" / ") : "制作"}
+                      </span>
+                      <span style={{ color: "var(--text)", fontWeight: 500 }}>{s.name}</span>
+                      {s.source ? (
+                        <span style={{ color: "var(--ink-2)", fontSize: 10, marginLeft: "auto", flexShrink: 0 }}>{PROVIDER_LABELS[s.source] || s.source}</span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+          {/* Phase 12-D：Relations 分组 + 可点击导航（本地→onOpenRelated / 外部→external_url） */}
+          {(data.relations || []).length > 0 && (() => {
+            const labels = { prequel: "前作", sequel: "后作", side_story: "外传", spin_off: "衍生", adaptation: "改编", alternative: "相关", parent_story: "主线", other: "其他" };
+            const groups = {};
+            for (const r of (data.relations || [])) {
+              const key = labels[r.relation_type] || "其他";
+              (groups[key] = groups[key] || []).push(r);
+            }
+            const renderRow = (r, i) => {
+              const isLocal = r.is_local || r.target_media_id != null;
+              const url = r.external_url;
+              const inner = (
+                <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>{r.title}</span>
+                  <ProviderBadge source={r.source} />
+                  {isLocal ? <span className="tsm-tag" style={{ fontSize: 9, padding: "0 5px", flexShrink: 0 }}>本地</span> : null}
+                </span>
+              );
+              const base = { display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", padding: "4px 6px", borderRadius: "var(--radius-control)", fontSize: 12, border: "none", background: "transparent" };
+              if (isLocal && onOpenRelated) {
+                return <button key={i} onClick={() => onOpenRelated(r.target_item_id)} style={{ ...base, cursor: "pointer" }}>{inner}</button>;
+              }
+              return <a key={i} href={url || undefined} target="_blank" rel="noreferrer"
+                style={{ ...base, textDecoration: "none", color: "var(--text)", cursor: url ? "pointer" : "default" }}>{inner}</a>;
+            };
+            return (
+              <div className="wd-chars">
+                <div className="wd-chars-title">Relations · {data.relations.length}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {Object.entries(groups).map(([label, list]) => (
+                    <div key={label}>
+                      <div className="wd-chars-title" style={{ marginTop: 4, color: "var(--accent)" }}>{label}</div>
+                      {list.slice(0, 6).map(renderRow)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+          {/* Phase 11-D：来源（MediaSource）——provider / external_id / 外部链接 */}
+          {(data.sources || []).length > 0 && (
+            <div className="wd-chars">
+              <div className="wd-chars-title">来源 · {data.sources.length}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {(data.sources || []).map((s, i) => (
+                  <a key={i} href={s.external_url || undefined} target="_blank" rel="noreferrer"
+                    className="tsm-tag"
+                    style={{ fontSize: 11, padding: "2px 8px", borderRadius: "var(--radius-control)", textDecoration: "none", cursor: s.external_url ? "pointer" : "default" }}>
+                    {PROVIDER_LABELS[s.source] || s.source}
+                    {s.external_id ? ` · ${s.external_id}` : ""}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Phase 12-C：外部链接（仅展示合法 http/https） */}
+          {(data.external_links || []).length > 0 && (
+            <div className="wd-chars">
+              <div className="wd-chars-title">外部链接</div>
+              <div className="flex flex-wrap gap-1.5">
+                {(data.external_links || []).slice(0, 8).map((l, i) => {
+                  const u = typeof l === "string" ? l : l.url;
+                  if (!u || !/^https?:\/\//.test(u)) return null;
+                  return (
+                    <a key={i} href={u} target="_blank" rel="noreferrer"
+                      className="tsm-tag"
+                      style={{ fontSize: 11, padding: "2px 8px", borderRadius: "var(--radius-control)", textDecoration: "none", cursor: "pointer" }}>
+                      {l.label || u}
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {tags.length > 0 && (
             <div className="wd-tags">
               {tags.map((t) => <TagCapsule key={t} text={t} />)}
             </div>
           )}
 
+          {/* Phase 12-D：角色紧凑卡片（头像/占位 + 名称 + 关系 + CV，空字段隐藏） */}
           {(data.characters || []).length > 0 && (
             <div className="wd-chars">
               <div className="wd-chars-title">角色 · {data.characters.length}</div>
-              <div className="flex flex-wrap gap-1.5">
-                {(data.characters || []).map((c) => (
-                  <TagCapsule key={c.id ?? c.name} text={c.name} title={c.summary || c.relation || undefined} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+                {(data.characters || []).slice(0, 12).map((c) => (
+                  <div key={c.id ?? c.name}
+                    style={{ display: "flex", gap: 8, padding: 8, border: "1px solid var(--panel-border)", borderRadius: "var(--radius-card)", background: "var(--panel)", minWidth: 0 }}>
+                    {c.image_url ? (
+                      <img src={c.image_url} alt="" loading="lazy" onError={(e) => { e.target.style.visibility = "hidden"; }}
+                        style={{ width: 40, height: 54, borderRadius: "var(--radius-cover)", objectFit: "cover", flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: 40, height: 54, borderRadius: "var(--radius-cover)", background: "var(--card-thumb)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", fontSize: 16 }}>{(c.name || "?").slice(0, 1)}</div>
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
+                      {c.relation ? <div style={{ fontSize: 10, color: "var(--text-secondary)" }}>{c.relation}</div> : null}
+                      {(c.actors || []).length > 0 ? <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 2 }}>CV：{(c.actors || []).join(" / ")}</div> : null}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>

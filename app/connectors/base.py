@@ -64,6 +64,10 @@ class SearchResult:
     rating: Optional[float] = None
     tags: List[str] = field(default_factory=list)
     raw: Optional[dict] = None
+    # Phase 11-A：媒体元数据（可选，旧 Provider 可不实现；缺失不影响兼容）
+    year: Optional[int] = None
+    type: Optional[str] = None          # "anime" | "manga" | ...
+    external_url: Optional[str] = None  # 数据源条目页 URL
 
 
 @dataclass
@@ -75,6 +79,13 @@ class ItemDetail:
     description: str = ""
     image_url: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Phase 11-A：丰富媒体元数据（可选，缺失用 None / 空数组）
+    genres: List[str] = field(default_factory=list)
+    background: Optional[str] = None
+    status: Optional[str] = None
+    episodes: Optional[int] = None
+    staff: List[dict] = field(default_factory=list)      # [{name, role, source, external_id}]
+    relations: List[dict] = field(default_factory=list)  # [{relation, title, external_id, source}]
 
 
 # ---------------------------------------------------------------- Protocol

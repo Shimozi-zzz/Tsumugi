@@ -143,3 +143,67 @@ describe("命令面板 work_type 关键词", () => {
     expect(it.keywords.join(" ")).toContain("galgame");
   });
 });
+
+describe("作品详情丰富资料（Phase 11-B/C）", () => {
+  it("显示 题材/状态/Staff/Relations；空字段隐藏", async () => {
+    mockFetch({ detail: { ...DETAIL,
+      genres: ["科幻", "悬疑"], status: "FINISHED",
+      staff: [{ name: "Takuya Sato", role: "Director" }],
+      relations: [{ relation: "SEQUEL", title: "Steins;Gate 0", source: "anilist" }],
+      background: "https://x/b.png" } });
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("空之境界")).toBeTruthy());
+    expect(screen.getByText(/悬疑/)).toBeTruthy();     // genres（DETAIL.tags 只有"科幻"，悬疑仅在 genres）
+    expect(screen.getByText("FINISHED")).toBeTruthy();  // status
+    expect(screen.getByText(/Staff/)).toBeTruthy();         // staff
+    expect(screen.getByText(/Takuya Sato/)).toBeTruthy();
+    expect(screen.getByText(/Relations/)).toBeTruthy();      // relations
+    expect(screen.getByText(/Steins;Gate 0/)).toBeTruthy();
+  });
+
+  it("空字段正常隐藏（旧数据兼容）", async () => {
+    mockFetch({ detail: DETAIL });  // 无 genres/staff/relations
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("空之境界")).toBeTruthy());
+    expect(screen.queryByText(/Staff/)).toBeNull();
+    expect(screen.queryByText(/Relations/)).toBeNull();
+  });
+
+  it("Hero 显示原名/年份与多来源徽标（Phase 11-D）", async () => {
+    mockFetch({ detail: { ...DETAIL,
+      sources: [{ source: "bangumi", external_id: "1" }, { source: "anilist", external_id: "2" }] } });
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText("空之境界")).toBeTruthy());
+    expect(screen.getAllByText("空の境界").length).toBeGreaterThan(0);  // 原名（hero + 编目行）
+    expect(screen.getAllByText(/2008/).length).toBeGreaterThan(0);       // 年份（hero meta + 编目日期）
+    expect(screen.getAllByText("Bangumi").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("AniList").length).toBeGreaterThan(0);
+  });
+
+  it("Relations 分组并支持本地跳转/外部链接（Phase 12-D）", async () => {
+    const opened = [];
+    mockFetch({ detail: { ...DETAIL, relations: [
+      { relation_type: "sequel", title: "续作A", target_media_id: 99, target_item_id: 7, is_local: true },
+      { relation_type: "spin_off", title: "外传B", target_media_id: null, external_url: "https://x/b" },
+    ] } });
+    render(<ItemDetailPanel itemId={1} onOpenRelated={(id) => opened.push(id)} />);
+    await waitFor(() => expect(screen.getByText("空之境界")).toBeTruthy());
+    expect(screen.getByText("后作")).toBeTruthy();   // 分组标签（sequel）
+    expect(screen.getByText("衍生")).toBeTruthy();   // 分组标签（spin_off）
+    fireEvent.click(screen.getByText("续作A"));      // 本地关系 → onOpenRelated(target_item_id)
+    expect(opened).toEqual([7]);
+    expect(screen.getByText("外传B").closest("a")).toBeTruthy();  // 外部关系 → 链接
+  });
+
+  it("Staff 同人合并角色徽标（Phase 12-D）", async () => {
+    mockFetch({ detail: { ...DETAIL, staff: [
+      { name: "Takuya Sato", role: "Director" },
+      { name: "Takuya Sato", role: "Writer" },
+      { name: "Writer A", role: "Writer" },
+    ] } });
+    render(<ItemDetailPanel itemId={1} />);
+    await waitFor(() => expect(screen.getByText(/Staff/)).toBeTruthy());
+    expect(screen.getAllByText("Takuya Sato").length).toBe(1);  // 同人合并为一行
+    expect(screen.getByText("Director / Writer")).toBeTruthy(); // 角色徽标合并
+  });
+});

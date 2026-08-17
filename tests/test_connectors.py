@@ -58,6 +58,19 @@ class TestRegistry:
         finally:
             registry.unregister("bangumi")
 
+    def test_discover_finds_anilist(self):
+        names = registry.discover()
+        try:
+            assert "anilist" in names
+            conn = registry.get_connector("anilist")
+            assert conn is not None
+            assert conn.manifest.display_name == "AniList"
+            assert "search" in conn.manifest.capabilities
+            assert "get_detail" in conn.manifest.capabilities
+            assert registry.is_enabled("anilist")
+        finally:
+            registry.unregister("anilist")
+
 
 class TestBangumiNormalize:
     def test_subject_to_search_result(self):

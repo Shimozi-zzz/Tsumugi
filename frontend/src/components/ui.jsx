@@ -1,8 +1,39 @@
 // 共享 UI 组件（Playnite 式信息设计，ADR 0029）
 // - InfoTable：label 右对齐 / value 左对齐 / 行间细分隔线的属性表格
 // - TagCapsule：统一圆角胶囊标签（用主题 --tag-bg/--tag-text 微弱变色，不随机上色）
+// - ProviderBadge：多 Provider 来源徽标（Phase 11-A/B，全站复用）
 // 全部走 token，四套主题（含深色）统一生效。
 import React from "react";
+
+/** 数据源 key → 展示名（多来源徽标与详情来源区复用）。 */
+export const PROVIDER_LABELS = {
+  bangumi: "Bangumi",
+  anilist: "AniList",
+  moegirl: "萌娘百科",
+  vndb: "VNDB",
+  jikan: "Jikan",
+};
+
+/**
+ * 多 Provider 来源徽标：传入 sources[]（{source,...}）或单个 source。
+ * count=true 时多来源显示数量。
+ */
+export function ProviderBadge({ source, sources, count = false, className = "" }) {
+  const list = sources && sources.length
+    ? sources.map((s) => s.source)
+    : (source ? [source] : []);
+  if (list.length === 0) return null;
+  return (
+    <span className={`provider-badge-group inline-flex items-center gap-1 ${className}`}>
+      {list.map((s, i) => (
+        <span key={i} className="provider-badge">{PROVIDER_LABELS[s] || s}</span>
+      ))}
+      {count && list.length > 1 && (
+        <span className="provider-badge-count">{list.length}</span>
+      )}
+    </span>
+  );
+}
 
 /** 统一标签胶囊：单一圆角矩形样式，颜色用主题 tag token（accent 系微弱变化）。 */
 export function TagCapsule({ text, title, onClick, muted = false }) {

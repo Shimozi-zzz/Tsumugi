@@ -70,7 +70,11 @@ htmlcov/
 node_modules/
 frontend/dist/
 frontend/release*/
-frontend/tmp_verify/
+frontend/tmp_*/
+# 应用图标资源（build/ 已被忽略，需显式放行 frontend/build/icons）
+!frontend/build/
+!frontend/build/icons/
+!frontend/build/icons/*
 
 # Docker
 .connector_cache.db

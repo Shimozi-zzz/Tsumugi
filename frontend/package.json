@@ -50,6 +50,7 @@
       }
     ],
     "win": {
+      "icon": "build/icons/icon.ico",
       "target": [
         {
           "target": "nsis",

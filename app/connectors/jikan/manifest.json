@@ -1,0 +1,11 @@
+{
+  "name": "jikan",
+  "display_name": "Jikan / MyAnimeList",
+  "version": "0.1.0",
+  "auth_type": "none",
+  "base_url": "https://api.jikan.moe/v4",
+  "rate_limit": {
+    "requests_per_minute": 30
+  },
+  "capabilities": ["search", "get_detail"]
+}

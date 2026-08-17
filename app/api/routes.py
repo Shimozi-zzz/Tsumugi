@@ -1,4 +1,5 @@
 """API 路由 - 资料管理、检索、RAG 问答（含 SSE 流式）"""
+import concurrent.futures
 import json
 import os
 import re
@@ -50,6 +51,7 @@ from app.schemas import (
     QueryRequest,
     RAGResponse,
     RelatedSourceOut,
+    MediaDetailOut,
     RetrievedChunk,
     PluginsResponse,
     ReviewCreate,
@@ -1139,7 +1141,99 @@ def _search_result_to_external(sr) -> ExternalResult:
         rating=sr.rating,
         tags=sr.tags,
         raw=sr.raw,
+        year=getattr(sr, "year", None),
+        type=getattr(sr, "type", None),
+        external_url=getattr(sr, "external_url", None),
     )
+
+
+# ---------------------------------------------------------------- 多来源去重/聚合（Phase 11-A）
+
+def _norm_title(t) -> str:
+    """标题规范化：小写 + 去标点/空格/括号（跨来源匹配用，保守）。"""
+    if not t:
+        return ""
+    s = str(t).lower().strip()
+    return re.sub(r"[：:（）()\[\]【】「」『』《》\-—_·、，。.,\s]", "", s)
+
+
+def _result_title_set(r) -> set:
+    """一条结果的候选规范化标题（主标题 + 副标题）。"""
+    ts = {_norm_title(r.title)}
+    if r.subtitle:
+        ts.add(_norm_title(r.subtitle))
+    ts.discard("")
+    return ts
+
+
+def _mergeable_external(a, b) -> bool:
+    """保守合并判定：类型族不同 / 年份差过大 → 不合并（防续作/重制/OVA 误并）。"""
+    ta, tb = (a.type or "").lower(), (b.type or "").lower()
+    if ta and tb and ta != tb:
+        return False
+    ya, yb = a.year, b.year
+    if ya is not None and yb is not None and abs(int(ya) - int(yb)) > 1:
+        return False
+    return True
+
+
+def _aggregate_external_results(results: List[ExternalResult], query: str = "") -> List[ExternalResult]:
+    """多来源结果去重 + 聚合：同一逻辑作品（标题交集 + 类型/年份兼容）合并为一个
+    结果，`sources` 列出全部来源；主字段取首条（代表性），description/cover/rating
+    缺失时用组内最优补全。宁可保留两条，也不错误合并不同作品。"""
+    groups = []  # [{titles: set, items: [ExternalResult]}]
+    for r in results:
+        titles = _result_title_set(r)
+        target = None
+        for g in groups:
+            if titles & g["titles"] and _mergeable_external(g["items"][0], r):
+                target = g
+                break
+        if target is None:
+            groups.append({"titles": titles, "items": [r]})
+        else:
+            target["titles"] |= titles
+            target["items"].append(r)
+
+    q = _norm_title(query)
+    out = []
+    for g in groups:
+        items = g["items"]
+        primary = items[0]
+        sources = [{
+            "source": it.source,
+            "external_id": it.external_id,
+            "title": it.title,
+            "url": getattr(it, "external_url", None),
+            "image_url": it.image_url,
+        } for it in items]
+        merged_tags = []
+        for it in items:
+            for t in (it.tags or []):
+                if t not in merged_tags:
+                    merged_tags.append(t)
+        out.append(ExternalResult(
+            source=primary.source,
+            title=primary.title,
+            subtitle=primary.subtitle,
+            description=primary.description or next(
+                (i.description for i in items if i.description), None),
+            image_url=primary.image_url or next(
+                (i.image_url for i in items if i.image_url), None),
+            external_id=primary.external_id,
+            rating=primary.rating if primary.rating is not None else max(
+                (i.rating for i in items if i.rating is not None), default=None),
+            tags=merged_tags[:12],
+            raw=primary.raw,
+            year=primary.year,
+            type=primary.type,
+            external_url=primary.external_url,
+            sources=sources,
+        ))
+    # 精确标题命中优先，其次按评分降序（保持组内原始顺序稳定）
+    out.sort(key=lambda r: (0 if q and q in _result_title_set(r) else 1,
+                            -(r.rating if r.rating is not None else 0)))
+    return out
 
 
 def _federated_search_sync(query: str, local_top_k: int, tag_filter, tag_match,
@@ -1159,19 +1253,29 @@ def _federated_search_sync(query: str, local_top_k: int, tag_filter, tag_match,
     except EmbeddingError:
         local_results = []  # 本地检索失败不阻塞外部检索
 
+    conns = connector_registry.get_enabled_connectors()
     external = []
     errors = {}
-    for connector in connector_registry.get_enabled_connectors():
+    if conns:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(len(conns), 8))
         try:
-            hits = connector.search(query)
-            external.extend(_search_result_to_external(h) for h in hits)
-        except RateLimitError as e:
-            errors[connector.name] = f"限流：{e}"
-        except ConnectorError as e:
-            errors[connector.name] = str(e)
-        except Exception as e:  # 兜底：单个源异常不影响整体
-            errors[connector.name] = f"未知错误：{e}"
-    return local_results, external, errors
+            futures = {executor.submit(c.search, query): c.name for c in conns}
+            for fut, name in futures.items():
+                try:
+                    hits = fut.result(timeout=5.0)  # 每源 fan-out 级超时
+                    external.extend(_search_result_to_external(h) for h in hits)
+                except concurrent.futures.TimeoutError:
+                    errors[name] = '请求超时'
+                except RateLimitError as e:
+                    errors[name] = f'限流：{e}'
+                except ConnectorError as e:
+                    errors[name] = str(e)
+                except Exception:
+                    errors[name] = '未知错误'
+        finally:
+            # 不等待慢线程：超时的源继续在后台跑完即弃，请求不被拖住
+            executor.shutdown(wait=False)
+    return local_results, _aggregate_external_results(external, query), errors
 
 
 @router.post("/search/federated", response_model=FederatedSearchResponse)
@@ -1393,7 +1497,77 @@ def _save_external_sync(req: SaveExternalRequest) -> IngestResponse:
         collections.on_collect(obj, db)
         db.commit()
         db.refresh(obj)
+        # Phase 11-B：建立/合并统一作品实体 MediaEntry + MediaSource（非致命，
+        # 失败不阻塞收藏入库；旧收藏在 refresh-external 时同样会进入）
+        try:
+            from app import media as media_svc
+            media_svc.ensure_media_for_item(obj, db)
+            db.commit()
+        except Exception:
+            db.rollback()
         return _ingest_response(obj)
+    finally:
+        db.close()
+
+
+def _media_detail_sync(media_id: int):
+    """独立会话读取 MediaEntry 聚合详情（供 run_in_threadpool）。"""
+    from app.database import SessionLocal
+    from app import media as media_svc
+    db = SessionLocal()
+    try:
+        return media_svc.media_detail(media_id, db)
+    finally:
+        db.close()
+
+
+@router.get("/media/{media_id}", response_model=MediaDetailOut)
+async def media_detail(media_id: int):
+    """统一作品 MediaEntry 聚合详情（字段级 fallback + 多来源 + 关联 Item）。
+
+    收藏入库后自动建立 MediaEntry/MediaSource；未收藏作品请用 /external/detail。
+    """
+    data = await run_in_threadpool(_media_detail_sync, media_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="作品不存在")
+    return data
+
+
+@router.get("/media/{media_id}/staff")
+async def media_staff(media_id: int):
+    """MediaEntry 的 Staff 列表（Phase 12-B，结构索引，按 credit_order 排序）。"""
+    from app.database import SessionLocal
+    from app.models import MediaEntry, Staff
+    db = SessionLocal()
+    try:
+        if db.get(MediaEntry, media_id) is None:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        rows = db.query(Staff).filter(Staff.media_id == media_id) \
+            .order_by(Staff.credit_order.asc()).all()
+        return [{
+            "id": s.id, "name": s.name, "role": s.role,
+            "source": s.source, "external_id": s.external_id, "credit_order": s.credit_order,
+        } for s in rows]
+    finally:
+        db.close()
+
+
+@router.get("/media/{media_id}/relations")
+async def media_relations_route(media_id: int):
+    """MediaEntry 的关系列表（Phase 12-B/12-D）。
+
+    返回含 external_url（外部查看入口）与 is_local / target_item_id（本地导航）；
+    目标未收藏（target_media_id 为空）时仅返回外部链接，不触发 Provider 请求。
+    """
+    from app.database import SessionLocal
+    from app import media as media_svc
+    from app.models import MediaEntry
+    db = SessionLocal()
+    try:
+        entry = db.get(MediaEntry, media_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        return media_svc.relations_out(entry, db)
     finally:
         db.close()
 
@@ -1456,6 +1630,16 @@ async def item_detail(item_id: int, db: Session = Depends(get_db)):
     if not isinstance(meta, dict):
         meta = {}
     from app.external_refs import extract_social_meta
+    # Phase 12-D：Relations 导航字段（有 MediaEntry 时用结构化索引；否则回退 raw）
+    if item.media_entry is not None:
+        from app import media as media_svc
+        item_relations = media_svc.relations_out(item.media_entry, db)
+    else:
+        item_relations = [
+            {"relation": r.get("relation"), "relation_type": r.get("relation"),
+             "title": r.get("title"), "source": r.get("source"), "external_id": r.get("external_id")}
+            for r in (meta.get("relations") or []) if r and r.get("title")
+        ]
     return ItemDetailOut(
         id=item.id,
         title=item.title,
@@ -1478,6 +1662,27 @@ async def item_detail(item_id: int, db: Session = Depends(get_db)):
         collection_status=item.collection.status if item.collection else None,
         collected_at=item.collection.added_at if item.collection else None,
         favorite=bool(item.collection.favorite) if item.collection else False,
+        genres=meta.get("genres") or [],
+        background=meta.get("background"),
+        status=meta.get("status"),
+        episodes=meta.get("episodes"),
+        staff=meta.get("staff") or [],
+        relations=item_relations,
+        duration=meta.get("duration"),
+        season=meta.get("season"),
+        studios=meta.get("studios") or [],
+        themes=meta.get("themes") or [],
+        demographics=meta.get("demographics") or [],
+        external_links=meta.get("external_links") or [],
+        sources=[{
+            "id": s.id,
+            "source": s.source,
+            "external_id": s.external_id,
+            "external_url": s.external_url,
+            "source_title": s.source_title,
+            "image_url": s.image_url,
+            "last_synced_at": s.last_synced_at,
+        } for s in (item.media_entry.sources if item.media_entry is not None else [])],
     )
 
 

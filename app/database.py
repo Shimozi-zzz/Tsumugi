@@ -37,6 +37,8 @@ def ensure_schema(bind=None):
             "work_type": "VARCHAR(20)",
             "alternative_title": "VARCHAR(255)",
             "release_date": "VARCHAR(20)",
+            # Phase 11-B：统一作品实体 MediaEntry 关联（可空，旧数据兼容）
+            "media_id": "INTEGER",
         }
         with engine.begin() as conn:
             for col, ddl_type in item_additions.items():
@@ -73,6 +75,22 @@ def ensure_schema(bind=None):
         if "emotion" not in mem_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE memories ADD COLUMN emotion VARCHAR(20)"))
+    # Phase 12-C：media_entries 高价值结构化字段（增量、可逆）
+    if "media_entries" in insp.get_table_names():
+        me_cols = {c["name"] for c in insp.get_columns("media_entries")}
+        me_additions = {
+            "duration": "VARCHAR(100)",
+            "season": "VARCHAR(50)",
+            "studios": "TEXT",
+            "themes": "TEXT",
+            "demographics": "TEXT",
+            "external_links": "TEXT",
+        }
+        missing = {k: v for k, v in me_additions.items() if k not in me_cols}
+        if missing:
+            with engine.begin() as conn:
+                for col, ddl_type in missing.items():
+                    conn.execute(text(f"ALTER TABLE media_entries ADD COLUMN {col} {ddl_type}"))
 
 
 def _backfill_chunk_source_type(engine):

@@ -217,6 +217,22 @@ class ItemDetailOut(BaseModel):
     work_type: Optional[str] = None
     alternative_title: Optional[str] = None
     release_date: Optional[str] = None
+    # Phase 11-A：丰富媒体元数据（可选，缺失用 None/空数组）
+    genres: List[str] = []
+    background: Optional[str] = None
+    status: Optional[str] = None
+    episodes: Optional[int] = None
+    staff: List[dict] = []      # [{name, role, source, external_id}]
+    relations: List[dict] = []  # [{relation, title, external_id, source}]
+    # Phase 12-C：高价值结构化字段（全 optional）
+    duration: Optional[str] = None
+    season: Optional[str] = None
+    studios: List[str] = []
+    themes: List[str] = []
+    demographics: List[str] = []
+    external_links: List[dict] = []  # [{label, url, source}]
+    # Phase 11-D：已收藏作品的 MediaSource 来源列表（provider/external_id/external_url）
+    sources: List[dict] = []
     # P2 收藏关系（ADR 0046）
     collection_status: Optional[str] = None
     collected_at: Optional[datetime] = None
@@ -231,6 +247,46 @@ class RelatedSourceOut(BaseModel):
     external_id: Optional[str] = None
     image_url: Optional[str] = None
     rating: Optional[float] = None
+
+
+class MediaSourceOut(BaseModel):
+    """统一作品实体在某 Provider 的来源身份（Phase 11-B）。"""
+    id: int
+    source: str
+    external_id: str
+    external_url: Optional[str] = None
+    source_title: Optional[str] = None
+    image_url: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
+
+
+class MediaDetailOut(BaseModel):
+    """统一作品 MediaEntry 聚合详情（字段级 fallback + 来源 + 关联 Item）。"""
+    id: int
+    canonical_title: str
+    alternative_titles: List[str] = []
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    work_type: Optional[str] = None
+    release_date: Optional[str] = None
+    year: Optional[int] = None
+    genres: List[str] = []
+    status: Optional[str] = None
+    episodes: Optional[int] = None
+    background: Optional[str] = None
+    # Phase 12-C：高价值结构化字段（全 optional）
+    duration: Optional[str] = None
+    season: Optional[str] = None
+    studios: List[str] = []
+    themes: List[str] = []
+    demographics: List[str] = []
+    external_links: List[dict] = []  # [{label, url, source}]
+    rating: Optional[float] = None
+    characters: List[dict] = []
+    staff: List[dict] = []
+    relations: List[dict] = []
+    sources: List[MediaSourceOut] = []
+    items: List[dict] = []  # 关联 Item（id/title/source/external_id/image_url）
 
 
 # ---------------------------------------------------------------- 第三方插件（ADR 0027）
@@ -368,6 +424,11 @@ class ExternalResult(BaseModel):
     rating: Optional[float] = None
     tags: List[str] = []
     raw: Optional[dict] = None
+    # Phase 11-A：媒体元数据（可选）+ 多来源聚合
+    year: Optional[int] = None
+    type: Optional[str] = None  # "anime" | "manga" | ...
+    external_url: Optional[str] = None  # 数据源条目页 URL
+    sources: List[dict] = []  # [{source, external_id, title, url, image_url}]，多来源聚合后 ≥1
 
 
 class FederatedSearchResponse(BaseModel):

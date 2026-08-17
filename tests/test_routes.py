@@ -480,6 +480,132 @@ class TestDeclarativeConnectorRoutes:
             registry_unreg("my-api")
 
 
+class TestFederatedMultiProvider:
+    """Phase 11-A：多 Provider 并发 fan-out、单源失败/超时降级、多来源去重聚合。"""
+
+    def _conns(self, monkeypatch, connectors):
+        monkeypatch.setattr(
+            "app.api.routes.connector_registry.get_enabled_connectors",
+            lambda: connectors,
+        )
+
+    def test_two_providers_same_work_aggregated(self, client, monkeypatch):
+        from app.connectors.base import SearchResult
+
+        class A:
+            name = "p1"
+            def search(self, query, **filters):
+                return [SearchResult(source="p1", title="命运石之门", subtitle="Steins;Gate",
+                                     external_id="1", year=2011, rating=8.9)]
+
+        class B:
+            name = "p2"
+            def search(self, query, **filters):
+                return [SearchResult(source="p2", title="Steins;Gate",
+                                     external_id="2", year=2011, type="anime", rating=9.0)]
+
+        self._conns(monkeypatch, [A(), B()])
+        resp = client.post("/api/search/federated", json={"query": "Steins;Gate"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["results"]) == 1  # 同作品聚合为一个
+        r = data["results"][0]
+        assert len(r["sources"]) == 2
+        assert {s["source"] for s in r["sources"]} == {"p1", "p2"}
+
+    def test_provider_failure_degrades(self, client, monkeypatch):
+        from app.connectors.base import ConnectorError, SearchResult
+
+        class Bad:
+            name = "bad"
+            def search(self, query, **filters):
+                raise ConnectorError("boom")
+
+        class Good:
+            name = "good"
+            def search(self, query, **filters):
+                return [SearchResult(source="good", title="OK", external_id="1")]
+
+        self._conns(monkeypatch, [Bad(), Good()])
+        resp = client.post("/api/search/federated", json={"query": "x"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "bad" in data["errors"]
+        assert data["results"][0]["source"] == "good"
+
+    def test_provider_timeout_degrades(self, client, monkeypatch):
+        import time
+        from app.connectors.base import SearchResult
+
+        class Slow:
+            name = "slow"
+            def search(self, query, **filters):
+                time.sleep(5.5)
+                return [SearchResult(source="slow", title="S", external_id="1")]
+
+        class Fast:
+            name = "fast"
+            def search(self, query, **filters):
+                return [SearchResult(source="fast", title="F", external_id="2")]
+
+        self._conns(monkeypatch, [Slow(), Fast()])
+        resp = client.post("/api/search/federated", json={"query": "x"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "slow" in data["errors"]
+        assert data["results"][0]["source"] == "fast"
+
+    def test_different_works_not_merged(self, client, monkeypatch):
+        from app.connectors.base import SearchResult
+
+        class A:
+            name = "p1"
+            def search(self, query, **filters):
+                return [SearchResult(source="p1", title="作品A", external_id="1", year=2020)]
+
+        class B:
+            name = "p2"
+            def search(self, query, **filters):
+                return [SearchResult(source="p2", title="作品B", external_id="2", year=2021)]
+
+        self._conns(monkeypatch, [A(), B()])
+        resp = client.post("/api/search/federated", json={"query": "作品"})
+        assert len(resp.json()["results"]) == 2
+
+    def test_anime_vs_manga_not_merged(self, client, monkeypatch):
+        from app.connectors.base import SearchResult
+
+        class A:
+            name = "p1"
+            def search(self, query, **filters):
+                return [SearchResult(source="p1", title="作品A", external_id="1", year=2020, type="anime")]
+
+        class B:
+            name = "p2"
+            def search(self, query, **filters):
+                return [SearchResult(source="p2", title="作品A", external_id="2", year=2020, type="manga")]
+
+        self._conns(monkeypatch, [A(), B()])
+        resp = client.post("/api/search/federated", json={"query": "作品A"})
+        assert len(resp.json()["results"]) == 2
+
+    def test_old_fields_compatible(self, client, monkeypatch):
+        from app.connectors.base import SearchResult
+
+        class A:
+            name = "p1"
+            def search(self, query, **filters):
+                return [SearchResult(source="p1", title="作品A", external_id="1")]
+
+        self._conns(monkeypatch, [A()])
+        resp = client.post("/api/search/federated", json={"query": "作品A"})
+        r = resp.json()["results"][0]
+        assert r["source"] == "p1"
+        assert r["title"] == "作品A"
+        assert r["external_id"] == "1"
+        assert len(r["sources"]) == 1
+
+
 def registry_get(name):
     from app.connectors import registry as r
     return r.get_connector(name)
@@ -652,3 +778,128 @@ class TestBatchOps:
         assert "单个" in r.json()["tags"]
         # 不存在的条目
         assert client.post("/api/items/99999/tags", json={"tag_names": ["x"]}).status_code == 404
+
+
+class TestMediaStaffRelations:
+    """Phase 12-B：MediaEntry Staff / MediaRelation 端点 + Jikan 加入 federated。"""
+
+    def _mk(self, db, **kw):
+        from app.models import Item
+        defaults = dict(type="external_ref", source="jikan", external_id="1", title="作品", content="")
+        defaults.update(kw)
+        it = Item(**defaults)
+        it.raw_metadata = kw.get("raw_metadata")
+        db.add(it)
+        db.commit()
+        db.refresh(it)
+        return it
+
+    def test_media_staff_route(self, client, db):
+        from app import media as media_svc
+        item = self._mk(db, raw_metadata={"source": "jikan", "detail": {"metadata": {"staff": [
+            {"name": "Takuya Sato", "role": "Director", "source": "jikan", "external_id": "5", "credit_order": 0}]}}})
+        entry = media_svc.ensure_media_for_item(item, db)
+        db.commit()
+        resp = client.get(f"/api/media/{entry.id}/staff")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data[0]["name"] == "Takuya Sato"
+        assert data[0]["role"] == "Director"
+        assert data[0]["source"] == "jikan"
+        assert data[0]["credit_order"] == 0
+
+    def test_media_relations_route(self, client, db):
+        from app import media as media_svc
+        item = self._mk(db, raw_metadata={"source": "jikan", "detail": {"metadata": {"relations": [
+            {"relation": "Sequel", "title": "Steins;Gate 0", "external_id": "999", "source": "jikan"}]}}})
+        entry = media_svc.ensure_media_for_item(item, db)
+        db.commit()
+        resp = client.get(f"/api/media/{entry.id}/relations")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data[0]["relation_type"] == "sequel"
+        assert data[0]["title"] == "Steins;Gate 0"
+        assert data[0]["target_media_id"] is None
+
+    def test_media_detail_includes_staff_relations(self, client, db):
+        from app import media as media_svc
+        item = self._mk(db, raw_metadata={"source": "jikan", "detail": {"metadata": {
+            "staff": [{"name": "A", "role": "Director", "source": "jikan", "external_id": "5", "credit_order": 0}],
+            "relations": [{"relation": "Sequel", "title": "T", "external_id": "9", "source": "jikan"}],
+        }}})
+        entry = media_svc.ensure_media_for_item(item, db)
+        db.commit()
+        data = client.get(f"/api/media/{entry.id}").json()
+        assert data["staff"][0]["name"] == "A"
+        assert data["relations"][0]["relation_type"] == "sequel"
+
+    def test_jikan_in_federated(self, client, monkeypatch):
+        from app.connectors.base import SearchResult
+
+        class J:
+            name = "jikan"
+            def search(self, query, **filters):
+                return [SearchResult(source="jikan", title="Steins;Gate", external_id="9253", year=2011)]
+
+        monkeypatch.setattr("app.api.routes.connector_registry.get_enabled_connectors", lambda: [J()])
+        resp = client.post("/api/search/federated", json={"query": "Steins"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["source"] == "jikan"
+        assert data["results"][0]["year"] == 2011
+
+    def test_jikan_failure_degrades(self, client, monkeypatch):
+        from app.connectors.base import ConnectorError, SearchResult
+
+        class Bad:
+            name = "jikan"
+            def search(self, query, **filters):
+                raise ConnectorError("jikan down")
+
+        class Good:
+            name = "bangumi"
+            def search(self, query, **filters):
+                return [SearchResult(source="bangumi", title="OK", external_id="1")]
+
+        monkeypatch.setattr("app.api.routes.connector_registry.get_enabled_connectors", lambda: [Bad(), Good()])
+        resp = client.post("/api/search/federated", json={"query": "x"})
+        data = resp.json()
+        assert "jikan" in data["errors"]
+        assert data["results"][0]["source"] == "bangumi"
+
+
+    def test_media_relations_navigation_fields(self, client, db):
+        from app import media as media_svc
+        target = self._mk(db, source="jikan", external_id="999", title="目标作品")
+        tmedia = media_svc.ensure_media_for_item(target, db)
+        db.commit()
+        item = self._mk(db, external_id="9253", title="本体",
+                        raw_metadata={"source": "jikan", "detail": {"metadata": {"relations": [
+                            {"relation": "Sequel", "title": "目标作品", "external_id": "999", "source": "jikan"}]}}})
+        emedia = media_svc.ensure_media_for_item(item, db)
+        db.commit()
+        rows = client.get(f"/api/media/{emedia.id}/relations").json()
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["relation_type"] == "sequel"
+        assert r["is_local"] is True
+        assert r["target_media_id"] == tmedia.id
+        assert r["target_item_id"] == target.id
+        assert r["external_url"] == "https://myanimelist.net/anime/999"
+
+    def test_media_relations_no_provider_request(self, client, db, monkeypatch):
+        """relations 端点只读本地 DB，绝不触发 Provider API。"""
+        import httpx
+
+        def boom(url, **kw):
+            raise AssertionError("relations 不应触发 Provider 请求")
+
+        monkeypatch.setattr("app.connectors.jikan.connector.http_get", boom)
+        from app import media as media_svc
+        item = self._mk(db, raw_metadata={"source": "jikan", "detail": {"metadata": {"relations": [
+            {"relation": "Sequel", "title": "X", "external_id": "1", "source": "jikan"}]}}})
+        emedia = media_svc.ensure_media_for_item(item, db)
+        db.commit()
+        resp = client.get(f"/api/media/{emedia.id}/relations")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1

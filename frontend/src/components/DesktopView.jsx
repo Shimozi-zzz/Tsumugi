@@ -30,7 +30,7 @@ import HomeShrine from "./HomeShrine.jsx";
 import MemoryGallery from "./MemoryGallery.jsx";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
 import ArchiveCard from "./ArchiveCard.jsx";
-import { WORK_TYPES, WORK_TYPE_LABEL, PageHeader } from "./ui.jsx";
+import { WORK_TYPES, WORK_TYPE_LABEL, PageHeader, ProviderBadge, PROVIDER_LABELS } from "./ui.jsx";
 import ShortcutsModal from "./ShortcutsModal.jsx";
 import TagEditModal from "./TagEditModal.jsx";
 import BangumiPanel from "./BangumiPanel.jsx";
@@ -47,6 +47,9 @@ function sourceTypeLabel(s) {
   if (s.source_type === "memory") return "我的记忆"; // P7 / ADR 0051
   return "知识库";
 }
+
+// 聚合结果来源展示："Bangumi · AniList"；无 sources 时回退单源（旧客户端兼容）
+// （Phase 11-A/B：改用 ui.jsx 的 ProviderBadge 呈现，见外部检索结果卡片）
 
 // Phase 10-1-B-9：来源 provenance——仅 memory 的真实 metadata（occurred_at/emotion/milestone）
 function sourceProvenance(s) {
@@ -287,6 +290,10 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState([]);
   const [fedResults, setFedResults] = useState([]);
+  // Phase 11-D + 12-D：外部检索结果按 来源/类型/年份 筛选（仅前端过滤，不改后端语义）
+  const [fedFilter, setFedFilter] = useState("all");
+  const [fedType, setFedType] = useState("all");
+  const [fedYear, setFedYear] = useState("all");
   const [askError, setAskError] = useState("");
   const [answerOpen, setAnswerOpen] = useState(false);
   // P6 检索台（ADR 0050）：个人全文检索结果 + 只读记忆弹层
@@ -1562,6 +1569,29 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               )}
             </div>
 
+            {/* Phase 12-D：最近收藏（收集时间倒序；数据不足隐藏） */}
+            {!gridLoading && libFiltered.length > 0 && (() => {
+              const recent = [...libFiltered].filter((it) => it.collected_at)
+                .sort((a, b) => String(b.collected_at).localeCompare(String(a.collected_at))).slice(0, 6);
+              if (!recent.length) return null;
+              return (
+                <div className="mb-4 shrink-0">
+                  <div className="wd-chars-title" style={{ marginBottom: 6 }}>最近收藏</div>
+                  <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
+                    {recent.map((it) => (
+                      <button key={it.id} onClick={() => openItemDetail(it)}
+                        style={{ flexShrink: 0, width: 72, textAlign: "left", cursor: "pointer", background: "none", border: "none", padding: 0 }}>
+                        <div style={{ width: 72, height: 96, borderRadius: "var(--radius-cover)", overflow: "hidden", background: "var(--card-thumb)" }}>
+                          {it.image_url ? <img src={it.image_url} alt="" loading="lazy" onError={(e) => { e.target.style.visibility = "hidden"; }} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+                        </div>
+                        <div style={{ fontSize: 10, color: "var(--text)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {gridLoading ? (
               <div className="flex-1 min-h-0 flex items-center justify-center text-sm"
                 style={{ color: "var(--text-secondary)" }}>加载中…</div>
@@ -1726,16 +1756,73 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                       <h3 className="wd-chapter-title">外部检索</h3>
                     </div>
                     <div className="ask-section-rule" />
+                    {/* Phase 11-D + 12-D：来源 / 类型 / 年份筛选（全部前端过滤） */}
+                    <div className="flex items-center gap-1 mb-2 flex-wrap">
+                      {["all", "bangumi", "anilist", "moegirl", "vndb", "jikan"].map((k) => (
+                        <button key={k} type="button" onClick={() => setFedFilter(k)}
+                          className={`settings-tab${fedFilter === k ? " settings-tab-active" : ""}`}
+                          style={{ padding: "3px 10px", fontSize: 12, flex: "0 0 auto" }}>
+                          {k === "all" ? "全部" : PROVIDER_LABELS[k]}
+                        </button>
+                      ))}
+                    </div>
+                    {["all", "anime", "manga", "other"].map((k) => (
+                      <button key={k} type="button" onClick={() => setFedType(k)}
+                        className={`settings-tab${fedType === k ? " settings-tab-active" : ""}`}
+                        style={{ padding: "3px 10px", fontSize: 12, flex: "0 0 auto" }}>
+                        {k === "all" ? "类型：全部" : k === "anime" ? "Anime" : k === "manga" ? "Manga" : "其它"}
+                      </button>
+                    ))}
+                    {Array.from(new Set(fedResults.map((r) => r.year).filter((y) => y != null))).sort((a, b) => b - a).slice(0, 6).map((y) => (
+                      <button key={y} type="button" onClick={() => setFedYear(fedYear === String(y) ? "all" : String(y))}
+                        className={`settings-tab${fedYear === String(y) ? " settings-tab-active" : ""}`}
+                        style={{ padding: "3px 10px", fontSize: 12, flex: "0 0 auto" }}>
+                        {y}
+                      </button>
+                    ))}
+                    {fedYear !== "all" && (
+                      <button type="button" onClick={() => setFedYear("all")}
+                        className="settings-tab" style={{ padding: "3px 10px", fontSize: 12, flex: "0 0 auto" }}>清空年份</button>
+                    )}
                     <div className="ask-list">
-                      {fedResults.slice(0, 4).map((r, i) => (
-                        <div key={i} className="ask-external-row">
-                          <button onClick={() => openExternalDetail(r)} className="ask-external-main">
-                            <span className="ask-type">{r.source}</span>
-                            <span className="ask-row-title">{r.title}</span>
+                      {fedResults
+                        .filter((r) => fedFilter === "all"
+                          || (r.sources || []).some((s) => s.source === fedFilter)
+                          || r.source === fedFilter)
+                        .filter((r) => fedType === "all"
+                          || (fedType === "other" ? !r.type : r.type === fedType))
+                        .filter((r) => fedYear === "all" || String(r.year) === fedYear)
+                        .slice(0, 4).map((r, i) => (
+                        <div key={i} className="ask-result-card">
+                          <button onClick={() => openExternalDetail(r)} className="ask-result-cover" aria-label="查看详情">
+                            {r.image_url
+                              ? <img src={r.image_url} alt="" loading="lazy" onError={(e) => { e.target.style.visibility = "hidden"; }} />
+                              : <span>{(r.title || "?").slice(0, 1)}</span>}
                           </button>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button onClick={() => openExternalDetail(r)} className="ask-action">详情</button>
-                            <button onClick={() => handleSave(r)} className="ask-action accent">收藏</button>
+                          <div className="ask-result-body">
+                            <button onClick={() => openExternalDetail(r)} className="ask-result-main">
+                              <span className="ask-result-title">{r.title}</span>
+                              {r.subtitle ? <span className="ask-result-sub">{r.subtitle}</span> : null}
+                              <span className="ask-result-meta">
+                                {r.year ? <span>{r.year}</span> : null}
+                                {r.type ? <span>{r.type}</span> : null}
+                                {r.rating != null ? <span>★ {Number(r.rating).toFixed(1)}</span> : null}
+                              </span>
+                              {(r.tags || []).length > 0 && (
+                                <span className="ask-result-tags">
+                                  {(r.tags || []).slice(0, 5).map((t, j) => (
+                                    <span key={j} className="tsm-tag ask-result-tag">{t}</span>
+                                  ))}
+                                </span>
+                              )}
+                            </button>
+                            <div className="ask-result-foot">
+                              <ProviderBadge source={r.source} sources={r.sources} count />
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button onClick={() => openExternalDetail(r)} className="ask-action">详情</button>
+                                <button onClick={() => handleSave(r)} className="ask-action accent">收藏</button>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -2271,6 +2358,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               onShareDetail={detailView.saved ? () => setShareItem(detailView.itemId) : null}
               onRefreshDetail={detailView.saved ? handleRefreshExternal : null}
               onOpenReview={(it) => { setDetailView(null); setReviewItem(it); }}
+              onOpenRelated={(id) => { if (id != null) openItemDetail({ id }); }}
               composerFocusTick={composerFocusTick}
             />
           </div>

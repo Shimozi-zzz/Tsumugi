@@ -240,3 +240,38 @@ describe("Experience Loop（Phase 10-1-A-4）", () => {
     });
   });
 });
+
+
+describe("Library 最近收藏（Phase 12-D）", () => {
+  function mockItems(items) {
+    global.fetch = vi.fn((u) => {
+      const url = String(u);
+      if (url.includes("/items") && !url.includes("/items/")) return ok({ total: items.length, items });
+      if (url.includes("/tags")) return ok([]);
+      if (url.includes("/connectors")) return ok([]);
+      if (url.includes("/collections")) return ok([]);
+      return ok({});
+    });
+  }
+
+  it("有收藏时间时显示「最近收藏」行", async () => {
+    mockItems([
+      { id: 1, title: "最近A", type: "external_ref", source: "bangumi", tags: [], collected_at: "2026-08-10T00:00:00", image_url: null },
+      { id: 2, title: "旧B", type: "external_ref", source: "bangumi", tags: [], collected_at: "2026-01-01T00:00:00", image_url: null },
+    ]);
+    render(<DesktopView {...PROPS} />);
+    fireEvent.click(screen.getByTitle("书库"));
+    await waitFor(() => expect(screen.getByText("最近收藏")).toBeTruthy());
+    expect(screen.getAllByText("最近A").length).toBeGreaterThan(0);
+  });
+
+  it("无 collected_at 时隐藏「最近收藏」行", async () => {
+    mockItems([
+      { id: 3, title: "无收藏时间", type: "note", source: "local", tags: [], collected_at: null, image_url: null },
+    ]);
+    render(<DesktopView {...PROPS} />);
+    fireEvent.click(screen.getByTitle("书库"));
+    await waitFor(() => expect(screen.getByText("无收藏时间")).toBeTruthy());
+    expect(screen.queryByText("最近收藏")).toBeNull();
+  });
+});

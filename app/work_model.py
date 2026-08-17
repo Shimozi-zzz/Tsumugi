@@ -29,6 +29,9 @@ def extract_work_columns(raw_metadata) -> Dict[str, str]:
     wt = md.get("type")
     if isinstance(wt, int) and wt in _BANGUMI_TYPE_TO_WORK:
         out["work_type"] = _BANGUMI_TYPE_TO_WORK[wt]
+    elif isinstance(wt, str) and wt.lower() in WORK_TYPES:
+        # Phase 11-A：非 Bangumi 数据源（如 AniList）直接给 work_type 字符串
+        out["work_type"] = wt.lower()
     alt = md.get("original_name")
     if isinstance(alt, str) and alt.strip():
         out["alternative_title"] = alt.strip()

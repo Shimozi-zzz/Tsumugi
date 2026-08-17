@@ -15,6 +15,8 @@ const fs = require("fs");
 
 const ROOT_DIR = path.resolve(__dirname, "..", ".."); // frontend/electron -> 项目根
 const VITE_URL = "http://127.0.0.1:4173";
+// 应用图标（开发模式窗口图标；打包版由 electron-builder 的 build.win.icon 内嵌进 exe）
+const APP_ICON = path.join(__dirname, "..", "build", "icons", "icon.ico");
 // 端口统一走环境变量 TSUMUGI_PORT（与后端 config.py / vite 一致）
 const BACKEND_PORT = Number(process.env.TSUMUGI_PORT || 8001);
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
@@ -93,6 +95,8 @@ async function createWindow() {
     title: "Tsumugi 知识库",
     // 无边框窗口：标题栏由渲染层绘制（与 Tsumugi UI 统一），窗口控制走 IPC
     frame: false,
+    // 开发模式窗口图标；打包版文件不在 asar，回退 exe 内嵌图标
+    ...(fs.existsSync(APP_ICON) ? { icon: APP_ICON } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

@@ -1,6 +1,6 @@
 """ORM模型定义 - Item/Chunk/Tag/Source"""
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, ForeignKey, Table, JSON
+    Column, Integer, String, Text, DateTime, ForeignKey, Table, JSON, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -49,6 +49,8 @@ class Item(Base):
     work_type = Column(String(20), nullable=True, index=True)  # anime/manga/game/galgame/novel/other
     alternative_title = Column(String(255), nullable=True)  # 原名/别名（多来源匹配用）
     release_date = Column(String(20), nullable=True)  # 发行日期（字符串，按需取年份）
+    # Phase 11-B：统一作品实体 MediaEntry 关联（可空；旧数据/旧 Item 不受影响）
+    media_id = Column(Integer, ForeignKey("media_entries.id"), nullable=True, index=True)
 
     # 关系
     chunks = relationship("Chunk", back_populates="item", cascade="all, delete-orphan")
@@ -58,6 +60,7 @@ class Item(Base):
     collection = relationship("Collection", back_populates="item", uselist=False,
                               cascade="all, delete-orphan")
     characters = relationship("Character", secondary=character_works, back_populates="works")
+    media_entry = relationship("MediaEntry", back_populates="items")
 
 
 class Chunk(Base):
@@ -233,3 +236,117 @@ class LLMProviderConfig(Base):
     api_key_ref = Column(String(200), nullable=True)
     enabled = Column(Integer, default=0)  # 同一时间仅一个启用
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class MediaEntry(Base):
+    """统一作品实体（Phase 11-B）：同一逻辑作品聚合多 Provider 来源。
+
+    注意命名：现有 Media 表是"记忆附件"（ADR 0047），故本实体命名 MediaEntry。
+    Item 仍是持久化入口（Collection/Review/Memory/RAG 依赖 Item.id），
+    MediaEntry 是跨来源聚合层；item.media_id 可空，旧 Item 不受影响。
+    """
+    __tablename__ = "media_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    canonical_title = Column(String(255), nullable=False, index=True)
+    alternative_titles = Column(Text, nullable=True)  # JSON 数组
+    description = Column(Text, nullable=True)
+    image_url = Column(String(500), nullable=True)
+    work_type = Column(String(20), nullable=True)  # anime/manga/game/...
+    release_date = Column(String(20), nullable=True)
+    year = Column(Integer, nullable=True)
+    genres = Column(Text, nullable=True)  # JSON 数组
+    status = Column(String(50), nullable=True)
+    episodes = Column(Integer, nullable=True)
+    background = Column(String(500), nullable=True)
+    # Phase 12-C：高价值结构化字段（全 nullable，跨 Provider 稳定）
+    duration = Column(String(100), nullable=True)      # 每集时长 / 总时长（Provider 原文）
+    season = Column(String(50), nullable=True)         # Spring/Summer/Fall/Winter 或 1-4
+    studios = Column(Text, nullable=True)              # JSON 数组（制作公司名）
+    themes = Column(Text, nullable=True)               # JSON 数组
+    demographics = Column(Text, nullable=True)         # JSON 数组
+    external_links = Column(Text, nullable=True)       # JSON 数组 [{label,url,source}]
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    items = relationship("Item", back_populates="media_entry")
+    sources = relationship("MediaSource", back_populates="media_entry", cascade="all, delete-orphan")
+    staff = relationship("Staff", back_populates="media_entry", cascade="all, delete-orphan")
+    relations = relationship("MediaRelation", back_populates="media_entry",
+                             cascade="all, delete-orphan", foreign_keys="MediaRelation.media_id")
+
+
+class MediaSource(Base):
+    """一个作品在某 Provider 的来源身份（source + external_id 唯一）。
+
+    支持未来增加 Provider 而不改 MediaEntry 主表：新增 Provider 只新增一行
+    MediaSource。raw_metadata 保留该来源的原始数据（不覆盖、可追溯）。
+    """
+    __tablename__ = "media_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    media_id = Column(Integer, ForeignKey("media_entries.id"), nullable=False, index=True)
+    source = Column(String(50), nullable=False)
+    external_id = Column(String(255), nullable=False)
+    external_url = Column(String(500), nullable=True)
+    source_title = Column(String(255), nullable=True)
+    image_url = Column(String(500), nullable=True)
+    raw_metadata = Column(JSON, nullable=True)  # 该来源原始 metadata（不覆盖）
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (UniqueConstraint("source", "external_id", name="uq_media_source"),)
+
+    media_entry = relationship("MediaEntry", back_populates="sources")
+
+
+class Staff(Base):
+    """轻量 Staff 实体（Phase 12-B）：从 raw_metadata 提炼的结构化索引。
+
+    - 允许同一 Staff 出现在多个 MediaEntry（不做跨 Provider 强行 Person 合并）；
+    - 去重键 (source, external_id, media_id)；external_id 缺失时按 name+media_id 记一条；
+    - 原 raw_metadata 中的 staff 保留，本表只是可查询索引。
+    """
+    __tablename__ = "staff"
+
+    id = Column(Integer, primary_key=True, index=True)
+    media_id = Column(Integer, ForeignKey("media_entries.id"), nullable=False, index=True)
+    source = Column(String(50), nullable=False)
+    external_id = Column(String(255), nullable=True)
+    name = Column(String(255), nullable=False)
+    role = Column(String(200), nullable=True)
+    credit_order = Column(Integer, nullable=True)
+    raw_metadata = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("source", "external_id", "media_id", name="uq_staff"),)
+
+    media_entry = relationship("MediaEntry", back_populates="staff")
+
+
+class MediaRelation(Base):
+    """作品关系索引（Phase 12-B）：从 raw_metadata.relations 提炼，可查询可跳转。
+
+    - target_media_id 可空：目标作品尚未收藏时保留 title/external_id/source；
+    - 未知 relation_type 保留原始字符串，不做强行归类；
+    - 禁止为建立关系自动请求目标作品 API。
+    """
+    __tablename__ = "media_relations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    media_id = Column(Integer, ForeignKey("media_entries.id"), nullable=False, index=True)
+    source = Column(String(50), nullable=False)
+    relation_type = Column(String(100), nullable=True)
+    target_title = Column(String(255), nullable=True)
+    target_external_id = Column(String(255), nullable=True)
+    target_source = Column(String(50), nullable=True)
+    target_media_id = Column(Integer, ForeignKey("media_entries.id"), nullable=True, index=True)
+    raw_metadata = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint(
+        "media_id", "source", "target_external_id", "relation_type", name="uq_media_relation"),)
+
+    media_entry = relationship("MediaEntry", back_populates="relations",
+                               foreign_keys=[media_id])
