@@ -295,12 +295,15 @@ def relations_out(entry: MediaEntry, db: Session) -> list:
     只查本地数据，不触发任何 Provider 请求。
     """
     rows = db.query(MediaRelation).filter(MediaRelation.media_id == entry.id).all()
+    # Phase 13-E：批量解析 target_media_id → item_id（一次 IN 查询，避免逐行 N+1）
+    target_ids = {r.target_media_id for r in rows if r.target_media_id is not None}
+    item_by_media = {}
+    if target_ids:
+        for it in db.query(Item).filter(Item.media_id.in_(target_ids)).all():
+            item_by_media.setdefault(it.media_id, it.id)
     out = []
     for r in rows:
-        target_item_id = None
-        if r.target_media_id is not None:
-            it = db.query(Item).filter(Item.media_id == r.target_media_id).first()
-            target_item_id = it.id if it is not None else None
+        target_item_id = item_by_media.get(r.target_media_id) if r.target_media_id is not None else None
         out.append({
             "id": r.id,
             "relation": r.relation_type,          # 兼容旧字段名

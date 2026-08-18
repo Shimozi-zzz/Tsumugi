@@ -603,3 +603,15 @@ export async function streamRag(query, { onSources, onChunk, onDone, onError }) 
     }
   }
 }
+
+export async function fetchStaffPerson(source, externalId) {
+  const resp = await fetch(`${API_BASE}/staff/${encodeURIComponent(source)}/${encodeURIComponent(externalId)}`);
+  if (!resp.ok) throw new Error("加载人物失败");
+  return resp.json();
+}
+
+export async function fetchCharacterPerson(source, externalId) {
+  const resp = await fetch(`${API_BASE}/characters/${encodeURIComponent(source)}/${encodeURIComponent(externalId)}`);
+  if (!resp.ok) throw new Error("加载角色失败");
+  return resp.json();
+}

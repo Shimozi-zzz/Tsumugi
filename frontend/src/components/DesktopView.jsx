@@ -27,6 +27,7 @@ import ContextMenu from "./ContextMenu.jsx";
 import CommandPalette from "./CommandPalette.jsx";
 import CoverAmbient from "./CoverAmbient.jsx";
 import HomeShrine from "./HomeShrine.jsx";
+import PersonPanel from "./PersonPanel.jsx";
 import MemoryGallery from "./MemoryGallery.jsx";
 import MemoryReviewModal from "./MemoryReviewModal.jsx";
 import ArchiveCard from "./ArchiveCard.jsx";
@@ -159,6 +160,8 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
   const [reviewItem, setReviewItem] = useState(null);
   // 作品详情弹层：{detail, saved}；null=关闭（角色图鉴）
   const [detailView, setDetailView] = useState(null); // { itemId, externalDetail, saved }
+  // Phase 13-B：人物面板（Staff / Character 导航）
+  const [personView, setPersonView] = useState(null);
   const [detailRefreshKey, setDetailRefreshKey] = useState(0); // 刷新资料后重取详情
   // 安利卡弹层：当前生成安利卡的 item id（null=关闭）
   const [shareItem, setShareItem] = useState(null);
@@ -369,7 +372,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       tagMatch: groupTagFilter?.length ? "all" : undefined,
       type: activeGroup === "custom" ? undefined : typeMap[activeGroup],
       skip: 0,
-      limit: 200,
+      limit: 500,
     })
       .then((d) => { setGridItems(d.items); setGridTotal(d.total); })
       .catch(() => {})
@@ -518,6 +521,12 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
       });
       refresh();
       setCharRefreshKey((k) => k + 1);
+      // Phase 14-B：收藏成功后立即同步当前搜索快照 → 该卡从「收藏」变「打开」
+      // （匹配 source+external_id，只改明确对应项；不重新搜索、不逐卡请求）
+      setFedResults((prev) => prev.map((x) =>
+        x.source === r.source && String(x.external_id) === String(r.external_id)
+          ? { ...x, is_local: true, local_item_id: res.item_id }
+          : x));
       // Phase 10-1-A-2：收藏成功 toast 附加 quiet 引导 → 打开详情并聚焦「我的记忆」composer
       toast.success(`已收藏「${r.title}」`, 5200, {
         label: "去记录第一条回忆",
@@ -544,6 +553,28 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
 
   function openItemDetail(it) {
     setDetailView({ itemId: it.id, externalDetail: null, saved: true });
+  }
+
+  // Phase 14-C：本地结果的合法 id——必须 is_local=true 且 local_item_id 非 null/非空串。
+  // 空串/缺失视为「无有效本地 id」，走安全 fallback，绝不制造假的本地打开。
+  // 注意：数字 0 是合法 id（不因 falsy 误判），仅排除 null 与空串。
+  function localResultId(r) {
+    if (!r || r.is_local !== true) return null;
+    const id = r.local_item_id;
+    if (id == null || id === "") return null;
+    return id;
+  }
+
+  // Phase 14-B：搜索结果打开——本地已收藏结果（is_local + 有效 local_item_id）直接进本地
+  // ItemDetailPanel，禁止 /external/detail 与任何 Provider 请求；否则走 live 详情 fallback。
+  // 结果卡封面/标题/「详情」统一走这里，保证行为一致。
+  function openSearchResult(r) {
+    const id = localResultId(r);
+    if (id != null) {
+      openItemDetail({ id });
+    } else {
+      openExternalDetail(r);
+    }
   }
 
   // 手动刷新外部条目资料：重新拉取最新简介/角色小传（受限流约束，非阻塞 UI）
@@ -694,6 +725,7 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
         if (showShortcuts) { setShowShortcuts(false); return; }
         if (selectMode) { exitSelectMode(); return; }
         if (detailView) { setDetailView(null); return; }
+        if (personView) { setPersonView(null); return; } // Phase 13-D：ESC 也能关闭人物面板
         if (shareItem != null) { setShareItem(null); return; }
         if (reviewItem) { setReviewItem(null); return; }
         if (showImport) { setShowImport(false); return; }
@@ -977,10 +1009,17 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
     || (mySearch && (mySearch.q || mySearch.works.length || mySearch.reviews.length || mySearch.memories.length)));
   // P1（ADR 0045）：图书馆按作品类型筛选（work_type）
   const [activeWorkType, setActiveWorkType] = useState(null);
+  // Phase 13-B：题材 / 制作公司筛选（MediaEntry 结构化字段，前端过滤）
+  const [activeGenre, setActiveGenre] = useState(null);
+  const [activeStudio, setActiveStudio] = useState(null);
+  const genreOptions = [...new Set((gridItems || []).flatMap((it) => it.genres || []))].sort().slice(0, 12);
+  const studioOptions = [...new Set((gridItems || []).flatMap((it) => it.studios || []))].sort().slice(0, 8);
   const workTypeOptions = WORK_TYPES.filter((t) => (gridItems || []).some((it) => it.work_type === t));
   // 图书馆网格：按 work_type + libQuery 本地过滤（标题/内容）
   const libFiltered = gridItems.filter((it) => {
     if (activeWorkType && it.work_type !== activeWorkType) return false;
+    if (activeGenre && !(it.genres || []).includes(activeGenre)) return false;
+    if (activeStudio && !(it.studios || []).includes(activeStudio)) return false;
     if (!libQuery.trim()) return true;
     const q = libQuery.trim().toLowerCase();
     return (it.title || "").toLowerCase().includes(q) || (it.content || "").toLowerCase().includes(q);
@@ -1546,6 +1585,23 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   {WORK_TYPE_LABEL[t]}
                 </button>
               ))}
+              {/* Phase 13-B：题材 / 制作公司筛选（仅前端过滤，数据不足隐藏） */}
+              {genreOptions.map((g) => (
+                <button key={g} onClick={() => setActiveGenre(activeGenre === g ? null : g)}
+                  className="px-2 py-0.5 rounded-full"
+                  style={{ color: activeGenre === g ? "var(--accent)" : "var(--ink-2)",
+                    backgroundColor: activeGenre === g ? "var(--accent-soft)" : "transparent" }}>
+                  {g}
+                </button>
+              ))}
+              {studioOptions.map((s) => (
+                <button key={s} onClick={() => setActiveStudio(activeStudio === s ? null : s)}
+                  className="px-2 py-0.5 rounded-full"
+                  style={{ color: activeStudio === s ? "var(--accent)" : "var(--ink-2)",
+                    backgroundColor: activeStudio === s ? "var(--accent-soft)" : "transparent" }}>
+                  {s}
+                </button>
+              ))}
               {activeTag && (
                 <button onClick={() => setActiveTag(null)} title="清除标签"
                   className="px-2 py-0.5 rounded-full"
@@ -1563,33 +1619,57 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                   className="px-2 py-0.5 rounded-full"
                   style={{ color: "var(--accent)", backgroundColor: "var(--accent-soft)" }}>「{libQuery.trim()}」 ✕</button>
               )}
-              {(activeTag || activeGroup !== "all" || activeWorkType || libQuery.trim()) && (
-                <button onClick={() => { setActiveTag(null); setActiveGroup("all"); setActiveWorkType(null); setLibQuery(""); }}
+              {(activeTag || activeGroup !== "all" || activeWorkType || activeGenre || activeStudio || libQuery.trim()) && (
+                <button onClick={() => { setActiveTag(null); setActiveGroup("all"); setActiveWorkType(null); setActiveGenre(null); setActiveStudio(null); setLibQuery(""); }}
                   title="清除筛选" className="px-1" style={{ color: "var(--text-secondary)" }}>清除筛选</button>
               )}
             </div>
 
-            {/* Phase 12-D：最近收藏（收集时间倒序；数据不足隐藏） */}
+            {/* Phase 12-D + 13-B：动态内容行（最近收藏 / 最近更新 / 有记录；数据不足隐藏，角标=有记录） */}
             {!gridLoading && libFiltered.length > 0 && (() => {
               const recent = [...libFiltered].filter((it) => it.collected_at)
                 .sort((a, b) => String(b.collected_at).localeCompare(String(a.collected_at))).slice(0, 6);
-              if (!recent.length) return null;
-              return (
-                <div className="mb-4 shrink-0">
-                  <div className="wd-chars-title" style={{ marginBottom: 6 }}>最近收藏</div>
-                  <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
-                    {recent.map((it) => (
-                      <button key={it.id} onClick={() => openItemDetail(it)}
-                        style={{ flexShrink: 0, width: 72, textAlign: "left", cursor: "pointer", background: "none", border: "none", padding: 0 }}>
-                        <div style={{ width: 72, height: 96, borderRadius: "var(--radius-cover)", overflow: "hidden", background: "var(--card-thumb)" }}>
-                          {it.image_url ? <img src={it.image_url} alt="" loading="lazy" onError={(e) => { e.target.style.visibility = "hidden"; }} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
-                        </div>
-                        <div style={{ fontSize: 10, color: "var(--text)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title}</div>
-                      </button>
-                    ))}
+              const recentIds = new Set(recent.map((i) => i.id));
+              const updated = [...libFiltered]
+                .filter((it) => !recentIds.has(it.id) && (it.updated_at || it.synced_at))
+                .sort((a, b) => String(b.updated_at || b.synced_at || "").localeCompare(String(a.updated_at || a.synced_at || ""))).slice(0, 6);
+              const hasRecord = [...libFiltered].filter((it) => (it.review_count || 0) + (it.memory_count || 0) > 0).slice(0, 6);
+              const badges = (it) => [
+                it.collection_status ? "已收藏" : null,
+                it.my_rating != null ? "评分" : null,
+                (it.memory_count || 0) > 0 ? "记忆" : null,
+                (it.review_count || 0) > 0 ? "书评" : null,
+              ].filter(Boolean);
+              const renderRow = (label, items) => {
+                if (!items.length) return null;
+                return (
+                  <div className="mb-4 shrink-0">
+                    <div className="wd-chars-title" style={{ marginBottom: 6 }}>{label}</div>
+                    <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
+                      {items.map((it) => {
+                        const b = badges(it);
+                        return (
+                          <button key={it.id} onClick={() => openItemDetail(it)}
+                            style={{ flexShrink: 0, width: 72, textAlign: "left", cursor: "pointer", background: "none", border: "none", padding: 0 }}>
+                            <div style={{ width: 72, height: 96, borderRadius: "var(--radius-cover)", overflow: "hidden", background: "var(--card-thumb)" }}>
+                              {it.image_url ? <img src={it.image_url} alt="" loading="lazy" onError={(e) => { e.target.style.visibility = "hidden"; }} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+                            </div>
+                            <div style={{ fontSize: 10, color: "var(--text)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title}</div>
+                            {b.length > 0 && (
+                              <div style={{ display: "flex", gap: 3, marginTop: 2, flexWrap: "wrap" }}>
+                                {b.slice(0, 2).map((x, i) => (
+                                  <span key={i} style={{ fontSize: 8, color: "var(--accent)", border: "1px solid var(--accent-soft)", borderRadius: 4, padding: "0 3px" }}>{x}</span>
+                                ))}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              );
+                );
+              };
+              return (<>{renderRow("最近收藏", recent)}{renderRow("最近更新", updated)}{renderRow("有记录", hasRecord)}</>);
             })()}
 
             {gridLoading ? (
@@ -1748,6 +1828,77 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                 )}
               </section>
             )}
+            {/* Phase 13-B：搜索空状态探索块（无我的记录 + 无外部结果 + 无回答时显示） */}
+            {mySearch?.q && mySearch?.works?.length === 0 && mySearch?.reviews?.length === 0
+              && mySearch?.memories?.length === 0 && fedResults.length === 0 && !answer && !sources.length && (
+              <section className="ask-section">
+                <div className="ask-section-head">
+                  <h3 className="wd-chapter-title">没有找到匹配作品</h3>
+                </div>
+                <div className="ask-section-rule" />
+                <div className="ask-hint">试试其他关键词，或浏览你的收藏。</div>
+                <button type="button" onClick={() => setSection("library")} className="settings-action">浏览我的收藏</button>
+                {(() => {
+                  const recent = [...(gridItems || [])].filter((it) => it.collected_at)
+                    .sort((a, b) => String(b.collected_at).localeCompare(String(a.collected_at))).slice(0, 6);
+                  if (!recent.length) return null;
+                  return (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="wd-chars-title" style={{ marginBottom: 6 }}>最近收藏</div>
+                      <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
+                        {recent.map((it) => (
+                          <button key={it.id} onClick={() => openItemDetail(it)}
+                            style={{ flexShrink: 0, width: 64, textAlign: "left", cursor: "pointer", background: "none", border: "none", padding: 0 }}>
+                            <div style={{ width: 64, height: 86, borderRadius: "var(--radius-cover)", overflow: "hidden", background: "var(--card-thumb)" }}>
+                              {it.image_url ? <img src={it.image_url} alt="" loading="lazy" onError={(e) => { e.target.style.visibility = "hidden"; }} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+                            </div>
+                            <div style={{ fontSize: 10, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>{it.title}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+                {/* Phase 13-C：空状态下一步入口——从本地 gridItems 提炼题材/制作/类型（零新增请求） */}
+                {(() => {
+                  const genres = [...new Set((gridItems || []).flatMap((it) => it.genres || []))].filter(Boolean).slice(0, 6);
+                  const studios = [...new Set((gridItems || []).flatMap((it) => it.studios || []))].filter(Boolean).slice(0, 4);
+                  const types = WORK_TYPES.filter((t) => (gridItems || []).some((it) => it.work_type === t)).slice(0, 6);
+                  if (!genres.length && !studios.length && !types.length) return null;
+                  return (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="wd-chars-title" style={{ marginBottom: 6 }}>按已有资料继续探索</div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {genres.map((g) => (
+                          <button key={g} type="button"
+                            onClick={() => { setActiveGenre(g); setSection("library"); }}
+                            className="tsm-tag"
+                            style={{ cursor: "pointer", fontSize: 11, padding: "3px 9px", borderRadius: "var(--radius-control)", border: "1px solid var(--panel-border)" }}>
+                            题材 · {g}
+                          </button>
+                        ))}
+                        {studios.map((s) => (
+                          <button key={s} type="button"
+                            onClick={() => { setActiveStudio(s); setSection("library"); }}
+                            className="tsm-tag"
+                            style={{ cursor: "pointer", fontSize: 11, padding: "3px 9px", borderRadius: "var(--radius-control)", border: "1px solid var(--panel-border)" }}>
+                            制作 · {s}
+                          </button>
+                        ))}
+                        {types.map((t) => (
+                          <button key={t} type="button"
+                            onClick={() => { setActiveWorkType(t); setSection("library"); }}
+                            className="tsm-tag"
+                            style={{ cursor: "pointer", fontSize: 11, padding: "3px 9px", borderRadius: "var(--radius-control)", border: "1px solid var(--panel-border)" }}>
+                            类型 · {WORK_TYPE_LABEL[t]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </section>
+            )}
             {answerOpen && (answer || sources.length > 0 || fedResults.length > 0) ? (
               <div className="flex-1 overflow-y-auto space-y-6">
                 {fedResults.length > 0 && (
@@ -1794,13 +1945,13 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                         .filter((r) => fedYear === "all" || String(r.year) === fedYear)
                         .slice(0, 4).map((r, i) => (
                         <div key={i} className="ask-result-card">
-                          <button onClick={() => openExternalDetail(r)} className="ask-result-cover" aria-label="查看详情">
+                          <button onClick={() => openSearchResult(r)} className="ask-result-cover" aria-label="查看详情">
                             {r.image_url
                               ? <img src={r.image_url} alt="" loading="lazy" onError={(e) => { e.target.style.visibility = "hidden"; }} />
                               : <span>{(r.title || "?").slice(0, 1)}</span>}
                           </button>
                           <div className="ask-result-body">
-                            <button onClick={() => openExternalDetail(r)} className="ask-result-main">
+                            <button onClick={() => openSearchResult(r)} className="ask-result-main">
                               <span className="ask-result-title">{r.title}</span>
                               {r.subtitle ? <span className="ask-result-sub">{r.subtitle}</span> : null}
                               <span className="ask-result-meta">
@@ -1819,8 +1970,12 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
                             <div className="ask-result-foot">
                               <ProviderBadge source={r.source} sources={r.sources} count />
                               <div className="flex items-center gap-1 shrink-0">
-                                <button onClick={() => openExternalDetail(r)} className="ask-action">详情</button>
-                                <button onClick={() => handleSave(r)} className="ask-action accent">收藏</button>
+                                <button onClick={() => openSearchResult(r)} className="ask-action">详情</button>
+                                {localResultId(r) != null ? (
+                                  <button onClick={() => openItemDetail({ id: localResultId(r) })} className="ask-action accent">打开</button>
+                                ) : (
+                                  <button onClick={() => handleSave(r)} className="ask-action accent">收藏</button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -2347,8 +2502,16 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
             style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", borderRadius: "var(--radius-floating)" }}>
             <div className="flex items-center justify-between mb-4">
               <span className="tsm-heading text-sm" style={{ color: "var(--text)" }}>作品档案</span>
-              <button onClick={() => setDetailView(null)} title="关闭" className="text-sm px-2 py-0.5"
-                style={{ color: "var(--text-secondary)", borderRadius: "var(--radius-control)" }}>✕</button>
+              <div className="flex items-center gap-1">
+                {/* Phase 13-D：人物 → 作品 → 返回人物的明确路径（详情关闭后人物面板仍在） */}
+                {personView && (
+                  <button onClick={() => setDetailView(null)} title="返回人物面板"
+                    className="text-xs px-2 py-0.5"
+                    style={{ color: "var(--accent)", borderRadius: "var(--radius-control)" }}>← 返回人物</button>
+                )}
+                <button onClick={() => setDetailView(null)} title="关闭" className="text-sm px-2 py-0.5"
+                  style={{ color: "var(--text-secondary)", borderRadius: "var(--radius-control)" }}>✕</button>
+              </div>
             </div>
             <ItemDetailPanel
               itemId={detailView.itemId}
@@ -2359,8 +2522,24 @@ export default function DesktopView({ items, total, allTags, refresh, theme, set
               onRefreshDetail={detailView.saved ? handleRefreshExternal : null}
               onOpenReview={(it) => { setDetailView(null); setReviewItem(it); }}
               onOpenRelated={(id) => { if (id != null) openItemDetail({ id }); }}
+              onOpenPerson={(p) => setPersonView(p)}
               composerFocusTick={composerFocusTick}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Phase 13-B：人物面板（Staff / Character 导航）。z-40 低于作品详情 z-50：
+          人物 → 作品时详情浮层叠在上方，人物面板保留在下层，返回不重新请求。 */}
+      {personView && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(20, 14, 8, 0.5)" }} onClick={() => setPersonView(null)}>
+          <div className="w-full max-w-md max-h-[70vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+            style={{ backgroundColor: "var(--panel)", border: "1px solid var(--panel-border)", borderRadius: "var(--radius-card)" }}>
+            <PersonPanel person={personView}
+              onOpenWork={(itemId) => { if (itemId != null) openItemDetail({ id: itemId }); }}
+              onClose={() => setPersonView(null)} />
           </div>
         </div>
       )}

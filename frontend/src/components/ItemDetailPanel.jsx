@@ -52,6 +52,7 @@ export default function ItemDetailPanel({
   onSaveDetail, onShareDetail, onRefreshDetail, onOpenReview,
   composerFocusTick = 0,
   onOpenRelated, // Phase 12-D：点击本地关系作品（target_item_id）
+  onOpenPerson, // Phase 13-B：点击角色 / Staff → 人物面板
 }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -344,14 +345,18 @@ export default function ItemDetailPanel({
             const merged = [];
             for (const s of (data.staff || [])) {
               const prev = merged.find((x) => x.name === s.name);
-              if (prev) { prev.roles.push(s.role); } else { merged.push({ name: s.name, roles: s.role ? [s.role] : [], source: s.source }); }
+              if (prev) { prev.roles.push(s.role); }
+              else { merged.push({ name: s.name, roles: s.role ? [s.role] : [], source: s.source, external_id: s.external_id }); }
             }
             return (
               <div className="wd-chars">
                 <div className="wd-chars-title">Staff · {data.staff.length}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {merged.slice(0, 24).map((s, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 11 }}>
+                    <div key={i} onClick={onOpenPerson && s.source && s.external_id
+                      ? () => onOpenPerson({ type: "staff", source: s.source, external_id: String(s.external_id), name: s.name }) : undefined}
+                      title={onOpenPerson && s.source && s.external_id ? `查看「${s.name}」的相关作品` : undefined}
+                      style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 11, padding: "2px 4px", borderRadius: "var(--radius-control)", cursor: onOpenPerson && s.source && s.external_id ? "pointer" : "default" }}>
                       <span className="tsm-tag" style={{ flexShrink: 0, fontSize: 10, padding: "0 6px", borderRadius: "var(--radius-control)" }}>
                         {s.roles.length ? s.roles.join(" / ") : "制作"}
                       </span>
@@ -374,7 +379,10 @@ export default function ItemDetailPanel({
               (groups[key] = groups[key] || []).push(r);
             }
             const renderRow = (r, i) => {
+              // Phase 13-E：仅当本地关系确实能打开（target_item_id 存在）才渲染可点击按钮；
+              // MediaEntry 存在但 Item 已删除（target_item_id null）时回退外部链接，避免死按钮。
               const isLocal = r.is_local || r.target_media_id != null;
+              const clickableLocal = isLocal && r.target_item_id != null;
               const url = r.external_url;
               const inner = (
                 <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
@@ -384,7 +392,7 @@ export default function ItemDetailPanel({
                 </span>
               );
               const base = { display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", padding: "4px 6px", borderRadius: "var(--radius-control)", fontSize: 12, border: "none", background: "transparent" };
-              if (isLocal && onOpenRelated) {
+              if (clickableLocal && onOpenRelated) {
                 return <button key={i} onClick={() => onOpenRelated(r.target_item_id)} style={{ ...base, cursor: "pointer" }}>{inner}</button>;
               }
               return <a key={i} href={url || undefined} target="_blank" rel="noreferrer"
@@ -454,7 +462,10 @@ export default function ItemDetailPanel({
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
                 {(data.characters || []).slice(0, 12).map((c) => (
                   <div key={c.id ?? c.name}
-                    style={{ display: "flex", gap: 8, padding: 8, border: "1px solid var(--panel-border)", borderRadius: "var(--radius-card)", background: "var(--panel)", minWidth: 0 }}>
+                    onClick={onOpenPerson && c.id != null && c.id !== ""
+                      ? () => onOpenPerson({ type: "character", source: data.source, external_id: String(c.id), name: c.name }) : undefined}
+                    title={onOpenPerson && c.id != null && c.id !== "" ? `查看「${c.name}」的出演作品` : undefined}
+                    style={{ display: "flex", gap: 8, padding: 8, border: "1px solid var(--panel-border)", borderRadius: "var(--radius-card)", background: "var(--panel)", minWidth: 0, cursor: onOpenPerson && c.id != null && c.id !== "" ? "pointer" : "default" }}>
                     {c.image_url ? (
                       <img src={c.image_url} alt="" loading="lazy" onError={(e) => { e.target.style.visibility = "hidden"; }}
                         style={{ width: 40, height: 54, borderRadius: "var(--radius-cover)", objectFit: "cover", flexShrink: 0 }} />

@@ -166,3 +166,347 @@ describe("外部检索多来源卡片（Phase 11-C）", () => {
     expect(screen.getByText("MangaX")).toBeTruthy();
   });
 });
+
+
+describe("搜索本地状态与空状态（Phase 13-B）", () => {
+  function mockFetchFed(fedResults) {
+    global.fetch = vi.fn((url, opts = {}) => {
+      const u = String(url);
+      if (u.includes("/search/my")) return ok({ works: [], reviews: [], memories: [] });
+      if (u.includes("/search/federated")) return ok({ results: fedResults, local_results: [], errors: {} });
+      if (u.includes("/rag/query/stream")) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: "AI 未启用" }) });
+      if (u.includes("/collections")) return ok([]);
+      if (u.includes("/reviews")) return ok([]);
+      if (u.includes("/memories")) return ok([]);
+      if (u.includes("/items")) return ok({ total: 0, items: [] });
+      if (u.includes("/tags")) return ok([]);
+      if (u.includes("/connectors")) return ok([]);
+      if (u.includes("/plugins")) return ok({ plugins: [], failures: [], notice_needed: false, plugin_dir: "./plugins" });
+      return ok({});
+    });
+  }
+  const PROPS2 = { items: [], total: 0, allTags: [], refresh: () => {},
+    theme: "default", setTheme: () => {},
+    custom: { accentHue: 0, density: "comfortable", radius: 16 }, updateCustom: () => {},
+    textOverlays: [], updateTextOverlays: () => {} };
+
+  it("已收藏结果显示「打开」而非「收藏」", async () => {
+    mockFetchFed([
+      { source: "anilist", title: "已收藏作", external_id: "1", is_local: true, local_item_id: 42, sources: [{ source: "anilist", external_id: "1" }] },
+    ]);
+    render(<DesktopView {...PROPS2} />);
+    const input = screen.getByPlaceholderText("搜索知识库并提问…（Enter）");
+    fireEvent.change(input, { target: { value: "X" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(screen.getByText("已收藏作")).toBeTruthy());
+    expect(screen.getByText("打开")).toBeTruthy();
+  });
+
+  it("无结果时显示探索块", async () => {
+    mockFetchFed([]);
+    render(<DesktopView {...PROPS2} />);
+    const input = screen.getByPlaceholderText("搜索知识库并提问…（Enter）");
+    fireEvent.change(input, { target: { value: "不存在的词" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(screen.getByText("没有找到匹配作品")).toBeTruthy());
+    expect(screen.getByText("浏览我的收藏")).toBeTruthy();
+  });
+});
+
+
+describe("搜索空状态探索（Phase 13-C）", () => {
+  function mockFetchExplore(items) {
+    global.fetch = vi.fn((url) => {
+      const u = String(url);
+      if (u.includes("/search/my")) return ok({ works: [], reviews: [], memories: [] });
+      if (u.includes("/search/federated")) return ok({ results: [], local_results: [], errors: {} });
+      if (u.includes("/rag/query/stream")) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: "AI 未启用" }) });
+      if (u.includes("/collections")) return ok([]);
+      if (u.includes("/reviews")) return ok([]);
+      if (u.includes("/memories")) return ok([]);
+      if (u.includes("/items")) return ok({ total: items.length, items });
+      if (u.includes("/tags")) return ok([]);
+      if (u.includes("/connectors")) return ok([]);
+      if (u.includes("/plugins")) return ok({ plugins: [], failures: [], notice_needed: false, plugin_dir: "./plugins" });
+      return ok({});
+    });
+  }
+  const PROPS3 = { items: [], total: 0, allTags: [], refresh: () => {},
+    theme: "default", setTheme: () => {},
+    custom: { accentHue: 0, density: "comfortable", radius: 16 }, updateCustom: () => {},
+    textOverlays: [], updateTextOverlays: () => {} };
+
+  it("空状态显示题材/制作/类型入口，点击跳转图书馆并应用筛选", async () => {
+    mockFetchExplore([
+      { id: 1, title: "科幻作", type: "external_ref", source: "bangumi", tags: [],
+        genres: ["科幻"], studios: ["White Fox"], work_type: "anime", collected_at: null },
+      { id: 2, title: "恋爱作", type: "external_ref", source: "bangumi", tags: [],
+        genres: ["恋爱"], studios: [], work_type: "manga", collected_at: null },
+    ]);
+    render(<DesktopView {...PROPS3} />);
+    const input = screen.getByPlaceholderText("搜索知识库并提问…（Enter）");
+    fireEvent.change(input, { target: { value: "不存在的词" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(screen.getByText("没有找到匹配作品")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("题材 · 科幻")).toBeTruthy());
+    expect(screen.getByText("制作 · White Fox")).toBeTruthy();
+    expect(screen.getByText("类型 · 动画")).toBeTruthy();
+    fireEvent.click(screen.getByText("题材 · 科幻"));
+    await waitFor(() => expect(screen.getByText("共 2 册")).toBeTruthy());
+    // 已进入图书馆且筛选生效：只剩科幻作
+    await waitFor(() => expect(screen.getByText("科幻作")).toBeTruthy());
+    expect(screen.queryByText("恋爱作")).toBeNull();
+  });
+});
+
+
+describe("本地搜索结果导航（Phase 14-B）", () => {
+  function mockLocal() {
+    const calls = { localDetail: 0, externalDetail: 0 };
+    global.fetch = vi.fn((url) => {
+      const u = String(url);
+      if (u.includes("/search/my")) return ok({ works: [], reviews: [], memories: [] });
+      if (u.includes("/search/federated")) return ok({ results: [
+        { source: "bangumi", title: "本地作", external_id: "123", is_local: true, local_item_id: 123,
+          sources: [{ source: "bangumi", external_id: "123" }] }], local_results: [], errors: {} });
+      if (u.includes("/rag/query/stream")) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: "AI 未启用" }) });
+      if (u.includes("/external/detail")) { calls.externalDetail += 1; return ok({}); }
+      if (u.match(/\/items\/123\/detail$/)) { calls.localDetail += 1; return ok({ id: 123, title: "本地作", source: "bangumi", description: "本地详情", tags: [], characters: [], relations: [], sources: [], image_url: null }); }
+      if (u.includes("/items")) return ok({ total: 0, items: [] });
+      if (u.includes("/tags")) return ok([]);
+      if (u.includes("/connectors")) return ok([]);
+      if (u.includes("/collections")) return ok([]);
+      if (u.includes("/reviews")) return ok([]);
+      if (u.includes("/memories")) return ok([]);
+      if (u.includes("/plugins")) return ok({ plugins: [], failures: [], notice_needed: false, plugin_dir: "./plugins" });
+      return ok({});
+    });
+    return calls;
+  }
+  const PROPS14 = { items: [], total: 0, allTags: [], refresh: () => {},
+    theme: "default", setTheme: () => {},
+    custom: { accentHue: 0, density: "comfortable", radius: 16 }, updateCustom: () => {},
+    textOverlays: [], updateTextOverlays: () => {} };
+
+  async function doSearch() {
+    const input = screen.getByPlaceholderText("搜索知识库并提问…（Enter）");
+    fireEvent.change(input, { target: { value: "X" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(screen.getByText("本地作")).toBeTruthy());
+  }
+
+  it("已收藏结果点「详情」→ 直接进本地 ItemDetailPanel，不请求 /external/detail", async () => {
+    const calls = mockLocal();
+    render(<DesktopView {...PROPS14} />);
+    await doSearch();
+    fireEvent.click(screen.getByText("详情"));
+    await waitFor(() => expect(calls.localDetail).toBeGreaterThan(0));
+    expect(screen.getByText("作品档案")).toBeTruthy(); // 打开本地 ItemDetailPanel
+    expect(calls.externalDetail).toBe(0);              // 未触发 Provider
+  });
+
+  it("已收藏结果点标题/封面同样进本地详情（共用 handler），不请求 /external/detail", async () => {
+    const calls = mockLocal();
+    render(<DesktopView {...PROPS14} />);
+    await doSearch();
+    // 标题点击
+    fireEvent.click(screen.getByText("本地作"));
+    await waitFor(() => expect(calls.localDetail).toBeGreaterThan(0));
+    expect(calls.externalDetail).toBe(0);
+    // 关闭详情后点封面
+    fireEvent.click(screen.getByTitle("关闭"));
+    await waitFor(() => expect(calls.localDetail).toBe(1));
+    fireEvent.click(screen.getByLabelText("查看详情"));
+    await waitFor(() => expect(calls.localDetail).toBe(2));
+    expect(calls.externalDetail).toBe(0);
+  });
+});
+
+
+describe("收藏后本地状态同步（Phase 14-B）", () => {
+  const PROPS15 = { items: [], total: 0, allTags: [], refresh: () => {},
+    theme: "default", setTheme: () => {},
+    custom: { accentHue: 0, density: "comfortable", radius: 16 }, updateCustom: () => {},
+    textOverlays: [], updateTextOverlays: () => {} };
+
+  it("收藏成功 → 卡片立即「打开」→ 点击进本地详情，不请求 Provider", async () => {
+    let externalCalls = 0;
+    global.fetch = vi.fn((url, opts = {}) => {
+      const u = String(url);
+      const m = opts.method || "GET";
+      if (u.includes("/search/my")) return ok({ works: [], reviews: [], memories: [] });
+      if (u.includes("/search/federated")) return ok({ results: [
+        { source: "bangumi", title: "未收藏作", external_id: "456", is_local: false, local_item_id: null,
+          sources: [{ source: "bangumi", external_id: "456" }] }], local_results: [], errors: {} });
+      if (u.includes("/items/save-external")) return ok({ item_id: 99, title: "未收藏作", type: "external_ref", chunks_count: 1, tags: [] });
+      if (u.includes("/external/detail")) { externalCalls += 1; return ok({}); }
+      if (u.match(/\/items\/99\/detail$/)) return ok({ id: 99, title: "未收藏作", source: "bangumi", description: "", tags: [], characters: [], relations: [], sources: [], image_url: null });
+      if (u.includes("/rag/query/stream")) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: "AI 未启用" }) });
+      if (u.includes("/items") && m === "GET") return ok({ total: 0, items: [] });
+      if (u.includes("/tags")) return ok([]);
+      if (u.includes("/connectors")) return ok([]);
+      if (u.includes("/collections")) return ok([]);
+      if (u.includes("/reviews")) return ok([]);
+      if (u.includes("/memories")) return ok([]);
+      if (u.includes("/plugins")) return ok({ plugins: [], failures: [], notice_needed: false, plugin_dir: "./plugins" });
+      return ok({});
+    });
+    render(<DesktopView {...PROPS15} />);
+    const input = screen.getByPlaceholderText("搜索知识库并提问…（Enter）");
+    fireEvent.change(input, { target: { value: "X" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(screen.getByText("未收藏作")).toBeTruthy());
+    expect(screen.getByText("收藏")).toBeTruthy();
+    // 收藏成功 → 卡片立即变「打开」
+    fireEvent.click(screen.getByText("收藏"));
+    await waitFor(() => expect(screen.getByText("打开")).toBeTruthy());
+    expect(screen.queryByText("收藏")).toBeNull();
+    // 点「打开」→ 本地 ItemDetailPanel，不请求 Provider
+    fireEvent.click(screen.getByText("打开"));
+    await waitFor(() => expect(screen.getByText("作品档案")).toBeTruthy());
+    expect(externalCalls).toBe(0);
+  });
+});
+
+
+describe("本地状态边界（Phase 14-C）", () => {
+  const PROPS16 = { items: [], total: 0, allTags: [], refresh: () => {},
+    theme: "default", setTheme: () => {},
+    custom: { accentHue: 0, density: "comfortable", radius: 16 }, updateCustom: () => {},
+    textOverlays: [], updateTextOverlays: () => {} };
+
+  function mockResult({ externalId, localItemId, source = "bangumi" }) {
+    const state = { fetched: [], externalDetail: 0, saveExternal: 0 };
+    global.fetch = vi.fn((url, opts = {}) => {
+      const u = String(url);
+      const m = opts.method || "GET";
+      state.fetched.push(u);
+      if (u.includes("/search/my")) return ok({ works: [], reviews: [], memories: [] });
+      if (u.includes("/search/federated")) return ok({ results: [
+        { source, title: "边界作", external_id: externalId, is_local: true, local_item_id: localItemId,
+          sources: [{ source, external_id: externalId }] }], local_results: [], errors: {} });
+      if (u.includes("/items/save-external")) { state.saveExternal += 1; return ok({ item_id: 77, title: "边界作", type: "external_ref", chunks_count: 1, tags: [] }); }
+      if (u.includes("/external/detail")) { state.externalDetail += 1; return ok({ source, title: "外部详情", external_id: String(externalId) }); }
+      if (u.includes("/rag/query/stream")) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: "AI 未启用" }) });
+      if (u.includes("/items") && m === "GET") return ok({ total: 0, items: [] });
+      if (u.includes("/tags")) return ok([]);
+      if (u.includes("/connectors")) return ok([]);
+      if (u.includes("/collections")) return ok([]);
+      if (u.includes("/reviews")) return ok([]);
+      if (u.includes("/memories")) return ok([]);
+      if (u.includes("/plugins")) return ok({ plugins: [], failures: [], notice_needed: false, plugin_dir: "./plugins" });
+      return ok({});
+    });
+    return state;
+  }
+
+  async function doSearch() {
+    const input = screen.getByPlaceholderText("搜索知识库并提问…（Enter）");
+    fireEvent.change(input, { target: { value: "X" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(screen.getByText("边界作")).toBeTruthy());
+  }
+
+  it("is_local=true + local_item_id=null：不调用 openItemDetail(null)，走安全 fallback", async () => {
+    const state = mockResult({ externalId: "123", localItemId: null });
+    render(<DesktopView {...PROPS16} />);
+    await doSearch();
+    fireEvent.click(screen.getByText("详情"));
+    await waitFor(() => expect(state.externalDetail).toBeGreaterThan(0)); // fallback 到外部详情
+    expect(state.fetched.some((u) => u.includes("/items/null/detail"))).toBe(false);
+    expect(state.fetched.some((u) => /\/items\/\/detail/.test(u))).toBe(false);
+  });
+
+  it("is_local=true + local_item_id=空串：不调用 openItemDetail(\"\")，走安全 fallback", async () => {
+    const state = mockResult({ externalId: "123", localItemId: "" });
+    render(<DesktopView {...PROPS16} />);
+    await doSearch();
+    fireEvent.click(screen.getByText("详情"));
+    await waitFor(() => expect(state.externalDetail).toBeGreaterThan(0));
+    expect(state.fetched.some((u) => u.includes("/items//detail"))).toBe(false);
+    expect(state.fetched.some((u) => /\/items\/\/detail/.test(u))).toBe(false);
+  });
+
+  it("external_id 为数字：收藏成功后 String() 归一匹配并翻转为本地", async () => {
+    const state = mockResult({ externalId: 123, localItemId: null });
+    render(<DesktopView {...PROPS16} />);
+    await doSearch();
+    // is_local=true 但无有效 local_item_id → 按钮显示「收藏」（安全恢复路径）
+    expect(screen.getByText("收藏")).toBeTruthy();
+    fireEvent.click(screen.getByText("收藏"));
+    await waitFor(() => expect(screen.getByText("打开")).toBeTruthy());
+    expect(state.saveExternal).toBe(1);
+  });
+});
+
+
+describe("收藏同步边界（Phase 14-C）", () => {
+  const PROPS17 = { items: [], total: 0, allTags: [], refresh: () => {},
+    theme: "default", setTheme: () => {},
+    custom: { accentHue: 0, density: "comfortable", radius: 16 }, updateCustom: () => {},
+    textOverlays: [], updateTextOverlays: () => {} };
+
+  it("不同 source 相同 external_id：只更新 source 匹配的结果", async () => {
+    global.fetch = vi.fn((url, opts = {}) => {
+      const u = String(url);
+      const m = opts.method || "GET";
+      if (u.includes("/search/my")) return ok({ works: [], reviews: [], memories: [] });
+      if (u.includes("/search/federated")) return ok({ results: [
+        { source: "bangumi", title: "作品甲", external_id: "123", is_local: false, local_item_id: null, sources: [{ source: "bangumi", external_id: "123" }] },
+        { source: "anilist", title: "作品乙", external_id: "123", is_local: false, local_item_id: null, sources: [{ source: "anilist", external_id: "123" }] },
+      ], local_results: [], errors: {} });
+      if (u.includes("/items/save-external")) return ok({ item_id: 77, title: "作品甲", type: "external_ref", chunks_count: 1, tags: [] });
+      if (u.includes("/rag/query/stream")) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: "AI 未启用" }) });
+      if (u.includes("/items") && m === "GET") return ok({ total: 0, items: [] });
+      if (u.includes("/tags")) return ok([]);
+      if (u.includes("/connectors")) return ok([]);
+      if (u.includes("/collections")) return ok([]);
+      if (u.includes("/reviews")) return ok([]);
+      if (u.includes("/memories")) return ok([]);
+      if (u.includes("/plugins")) return ok({ plugins: [], failures: [], notice_needed: false, plugin_dir: "./plugins" });
+      return ok({});
+    });
+    render(<DesktopView {...PROPS17} />);
+    const input = screen.getByPlaceholderText("搜索知识库并提问…（Enter）");
+    fireEvent.change(input, { target: { value: "X" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(screen.getByText("作品甲")).toBeTruthy());
+    // 点第一个「收藏」（bangumi 作品甲）
+    fireEvent.click(screen.getAllByText("收藏")[0]);
+    await waitFor(() => expect(screen.getByText("打开")).toBeTruthy());
+    // 只剩一个「收藏」（anilist 作品乙，未被误改）
+    expect(screen.getAllByText("收藏").length).toBe(1);
+    expect(screen.getByText("作品乙")).toBeTruthy();
+  });
+
+  it("收藏失败：fedResults 不得被标记为 local", async () => {
+    global.fetch = vi.fn((url, opts = {}) => {
+      const u = String(url);
+      const m = opts.method || "GET";
+      if (u.includes("/search/my")) return ok({ works: [], reviews: [], memories: [] });
+      if (u.includes("/search/federated")) return ok({ results: [
+        { source: "bangumi", title: "失败作", external_id: "123", is_local: false, local_item_id: null,
+          sources: [{ source: "bangumi", external_id: "123" }] }], local_results: [], errors: {} });
+      if (u.includes("/items/save-external")) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: "保存失败" }) });
+      if (u.includes("/rag/query/stream")) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: "AI 未启用" }) });
+      if (u.includes("/items") && m === "GET") return ok({ total: 0, items: [] });
+      if (u.includes("/tags")) return ok([]);
+      if (u.includes("/connectors")) return ok([]);
+      if (u.includes("/collections")) return ok([]);
+      if (u.includes("/reviews")) return ok([]);
+      if (u.includes("/memories")) return ok([]);
+      if (u.includes("/plugins")) return ok({ plugins: [], failures: [], notice_needed: false, plugin_dir: "./plugins" });
+      return ok({});
+    });
+    render(<DesktopView {...PROPS17} />);
+    const input = screen.getByPlaceholderText("搜索知识库并提问…（Enter）");
+    fireEvent.change(input, { target: { value: "X" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(screen.getByText("失败作")).toBeTruthy());
+    expect(screen.getByText("收藏")).toBeTruthy();
+    fireEvent.click(screen.getByText("收藏"));
+    await waitFor(() => expect(screen.getByText("保存失败")).toBeTruthy()); // toast 错误
+    expect(screen.getByText("收藏")).toBeTruthy();  // 卡片仍为「收藏」，未被误标 local
+    expect(screen.queryByText("打开")).toBeNull();
+  });
+});

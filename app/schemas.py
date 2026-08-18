@@ -60,6 +60,12 @@ class ItemOut(BaseModel):
     synced_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Phase 13-B：Library 动态内容行 / 题材·制作筛选（有记录角标与过滤）
+    review_count: int = 0
+    memory_count: int = 0
+    my_rating: Optional[float] = None
+    genres: List[str] = []
+    studios: List[str] = []
     tags: List[str] = []
     chunks_count: int = 0
     # P1 Work 模型世界轴列（ADR 0045）
@@ -260,6 +266,39 @@ class MediaSourceOut(BaseModel):
     last_synced_at: Optional[datetime] = None
 
 
+class PersonWorkOut(BaseModel):
+    """人物关联作品（Phase 13-B：Staff/Character 导航用）。"""
+    media_id: Optional[int] = None
+    item_id: Optional[int] = None
+    title: Optional[str] = None
+    image_url: Optional[str] = None
+    year: Optional[int] = None
+    work_type: Optional[str] = None
+    role: Optional[str] = None
+    credit_order: Optional[int] = None
+    relation: Optional[str] = None  # Character 场景：在该作品中的角色关系
+
+
+class StaffPersonOut(BaseModel):
+    """Staff 人物详情（本地已收藏作品列表；只查 Staff 表，不触发 Provider）。"""
+    source: str
+    external_id: str
+    name: str
+    works: List[PersonWorkOut] = []
+
+
+class CharacterPersonOut(BaseModel):
+    """角色人物详情（本地 Character + 出演作品；只查 Character 表）。"""
+    source: str
+    external_id: str
+    name: str
+    image_url: Optional[str] = None
+    summary: Optional[str] = None
+    relation: Optional[str] = None
+    actors: List[str] = []
+    works: List[PersonWorkOut] = []
+
+
 class MediaDetailOut(BaseModel):
     """统一作品 MediaEntry 聚合详情（字段级 fallback + 来源 + 关联 Item）。"""
     id: int
@@ -429,6 +468,9 @@ class ExternalResult(BaseModel):
     type: Optional[str] = None  # "anime" | "manga" | ...
     external_url: Optional[str] = None  # 数据源条目页 URL
     sources: List[dict] = []  # [{source, external_id, title, url, image_url}]，多来源聚合后 ≥1
+    # Phase 13-B：本地收藏状态（已收藏 → is_local=True + local_item_id）
+    is_local: bool = False
+    local_item_id: Optional[int] = None
 
 
 class FederatedSearchResponse(BaseModel):

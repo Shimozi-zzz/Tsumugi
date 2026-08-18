@@ -275,3 +275,62 @@ describe("Library 最近收藏（Phase 12-D）", () => {
     expect(screen.queryByText("最近收藏")).toBeNull();
   });
 });
+
+
+describe("Library 动态内容与题材筛选（Phase 13-B）", () => {
+  function mockItems(items) {
+    global.fetch = vi.fn((u) => {
+      const url = String(u);
+      if (url.includes("/items") && !url.includes("/items/")) return ok({ total: items.length, items });
+      if (url.includes("/tags")) return ok([]);
+      if (url.includes("/connectors")) return ok([]);
+      if (url.includes("/collections")) return ok([]);
+      return ok({});
+    });
+  }
+
+  it("显示「最近更新」与「有记录」行（数据不足隐藏）", async () => {
+    mockItems([
+      { id: 1, title: "更新A", type: "external_ref", source: "bangumi", tags: [], collected_at: null, updated_at: "2026-08-12T00:00:00", image_url: null, review_count: 1, memory_count: 0, my_rating: 8.5, genres: ["科幻"], studios: ["White Fox"] },
+      { id: 2, title: "记忆B", type: "external_ref", source: "bangumi", tags: [], collected_at: null, updated_at: "2026-01-01T00:00:00", image_url: null, review_count: 0, memory_count: 2, my_rating: null, genres: [], studios: [] },
+    ]);
+    render(<DesktopView {...PROPS} />);
+    fireEvent.click(screen.getByTitle("书库"));
+    await waitFor(() => expect(screen.getByText("最近更新")).toBeTruthy());
+    expect(screen.getByText("有记录")).toBeTruthy();
+    expect(screen.getAllByText("记忆").length).toBeGreaterThan(0);  // 有记录角标
+    expect(screen.getAllByText("评分").length).toBeGreaterThan(0);  // 有评分角标
+  });
+
+  it("题材筛选：点科幻只留科幻（前端过滤）", async () => {
+    mockItems([
+      { id: 1, title: "科幻作", type: "external_ref", source: "bangumi", tags: [], image_url: null, genres: ["科幻"], studios: [] },
+      { id: 2, title: "恋爱作", type: "external_ref", source: "bangumi", tags: [], image_url: null, genres: ["恋爱"], studios: [] },
+    ]);
+    render(<DesktopView {...PROPS} />);
+    fireEvent.click(screen.getByTitle("书库"));
+    await waitFor(() => expect(screen.getByText("科幻作")).toBeTruthy());
+    fireEvent.click(screen.getByText("科幻"));
+    await waitFor(() => expect(screen.queryByText("恋爱作")).toBeNull());
+    expect(screen.getByText("科幻作")).toBeTruthy();
+  });
+});
+
+
+describe("Library 网格数据范围（Phase 14-B）", () => {
+  it("网格请求使用 limit=500", async () => {
+    const itemUrls = [];
+    global.fetch = vi.fn((u) => {
+      const url = String(u);
+      if (url.includes("/items") && !url.includes("/items/")) { itemUrls.push(url); return ok({ total: ITEMS.length, items: ITEMS }); }
+      if (url.includes("/tags")) return ok([]);
+      if (url.includes("/connectors")) return ok([]);
+      return ok({});
+    });
+    render(<DesktopView {...PROPS} />);
+    fireEvent.click(screen.getByTitle("书库"));
+    await waitFor(() => expect(screen.getByTitle("网格视图")).toBeTruthy());
+    // 网格主请求 = skip=0&limit=500（三个分组计数请求是 limit=1，不应误匹配）
+    expect(itemUrls.some((u) => u.includes("limit=500"))).toBe(true);
+  });
+});

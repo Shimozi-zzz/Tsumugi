@@ -52,6 +52,8 @@ from app.schemas import (
     RAGResponse,
     RelatedSourceOut,
     MediaDetailOut,
+    StaffPersonOut,
+    CharacterPersonOut,
     RetrievedChunk,
     PluginsResponse,
     ReviewCreate,
@@ -90,6 +92,14 @@ def _strip_text_ext(filename: str) -> str:
 
 def _item_out(item: Item) -> ItemOut:
     col = item.collection
+    reviews = list(item.reviews or [])
+    memories = list(item.memories or [])
+    ratings = [r.rating for r in reviews if r.rating is not None]
+    genres: List[str] = []
+    studios: List[str] = []
+    if item.media_entry is not None:
+        genres = _json_list(item.media_entry.genres)
+        studios = _json_list(item.media_entry.studios)
     return ItemOut(
         id=item.id,
         title=item.title,
@@ -110,7 +120,24 @@ def _item_out(item: Item) -> ItemOut:
         collection_status=col.status if col else None,
         collected_at=col.added_at if col else None,
         favorite=bool(col.favorite) if col else False,
+        review_count=len(reviews),
+        memory_count=len(memories),
+        my_rating=round(sum(ratings) / len(ratings), 2) if ratings else None,
+        genres=genres,
+        studios=studios,
     )
+
+
+def _json_list(value) -> List[str]:
+    """把 MediaEntry 的 JSON 数组列（Text）解析为列表；异常返回空。"""
+    if not value:
+        return []
+    import json as _json
+    try:
+        v = _json.loads(value)
+        return [str(x) for x in v] if isinstance(v, list) else []
+    except (TypeError, ValueError):
+        return []
 
 
 def _split_tags(raw: Optional[str]) -> Optional[List[str]]:
@@ -325,7 +352,15 @@ async def list_items(
             .filter(Collection.status == collection_status)
 
     total = query.count()
-    query = query.options(selectinload(Item.collection))  # 避免列表 N+1
+    # Phase 13-B：一次性 eager-load 关联（避免列表 N+1；含 tags/chunks 既有潜在懒加载）
+    query = query.options(
+        selectinload(Item.collection),
+        selectinload(Item.tags),
+        selectinload(Item.chunks),
+        selectinload(Item.reviews),
+        selectinload(Item.memories),
+        selectinload(Item.media_entry),
+    )
     items = query.order_by(Item.id.desc()).offset(skip).limit(limit).all()
     return ItemListResponse(total=total, items=[_item_out(i) for i in items])
 
@@ -341,7 +376,15 @@ async def search_my(q: str, limit: int = 10, db: Session = Depends(get_db)):
     if not q:
         return {"works": [], "reviews": [], "memories": []}
     like = f"%{q}%"
-    works = db.query(Item).filter(
+    # Phase 14-D：works 一次性 selectinload 关联（避免逐行懒加载的 N+1）
+    works = db.query(Item).options(
+        selectinload(Item.collection),
+        selectinload(Item.tags),
+        selectinload(Item.chunks),
+        selectinload(Item.reviews),
+        selectinload(Item.memories),
+        selectinload(Item.media_entry),
+    ).filter(
         (Item.title.ilike(like)) | (Item.content.ilike(like))
     ).order_by(Item.id.desc()).limit(limit).all()
     reviews = db.query(Review).filter(
@@ -349,11 +392,21 @@ async def search_my(q: str, limit: int = 10, db: Session = Depends(get_db)):
     ).order_by(Review.id.desc()).limit(limit).all()
     mems = db.query(Memory).filter(Memory.summary.ilike(like)) \
         .order_by(Memory.id.desc()).limit(limit).all()
+    # Phase 14-D：review/memory 关联 Item 批量加载（一次 IN 查询）
+    items_by_id = _items_by_id(db, [r.item_id for r in reviews] + [m.item_id for m in mems])
     return {
         "works": [_item_out(w) for w in works],
-        "reviews": [_review_out(r, db) for r in reviews],
-        "memories": [_memory_out(m, db) for m in mems],
+        "reviews": [_review_out(r, db, items_by_id.get(r.item_id)) for r in reviews],
+        "memories": [_memory_out(m, db, items_by_id.get(m.item_id)) for m in mems],
     }
+
+
+def _items_by_id(db: Session, item_ids) -> dict:
+    """批量加载指定 Item id → 实体 映射（一次 IN 查询；空集返回 {}）。"""
+    ids = {i for i in item_ids if i is not None}
+    if not ids:
+        return {}
+    return {it.id: it for it in db.query(Item).filter(Item.id.in_(ids)).all()}
 
 
 @router.get("/items/{item_id}", response_model=ItemOut)
@@ -616,8 +669,11 @@ async def upload_item_cover(
 
 # ========== Review 读后感/书评 ==========
 
-def _review_out(review: Review, db: Session) -> ReviewOut:
-    item = db.get(Item, review.item_id)  # 显式加载，避免 DetachedInstanceError
+def _review_out(review: Review, db: Session, item: Optional[Item] = None) -> ReviewOut:
+    # Phase 14-D：item 可预加载（列表端点批量传入，消除逐行 db.get 的 N+1）；
+    # 未传入时保持原行为（显式加载，避免 DetachedInstanceError）。
+    if item is None:
+        item = db.get(Item, review.item_id)
     return ReviewOut(
         id=review.id,
         item_id=review.item_id,
@@ -707,13 +763,17 @@ async def list_all_reviews(
     """全局 review 列表（最近写的，时间倒序）。"""
     rows = db.query(Review).order_by(Review.created_at.desc()) \
         .offset(skip).limit(limit).all()
-    return [_review_out(r, db) for r in rows]
+    # Phase 14-D：关联 Item 批量加载（消除逐行 db.get N+1）
+    items_by_id = _items_by_id(db, [r.item_id for r in rows])
+    return [_review_out(r, db, items_by_id.get(r.item_id)) for r in rows]
 
 
 # ========== Memory 记忆（Phase A，ADR 0041） ==========
 
-def _memory_out(mem: Memory, db: Session) -> MemoryOut:
-    item = db.get(Item, mem.item_id)  # 显式加载，避免 DetachedInstanceError
+def _memory_out(mem: Memory, db: Session, item: Optional[Item] = None) -> MemoryOut:
+    # Phase 14-D：item 可预加载（列表端点批量传入，消除逐行 db.get 的 N+1）。
+    if item is None:
+        item = db.get(Item, mem.item_id)  # 显式加载，避免 DetachedInstanceError
     return MemoryOut(
         id=mem.id,
         item_id=mem.item_id,
@@ -772,7 +832,9 @@ async def list_memories(
         rows = memories.query_memories(
             db, item_id=item_id, start=start, end=end, search=search, skip=skip, limit=limit,
         )
-    return [_memory_out(m, db) for m in rows]
+    # Phase 14-D：关联 Item 批量加载（消除逐行 db.get N+1）
+    items_by_id = _items_by_id(db, [m.item_id for m in rows])
+    return [_memory_out(m, db, items_by_id.get(m.item_id)) for m in rows]
 
 
 @router.post("/items/{item_id}/memories", response_model=MemoryOut)
@@ -1275,7 +1337,51 @@ def _federated_search_sync(query: str, local_top_k: int, tag_filter, tag_match,
         finally:
             # 不等待慢线程：超时的源继续在后台跑完即弃，请求不被拖住
             executor.shutdown(wait=False)
-    return local_results, _aggregate_external_results(external, query), errors
+    external = _mark_local_status(_aggregate_external_results(external, query))
+    return local_results, external, errors
+
+
+def _mark_local_status(results: List[ExternalResult]) -> List[ExternalResult]:
+    """批量标记搜索结果是否已收藏（Phase 13-B）。
+
+    单次查询 MediaSource + 一次查询 Item，建立 (source, external_id) → 本地 Item 映射；
+    不做逐结果请求，不触发 Provider。
+    """
+    from sqlalchemy import and_, or_
+
+    from app.database import SessionLocal
+    from app.models import Item, MediaSource
+
+    pairs = set()
+    for r in results:
+        for s in (r.sources or []):
+            if s.get("source") and s.get("external_id") is not None:
+                pairs.add((s["source"], str(s["external_id"])))
+    if not pairs:
+        return results
+
+    db = SessionLocal()
+    try:
+        conds = [and_(MediaSource.source == src, MediaSource.external_id == eid) for src, eid in pairs]
+        media_of = {(m.source, m.external_id): m.media_id for m in
+                    db.query(MediaSource).filter(or_(*conds)).all()}
+        item_of: dict = {}
+        media_ids = set(media_of.values())
+        if media_ids:
+            for it in db.query(Item).filter(Item.media_id.in_(media_ids)).all():
+                item_of.setdefault(it.media_id, it.id)
+        for r in results:
+            lid = None
+            for s in (r.sources or []):
+                mid = media_of.get((s.get("source"), str(s.get("external_id")))) if s.get("external_id") is not None else None
+                if mid is not None and mid in item_of:
+                    lid = item_of[mid]
+                    break
+            r.is_local = lid is not None
+            r.local_item_id = lid
+        return results
+    finally:
+        db.close()
 
 
 @router.post("/search/federated", response_model=FederatedSearchResponse)
@@ -1568,6 +1674,82 @@ async def media_relations_route(media_id: int):
         if entry is None:
             raise HTTPException(status_code=404, detail="作品不存在")
         return media_svc.relations_out(entry, db)
+    finally:
+        db.close()
+
+
+@router.get("/staff/{source}/{external_id}", response_model=StaffPersonOut)
+async def staff_person(source: str, external_id: str):
+    """Staff 人物详情（Phase 13-B）：该人在本地 MediaEntry 中的关联作品。
+
+    只查 Staff 表（含 media_entry / 关联 Item 批量），绝不扫描 raw_metadata、
+    不调用 Provider。external_id 缺失（null）不在此路由范围。
+    """
+    from app.database import SessionLocal
+    from app.models import Staff
+    from sqlalchemy.orm import selectinload as _sl
+    db = SessionLocal()
+    try:
+        rows = db.query(Staff).options(_sl(Staff.media_entry)).filter(
+            Staff.source == source, Staff.external_id == external_id).all()
+        if not rows:
+            raise HTTPException(status_code=404, detail="未找到该 Staff")
+        person = rows[0]
+        entry_ids = [s.media_id for s in rows]
+        items_by_media = {}
+        if entry_ids:
+            for it in db.query(Item).filter(Item.media_id.in_(entry_ids)).all():
+                items_by_media.setdefault(it.media_id, it.id)
+        works = [{
+            "media_id": s.media_id,
+            "item_id": items_by_media.get(s.media_id),
+            "title": s.media_entry.canonical_title if s.media_entry else None,
+            "image_url": s.media_entry.image_url if s.media_entry else None,
+            "year": s.media_entry.year if s.media_entry else None,
+            "work_type": s.media_entry.work_type if s.media_entry else None,
+            "role": s.role,
+            "credit_order": s.credit_order,
+        } for s in rows if s.media_entry is not None]
+        return {"source": person.source, "external_id": person.external_id,
+                "name": person.name, "works": works}
+    finally:
+        db.close()
+
+
+@router.get("/characters/{source}/{external_id}", response_model=CharacterPersonOut)
+async def character_person(source: str, external_id: str):
+    """角色人物详情（Phase 13-B）：本地 Character + 出演作品（Character.works）。
+
+    只查 Character 表，不调用 Provider、不递归拉取。
+    """
+    from app.database import SessionLocal
+    from app.models import Character
+    from sqlalchemy.orm import selectinload as _sl
+    import json as _json
+    db = SessionLocal()
+    try:
+        # Phase 13-C：selectinload 一次加载 works 关联（避免懒加载多查；仍只查实体表+批量 Item）
+        ch = db.query(Character).options(_sl(Character.works)).filter(
+            Character.source == source, Character.external_id == external_id).first()
+        if ch is None:
+            raise HTTPException(status_code=404, detail="未找到该角色")
+        try:
+            actors = _json.loads(ch.actors or "[]") if ch.actors else []
+        except (TypeError, ValueError):
+            actors = []
+        works = [{
+            "item_id": w.id,
+            "title": w.title,
+            "image_url": w.image_url,
+            "year": int(w.release_date[:4]) if w.release_date and w.release_date[:4].isdigit() else None,
+            "work_type": w.work_type,
+            "relation": None,
+        } for w in ch.works]
+        return {
+            "source": ch.source, "external_id": ch.external_id, "name": ch.name,
+            "image_url": ch.image_url, "summary": ch.summary, "relation": ch.relation,
+            "actors": actors, "works": works,
+        }
     finally:
         db.close()
 

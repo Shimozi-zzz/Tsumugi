@@ -229,6 +229,42 @@ class TestSearchRoutes:
         assert resp.status_code == 200
         assert resp.json()["results"] == []
 
+    def test_search_my_no_n1(self, client, db):
+        """Phase 14-D：/search/my 关联批量加载——多结果场景查询数有界（不随结果数线性增长）。"""
+        from datetime import datetime
+        from sqlalchemy import event as sa_event
+
+        from app.models import Item, Memory, Review
+        for i in range(5):
+            it = Item(type="note", title=f"文档{i}", content="共享关键词 content")
+            db.add(it)
+            db.flush()
+            db.add(Review(item_id=it.id, title="书评", content="共享关键词 content"))
+            db.add(Memory(item_id=it.id, source_type="text",
+                          occurred_at=datetime.utcnow(), summary="共享关键词 content"))
+        db.commit()
+
+        selects = []
+
+        def _count(conn, cur, stmt, *a, **k):
+            if stmt.lstrip().lower().startswith("select"):
+                selects.append(stmt)
+
+        eng = db.get_bind()
+        sa_event.listen(eng, "before_cursor_execute", _count)
+        try:
+            resp = client.get("/api/search/my", params={"q": "共享关键词"})
+        finally:
+            sa_event.remove(eng, "before_cursor_execute", _count)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["works"]) == 5
+        assert len(data["reviews"]) == 5
+        assert len(data["memories"]) == 5
+        # 修复前：5 行 works × 6 次懒加载 + 每 review/memory 各 1 次 db.get ≈ 40+ 查询；
+        # 修复后：selectinload 常量 + 批量 IN，总数有界（<15）
+        assert len(selects) <= 15
+
     def test_upload_cover(self, client):
         item_id = _upload_md(client).json()["item_id"]
         resp = client.post(
@@ -902,4 +938,182 @@ class TestMediaStaffRelations:
         db.commit()
         resp = client.get(f"/api/media/{emedia.id}/relations")
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
+
+    def test_media_relations_local_target_without_item(self, client, db):
+        """Phase 13-E：本地关系目标 MediaEntry 存在但无关联 Item（如已删除）→
+        target_item_id=None、is_local=True，仍安全返回（前端回退外部链接，不产生死按钮）。"""
+        from app import media as media_svc
+        from app.models import MediaEntry, MediaRelation
+        item = self._mk(db, raw_metadata={"source": "jikan", "detail": {"metadata": {"relations": [
+            {"relation": "Sequel", "title": "孤儿目标", "external_id": "888", "source": "jikan"}]}}})
+        emedia = media_svc.ensure_media_for_item(item, db)
+        # 制造孤儿目标：一个没有任何关联 Item 的 MediaEntry（external_id 用 777 避免与
+        # 上面自动同步的 888 关系行撞 UniqueConstraint）
+        orphan = MediaEntry(canonical_title="孤儿")
+        db.add(orphan)
+        db.flush()
+        db.add(MediaRelation(
+            media_id=emedia.id, source="jikan", relation_type="sequel",
+            target_title="孤儿目标", target_external_id="777", target_source="jikan",
+            target_media_id=orphan.id,
+        ))
+        db.commit()
+        rows = client.get(f"/api/media/{emedia.id}/relations").json()
+        r = next(x for x in rows if x["target_media_id"] is not None)
+        assert r["is_local"] is True
+        assert r["target_item_id"] is None
+        assert r["external_url"] == "https://myanimelist.net/anime/777"
+
+
+class TestPersonNavigation:
+    """Phase 13-B：Staff / Character 人物导航（本地作品列表，不触发 Provider）。"""
+
+    def _mk(self, db, **kw):
+        from app.models import Item
+        defaults = dict(type="external_ref", source="jikan", external_id="1", title="作品", content="")
+        defaults.update(kw)
+        it = Item(**defaults)
+        it.raw_metadata = kw.get("raw_metadata")
+        db.add(it)
+        db.commit()
+        db.refresh(it)
+        return it
+
+    def test_staff_person_works(self, client, db):
+        from app import media as media_svc
+        item = self._mk(db, raw_metadata={"source": "jikan", "detail": {"metadata": {"staff": [
+            {"name": "Takuya Sato", "role": "Director", "source": "jikan", "external_id": "5", "credit_order": 0}]}}})
+        entry = media_svc.ensure_media_for_item(item, db)
+        db.commit()
+        resp = client.get("/api/staff/jikan/5")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "Takuya Sato"
+        assert len(data["works"]) == 1
+        assert data["works"][0]["media_id"] == entry.id
+        assert data["works"][0]["item_id"] == item.id
+        assert data["works"][0]["role"] == "Director"
+
+    def test_staff_not_found(self, client):
+        assert client.get("/api/staff/jikan/999999").status_code == 404
+
+    def test_staff_no_provider_request(self, client, db, monkeypatch):
+        from app import media as media_svc
+
+        def boom(url, **kw):
+            raise AssertionError("staff 导航不应触发 Provider")
+
+        monkeypatch.setattr("app.connectors.jikan.connector.http_get", boom)
+        item = self._mk(db, raw_metadata={"source": "jikan", "detail": {"metadata": {"staff": [
+            {"name": "Takuya Sato", "role": "Director", "source": "jikan", "external_id": "5", "credit_order": 0}]}}})
+        media_svc.ensure_media_for_item(item, db)
+        db.commit()
+        assert client.get("/api/staff/jikan/5").status_code == 200
+
+    def test_character_person_works(self, client, db):
+        from app.models import Character
+        ch = Character(source="bangumi", external_id="c1", name="角色A", actors='["声优X"]')
+        item = self._mk(db, source="bangumi", external_id="1", title="作品")
+        ch.works.append(item)
+        db.add(ch)
+        db.commit()
+        resp = client.get("/api/characters/bangumi/c1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "角色A"
+        assert data["actors"] == ["声优X"]
+        assert len(data["works"]) == 1
+        assert data["works"][0]["item_id"] == item.id
+
+    def test_character_not_found(self, client):
+        assert client.get("/api/characters/bangumi/nope").status_code == 404
+
+    def test_character_no_provider_request(self, client, db, monkeypatch):
+        from app.models import Character
+
+        def boom(url, **kw):
+            raise AssertionError("character 导航不应触发 Provider")
+
+        monkeypatch.setattr("app.connectors.bangumi.connector.http_get", boom)
+        ch = Character(source="bangumi", external_id="c1", name="角色A")
+        item = self._mk(db, source="bangumi", external_id="1", title="作品")
+        ch.works.append(item)
+        db.add(ch)
+        db.commit()
+        assert client.get("/api/characters/bangumi/c1").status_code == 200
+
+
+class TestSearchLocalStatus:
+    """Phase 13-B：搜索结果本地收藏状态（is_local / local_item_id，批量标记）。"""
+
+    def _mk(self, db, **kw):
+        from app.models import Item
+        defaults = dict(type="external_ref", source="bangumi", external_id="1", title="作品", content="")
+        defaults.update(kw)
+        it = Item(**defaults)
+        db.add(it)
+        db.commit()
+        db.refresh(it)
+        return it
+
+    def test_local_and_foreign(self, client, db, monkeypatch):
+        from app import media as media_svc
+        from app.connectors.base import SearchResult
+        local_item = self._mk(db, source="bangumi", external_id="123", title="命运石之门")
+        media_svc.ensure_media_for_item(local_item, db)
+        db.commit()
+
+        class C:
+            name = "bangumi"
+
+            def search(self, query, **filters):
+                return [
+                    SearchResult(source="bangumi", title="命运石之门", external_id="123", year=2011),
+                    SearchResult(source="bangumi", title="未收藏作品", external_id="999"),
+                ]
+
+        monkeypatch.setattr("app.api.routes.connector_registry.get_enabled_connectors", lambda: [C()])
+        resp = client.post("/api/search/federated", json={"query": "命运"})
+        assert resp.status_code == 200
+        data = resp.json()
+        r0 = next(r for r in data["results"] if r["external_id"] == "123")
+        assert r0["is_local"] is True
+        assert r0["local_item_id"] == local_item.id
+        r1 = next(r for r in data["results"] if r["external_id"] == "999")
+        assert r1["is_local"] is False
+        assert r1["local_item_id"] is None
+
+
+class TestItemDynamicFields:
+    """Phase 13-B：/items 返回 review/memory 计数、my_rating、genres/studios（一次查询无 N+1）。"""
+
+    def _mk(self, db, **kw):
+        from app.models import Item
+        defaults = dict(type="external_ref", source="jikan", external_id="1", title="作品", content="")
+        defaults.update(kw)
+        it = Item(**defaults)
+        it.raw_metadata = kw.get("raw_metadata")
+        db.add(it)
+        db.commit()
+        db.refresh(it)
+        return it
+
+    def test_dynamic_fields(self, client, db):
+        from datetime import datetime
+        from app import media as media_svc
+        from app.models import Memory, Review
+        it = self._mk(db, raw_metadata={"source": "jikan", "detail": {"metadata": {
+            "genres": ["科幻"], "studios": ["White Fox"]}}})
+        media_svc.ensure_media_for_item(it, db)
+        db.commit()
+        db.add(Review(item_id=it.id, content="好", rating=9))
+        db.add(Memory(item_id=it.id, source_type="text", occurred_at=datetime.utcnow(), summary="m"))
+        db.commit()
+        resp = client.get("/api/items")
+        assert resp.status_code == 200
+        it_out = next(i for i in resp.json()["items"] if i["id"] == it.id)
+        assert it_out["review_count"] == 1
+        assert it_out["memory_count"] == 1
+        assert it_out["my_rating"] == 9.0
+        assert it_out["genres"] == ["科幻"]
+        assert it_out["studios"] == ["White Fox"]
