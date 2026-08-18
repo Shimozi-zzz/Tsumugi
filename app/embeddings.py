@@ -23,6 +23,11 @@ def get_embedding_model():
                     from sentence_transformers import SentenceTransformer
                     _model = SentenceTransformer(settings.embedding_model)
                 except Exception as e:  # 网络失败 / 模型损坏 / 内存不足等
+                    import traceback as _tb
+                    try:
+                        _tb.print_exc()  # 诊断用：完整 traceback 打到 stderr（打包版日志）
+                    except Exception:
+                        pass
                     raise EmbeddingError(
                         f"加载 embedding 模型 '{settings.embedding_model}' 失败：{e}"
                     ) from e
