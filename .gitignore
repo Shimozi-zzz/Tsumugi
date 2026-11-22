@@ -16,6 +16,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+release_assets/
 
 # 前端依赖与构建产物
 frontend/node_modules/
@@ -23,7 +24,6 @@ frontend/dist/
 
 # 归档包与临时产物
 *.tar.gz
-Tsumugi-*.zip
 
 # 系统与编辑器杂项
 .DS_Store

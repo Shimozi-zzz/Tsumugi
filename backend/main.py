@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import mimetypes
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,19 @@ from backend.core.config import (
 from backend.core.os_adapter import os_adapter
 from backend.db.database import get_db, init_db
 from backend.services.process_tracker import process_tracker
+
+# 屏蔽 Windows 注册表 MIME 污染（避免 .js 被识别为 text/plain 导致 WebView2 拒绝执行 ES Module 黑屏）
+mimetypes.init()
+for _ext, _mime in (
+    (".js", "application/javascript"),
+    (".mjs", "application/javascript"),
+    (".css", "text/css"),
+    (".svg", "image/svg+xml"),
+    (".webp", "image/webp"),
+    (".woff2", "font/woff2"),
+    (".json", "application/json"),
+):
+    mimetypes.add_type(_mime, _ext, strict=True)
 
 # 在 StaticFiles 挂载前确保可写 data/ 目录存在，避免启动报错
 ensure_data_dirs()

@@ -389,7 +389,7 @@ async def convert_existing_assets_to_webp(db: AsyncSession = Depends(get_db)) ->
 
 # ──────────────────── 4. 版本信息与 GitHub Releases 检查更新 ────────────────────
 
-INSTALLER_ASSET_EXTS = (".exe", ".zip", ".msi", ".appimage")
+INSTALLER_ASSET_EXTS = (".exe", ".msi", ".appimage")
 _PRERELEASE_RANKS = {
     "dev": 0,
     "alpha": 1,
@@ -441,14 +441,19 @@ def _parse_version(tag: str) -> tuple[int, ...]:
 def _pick_installer_asset_url(assets: Any) -> str:
     if not isinstance(assets, list):
         return ""
+    fallback_url = ""
     for item in assets:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip().lower()
         dl_url = str(item.get("browser_download_url") or "").strip()
-        if dl_url and name.endswith(INSTALLER_ASSET_EXTS):
+        if not dl_url:
+            continue
+        if name.endswith(".exe"):
             return dl_url
-    return ""
+        if not fallback_url and name.endswith(INSTALLER_ASSET_EXTS):
+            fallback_url = dl_url
+    return fallback_url
 
 
 async def _load_proxy_url(db: AsyncSession) -> str:

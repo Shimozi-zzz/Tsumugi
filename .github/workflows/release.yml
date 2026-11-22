@@ -1,9 +1,8 @@
-name: Release Windows Portable
+name: Release Windows
 
 env:
   PYTHONUTF8: "1"
   PYTHONIOENCODING: "utf-8"
-
 
 on:
   push:
@@ -21,7 +20,7 @@ permissions:
 
 jobs:
   build-windows:
-    name: Build Windows x64 Portable
+    name: Build Windows Installer (x64)
     runs-on: windows-latest
     defaults:
       run:
@@ -31,7 +30,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Resolve release tag
+      - name: Resolve release tag and version
         run: |
           if ("${{ github.ref_type }}" -eq "tag") {
             $tag = "${{ github.ref_name }}"
@@ -39,10 +38,17 @@ jobs:
             $raw = "${{ inputs.tag }}".Trim()
             $tag = if ($raw) { $raw } else { "dev" }
           }
-          $zipName = "Tsumugi-Windows-x64-$tag.zip"
+          $cleanVer = $tag -replace '^[vV]', ''
+          if ($cleanVer -match '^(\d+\.\d+\.\d+)') {
+            $appVer = $Matches[1]
+          } else {
+            $appVer = "0.9.0"
+          }
+          $installerName = "Tsumugi-Setup-$tag.exe"
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Resolved tag=$tag, archive=$zipName"
+          "APP_VERSION=$appVer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "INSTALLER_NAME=$installerName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Resolved tag=$tag, appVersion=$appVer, installer=release_assets/$installerName"
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
@@ -67,28 +73,64 @@ jobs:
           uv python install 3.12
           uv sync --extra desktop
 
-      - name: Package Windows portable bundle
+      - name: Build Windows application core bundle
         run: uv run --extra desktop python packaging/build_windows.py
 
-      - name: Create portable zip archive
+      - name: Build Inno Setup installer
         run: |
-          if (Test-Path $env:ZIP_NAME) {
-            Remove-Item $env:ZIP_NAME -Force
+          $iscc = $null
+          $cmd = Get-Command iscc -ErrorAction SilentlyContinue
+          if ($cmd) {
+            $iscc = $cmd.Source
+          } else {
+            foreach ($candidate in @(
+              "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+              "C:\Program Files\Inno Setup 6\ISCC.exe"
+            )) {
+              if (Test-Path $candidate) {
+                $iscc = $candidate
+                break
+              }
+            }
           }
-          Compress-Archive -Path "dist/Tsumugi" -DestinationPath $env:ZIP_NAME -Force
-          Get-Item $env:ZIP_NAME | Format-List Name, Length
+          if (-not $iscc) {
+            Write-Host "Inno Setup not found, installing via Chocolatey..."
+            choco install innosetup -y --no-progress
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "ISCC.exe not found at $iscc"
+          }
+          New-Item -ItemType Directory -Force -Path "release_assets" | Out-Null
+          & $iscc "/DAppVersion=$env:APP_VERSION" "/DReleaseTag=$env:RELEASE_TAG" "packaging/installer.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "ISCC.exe exited with code $LASTEXITCODE"
+          }
+
+      - name: Verify installer executable
+        run: |
+          $installerPath = Join-Path "release_assets" $env:INSTALLER_NAME
+          if (-not (Test-Path $installerPath)) {
+            throw "Expected installer not found: $installerPath"
+          }
+          $item = Get-Item $installerPath
+          $sizeMB = [math]::Round($item.Length / 1MB, 2)
+          Write-Host "Verified installer: $($item.FullName) ($sizeMB MB)"
+          if ($item.Length -lt 5MB) {
+            throw "Installer size ($($item.Length) bytes) is unexpectedly small"
+          }
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ZIP_NAME }}
+          files: release_assets/Tsumugi-Setup-*.exe
           generate_release_notes: true
 
-      - name: Upload test build artifact
+      - name: Upload test installer artifact
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: Tsumugi-Windows-x64-${{ env.RELEASE_TAG }}
-          path: ${{ env.ZIP_NAME }}
+          name: Tsumugi-Setup-${{ env.RELEASE_TAG }}
+          path: release_assets/Tsumugi-Setup-*.exe
           retention-days: 14

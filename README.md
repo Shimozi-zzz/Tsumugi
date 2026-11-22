@@ -11,13 +11,13 @@
 - **全局留声机**：支持检索试听并本地化作品主题曲，在回廊与详情页间无缝淡入淡出播放。
 - **Bangumi 单向状态上传**：绑定作品条目 ID 后，可将本地游玩状态单向推送至 Bangumi。
 - **WebP 瘦身与存储治理**：入库与在线抓图自动转码压缩为 WebP 并生成缩略图，内置分类磁盘占用分析、存量旧图批量转换与孤儿文件清理。
-- **便携与更新检查**：全部数据库与媒体资产保存在单一 `data/` 目录，内置 GitHub Releases 版本检查。
+- **独立数据目录与更新检查**：全部数据库与媒体资产保存在安装目录同级的 `data/` 文件夹，内置 GitHub Releases 版本检查。
 
-## Windows 便携版使用
+## Windows 安装与升级
 
-1. 前往本仓库 [Releases](https://github.com/Shimozi/tsumugi-platform/releases) 下载最新的 `Tsumugi-Windows-x64-v*.zip`。
-2. 解压至任意本地目录，双击 `Tsumugi.exe` 即可启动。
-3. 全部数据库、图片、音频、视频与存档备份均保存在 `Tsumugi.exe` 同级的 `data/` 目录中，迁移或升级时保留 `data/` 即可无缝延续数据。
+1. 前往本仓库 [Releases](https://github.com/Shimozi/tsumugi-platform/releases) 下载最新的 **`Tsumugi-Setup-v*.exe`**。
+2. 双击安装包按向导完成安装（免管理员权限，支持自定义安装目录，默认安装至 `%LOCALAPPDATA%\Programs\Tsumugi`）。
+3. **无损覆盖升级**：新版本发布后，直接下载新版 `Tsumugi-Setup-*.exe` 覆盖安装到原目录即可；安装器会自动关闭运行中的程序，且升级与卸载均不会删除安装目录下的 `data/` 数据文件夹。
 
 ## 本地开发
 
@@ -54,12 +54,15 @@ uv sync --extra desktop
 uv run --extra desktop python desktop.py
 ```
 
-### 构建 Windows 便携版
+### 构建 Windows 安装包
+
+需要已安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)（`ISCC.exe`）：
 
 ```powershell
 cd frontend; npm ci; npm run build; cd ..
 uv sync --extra desktop
 uv run --extra desktop python packaging/build_windows.py
+ISCC.exe /DAppVersion=0.9.0 /DReleaseTag=v0.9.0 packaging/installer.iss
 ```
 
-打包产物位于 `dist/Tsumugi/`。推送 `v*` 格式标签（如 `git tag v0.9.0 && git push origin v0.9.0`）也会自动触发 GitHub Actions 编译并发布 Windows 便携压缩包。
+最终安装包产出在 `release_assets/Tsumugi-Setup-v0.9.0.exe`。推送 `v*` 格式标签（如 `git tag v0.9.0 && git push origin v0.9.0`）也会自动触发 GitHub Actions 编译并发布单文件 `.exe` 安装包。

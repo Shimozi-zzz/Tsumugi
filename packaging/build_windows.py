@@ -1,11 +1,9 @@
 """
-Windows 绿色便携版 PyInstaller 打包脚本
-用法：
+Windows application core PyInstaller build script (packaged into Tsumugi-Setup-*.exe by Inno Setup).
+Usage:
     cd frontend && npm ci && npm run build && cd ..
     uv sync --extra desktop
     uv run --extra desktop python packaging/build_windows.py
-产物：
-    dist/Tsumugi/Tsumugi.exe（便携数据默认写入同级 data/ 目录）
 """
 
 from __future__ import annotations
@@ -18,6 +16,7 @@ import sys
 ROOT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 ENTRY_SCRIPT = ROOT_DIR / "desktop.py"
+ICON_FILE = (ROOT_DIR / "packaging" / "tsumugi.ico").resolve()
 
 HIDDEN_IMPORTS = [
     "uvicorn.logging",
@@ -46,14 +45,18 @@ def main() -> None:
     index_html = FRONTEND_DIST / "index.html"
     if not index_html.is_file():
         print(
-            f"[ERROR] 未找到前端构建产物：{index_html}\n"
-            "请先在 frontend/ 目录执行 npm ci && npm run build。",
+            f"[ERROR] Frontend build output not found: {index_html}\n"
+            "Run 'npm ci && npm run build' inside frontend/ first.",
             file=sys.stderr,
         )
         sys.exit(1)
 
     if not ENTRY_SCRIPT.is_file():
-        print(f"[ERROR] 未找到桌面入口脚本：{ENTRY_SCRIPT}", file=sys.stderr)
+        print(f"[ERROR] Desktop entry script not found: {ENTRY_SCRIPT}", file=sys.stderr)
+        sys.exit(1)
+
+    if not ICON_FILE.is_file():
+        print(f"[ERROR] Application icon not found: {ICON_FILE}", file=sys.stderr)
         sys.exit(1)
 
     cmd: list[str] = [
@@ -66,12 +69,18 @@ def main() -> None:
         "--clean",
         "--name",
         "Tsumugi",
+        "--icon",
+        str(ICON_FILE),
         "--add-data",
         f"{FRONTEND_DIST}{os.pathsep}frontend/dist",
         "--collect-data",
         "pypinyin",
-        "--collect-submodules",
+        "--collect-all",
         "webview",
+        "--collect-all",
+        "clr_loader",
+        "--collect-all",
+        "pythonnet",
     ]
 
     for mod in HIDDEN_IMPORTS:
@@ -79,17 +88,31 @@ def main() -> None:
 
     cmd.append(str(ENTRY_SCRIPT))
 
-    print("Running PyInstaller:", " ".join(cmd))
+    print("Building Windows app core bundle:", " ".join(cmd))
     subprocess.run(cmd, cwd=str(ROOT_DIR), check=True)
 
     output_dir = ROOT_DIR / "dist" / "Tsumugi"
     exe_name = "Tsumugi.exe" if sys.platform == "win32" else "Tsumugi"
     output_exe = output_dir / exe_name
-    if not output_exe.exists():
-        print(f"[ERROR] 打包完成但未找到预期可执行文件：{output_exe}", file=sys.stderr)
+    if not output_exe.is_file():
+        print(f"[ERROR] Expected executable not found: {output_exe}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[OK] Portable build completed: {output_exe}")
+    bundled_frontend_candidates = (
+        output_dir / "_internal" / "frontend" / "dist" / "index.html",
+        output_dir / "frontend" / "dist" / "index.html",
+    )
+    bundled_index = next((p for p in bundled_frontend_candidates if p.is_file()), None)
+    if bundled_index is None:
+        print(
+            "[ERROR] Bundled frontend/dist/index.html missing under dist/Tsumugi "
+            "(checked _internal/frontend/dist/index.html and frontend/dist/index.html)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"[OK] Windows app core bundle ready for Inno Setup: {output_exe}")
+    print(f"[OK] Verified bundled frontend entry: {bundled_index}")
 
 
 if __name__ == "__main__":

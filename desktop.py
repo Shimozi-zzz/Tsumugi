@@ -2,12 +2,14 @@
 Tsumugi 轻量桌面端单进程入口（PyWebView + 内置 FastAPI）
 - 兼容 PyInstaller --noconsole 无控制台模式（避免 sys.stdout/stderr 为 None 导致 .isatty() 崩溃）
 - 自动申请空闲本地端口，守护线程拉起内置 Uvicorn 服务
-- 轮询 /api/system/version 就绪后在主线程打开原生窗口，关闭窗口时优雅落盘并退出
+- 本地健康检查绕过系统代理，轮询 /api/system/version 就绪后在主线程打开原生 WebView2 窗口
+- 关闭窗口时优雅落盘游玩时长并退出进程
 """
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 from pathlib import Path
@@ -20,7 +22,21 @@ from typing import Any
 import urllib.error
 import urllib.request
 
-from backend.core.config import DATA_DIR, ensure_data_dirs
+from backend.core.config import DATA_DIR, FRONTEND_DIST_DIR, ensure_data_dirs
+
+
+class _WinError10054Filter(logging.Filter):
+    """过滤 Windows ProactorEventLoop 常见的无害 WinError 10054 远程连接重置日志噪声"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "WinError 10054" in msg or "10054" in msg and "ConnectionResetError" in msg:
+            return False
+        if record.exc_info and record.exc_info[1]:
+            exc = record.exc_info[1]
+            if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
+                return False
+        return True
 
 
 def _setup_safe_io_and_logging() -> logging.Logger:
@@ -52,6 +68,12 @@ def _setup_safe_io_and_logging() -> logging.Logger:
         handlers=handlers or None,
         force=True,
     )
+
+    noise_filter = _WinError10054Filter()
+    logging.getLogger("asyncio").addFilter(noise_filter)
+    for h in logging.getLogger().handlers:
+        h.addFilter(noise_filter)
+
     return logging.getLogger("tsumugi.desktop")
 
 
@@ -62,11 +84,13 @@ def _find_free_port() -> int:
 
 
 def _wait_for_backend(port: int, timeout: float = 10.0) -> bool:
+    """本地健康轮询强制绕过系统代理，防止代理拦截 127.0.0.1 导致超时"""
     url = f"http://127.0.0.1:{port}/api/system/version"
+    no_proxy_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=0.6) as resp:
+            with no_proxy_opener.open(url, timeout=0.6) as resp:
                 if resp.status == 200:
                     return True
         except (urllib.error.URLError, TimeoutError, OSError):
@@ -164,6 +188,16 @@ class DesktopBridge:
 def main() -> None:
     logger = _setup_safe_io_and_logging()
 
+    frontend_index = FRONTEND_DIST_DIR / "index.html"
+    logger.info(
+        "启动环境检查: frozen=%s, DATA_DIR=%s, FRONTEND_DIST_DIR=%s (exists=%s, index_ready=%s)",
+        getattr(sys, "frozen", False),
+        DATA_DIR,
+        FRONTEND_DIST_DIR,
+        FRONTEND_DIST_DIR.is_dir(),
+        frontend_index.is_file(),
+    )
+
     try:
         import uvicorn
         import webview
@@ -174,7 +208,7 @@ def main() -> None:
         sys.exit(1)
 
     port = _find_free_port()
-    logger.info("启动内置服务: http://127.0.0.1:%d (DATA_DIR=%s)", port, DATA_DIR)
+    logger.info("启动内置服务: http://127.0.0.1:%d", port)
 
     config = uvicorn.Config(
         app,
@@ -212,8 +246,31 @@ def main() -> None:
     bridge.attach(window)
     window.events.loaded += lambda: _apply_windows_dark_titlebar("Tsumugi")
 
+    start_kwargs: dict[str, Any] = {}
+    if sys.platform == "win32":
+        start_kwargs["gui"] = "edgechromium"
+
+    start_sig = inspect.signature(webview.start).parameters
+    if "storage_path" in start_sig:
+        webview_cache_dir = DATA_DIR / "webview_cache"
+        webview_cache_dir.mkdir(parents=True, exist_ok=True)
+        start_kwargs["storage_path"] = str(webview_cache_dir)
+    if "private_mode" in start_sig:
+        start_kwargs["private_mode"] = False
+
+    def _log_runtime_renderer() -> None:
+        renderer = getattr(webview, "renderer", None) or start_kwargs.get("gui", "default")
+        logger.info(
+            "WebView 启动就绪: renderer=%s, storage_path=%s",
+            renderer,
+            start_kwargs.get("storage_path", "default"),
+        )
+
+    window.events.loaded += _log_runtime_renderer
+    logger.info("调用 webview.start 参数: %s", start_kwargs)
+
     try:
-        webview.start()
+        webview.start(**start_kwargs)
     except Exception as exc:
         logger.exception("桌面窗口运行异常: %s", exc)
     finally:
