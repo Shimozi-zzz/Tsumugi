@@ -89,7 +89,7 @@ def main() -> None:
         print(f"[ERROR] 打包完成但未找到预期可执行文件：{output_exe}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[OK] 便携版打包完成：{output_exe}")
+    print(f"[OK] Portable build completed: {output_exe}")
 
 
 if __name__ == "__main__":
