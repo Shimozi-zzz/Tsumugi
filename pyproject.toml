@@ -1,0 +1,23 @@
+[project]
+name = "tsumugi-platform"
+version = "0.9.0"
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "fastapi>=0.163.1",
+    "httpx>=0.28.1",
+    "pillow>=13.0.0",
+    "psutil>=7.2.2",
+    "pydantic>=2.14.3",
+    "pypinyin>=0.55.0",
+    "python-multipart>=0.0.34",
+    "sqlalchemy[asyncio]>=2.1.9",
+    "uvicorn[standard]>=0.54.0",
+    "yt-dlp>=2026.10.26",
+]
+
+[project.optional-dependencies]
+desktop = [
+    "pywebview>=5.3",
+    "pyinstaller>=6.10",
+]

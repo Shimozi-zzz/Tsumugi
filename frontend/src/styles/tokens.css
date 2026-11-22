@@ -1,0 +1,75 @@
+/* ==========================================================================
+   Tsumugi Design Tokens
+   Aesthetic benchmark: PS5, Apple TV+, Raycast & native macOS / Windows 11
+   ========================================================================== */
+
+:root {
+  /* Neutral Charcoal & Acrylic Materials */
+  --bg-canvas: #0a0a0c;
+  --bg-surface: #121215;
+  --bg-surface-subtle: rgba(255, 255, 255, 0.025);
+  --bg-surface-elevated: rgba(255, 255, 255, 0.035);
+  --bg-acrylic: rgba(15, 15, 18, 0.78);
+  --bg-acrylic-strong: rgba(16, 16, 20, 0.9);
+  --backdrop-acrylic: blur(28px) saturate(140%);
+
+  /* Restrained Hairlines & Dividers */
+  --divider-subtle: rgba(255, 255, 255, 0.06);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(255, 255, 255, 0.25);
+  --highlight-top: rgba(255, 255, 255, 0.08);
+
+  /* High-Contrast Monochrome Interactive Layering */
+  --cta-bg: #f5f5f7;
+  --cta-bg-hover: #ffffff;
+  --cta-text: #0a0a0c;
+
+  --surface-hover: rgba(255, 255, 255, 0.07);
+  --surface-active: rgba(255, 255, 255, 0.11);
+  --active-bar: #f5f5f7;
+
+  /* Typography Hierarchy */
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+
+  /* Semantic Status (Pure & Restrained) */
+  --status-todo: #71717a;
+  --status-playing: #f59e0b;
+  --status-done: #10b981;
+
+  --emerald: #10b981;
+  --emerald-bg: rgba(16, 185, 129, 0.16);
+  --emerald-bg-hover: rgba(16, 185, 129, 0.24);
+  --emerald-text: #6ee7b7;
+
+  --amber: #f59e0b;
+  --amber-bg: rgba(245, 158, 11, 0.14);
+  --amber-text: #fcd34d;
+
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.14);
+  --danger-bg-hover: rgba(239, 68, 68, 0.22);
+  --danger-text: #fca5a5;
+
+  /* Font Stacks */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Noto Sans SC',
+    'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', Georgia, serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+
+  /* Motion & Radii */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 180ms;
+  --duration-base: 280ms;
+  --duration-slow: 480ms;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* Shadows */
+  --shadow-modal: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 32px 90px rgba(0, 0, 0, 0.72);
+  --shadow-cover: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 24px 52px rgba(0, 0, 0, 0.7);
+}

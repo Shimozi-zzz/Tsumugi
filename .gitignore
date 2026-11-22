@@ -1,0 +1,32 @@
+# 个人数据、数据库与隐私文件
+data/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+.env
+.env.*
+*cookies*.txt
+*.log
+
+# Python 虚拟环境、缓存与打包产物
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# 前端依赖与构建产物
+frontend/node_modules/
+frontend/dist/
+
+# 归档包与临时产物
+*.tar.gz
+Tsumugi-*.zip
+
+# 系统与编辑器杂项
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,89 @@
+name: Release Windows Portable
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "手动构建版本号标识（如 v0.9.0-test）"
+        required: false
+        default: "dev"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows x64 Portable
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+          } else {
+            $raw = "${{ inputs.tag }}".Trim()
+            $tag = if ($raw) { $raw } else { "dev" }
+          }
+          $zipName = "Tsumugi-Windows-x64-$tag.zip"
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Resolved tag=$tag, archive=$zipName"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "frontend/package-lock.json"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.12 & sync dependencies
+        run: |
+          uv python install 3.12
+          uv sync --extra desktop
+
+      - name: Package Windows portable bundle
+        run: uv run --extra desktop python packaging/build_windows.py
+
+      - name: Create portable zip archive
+        run: |
+          if (Test-Path $env:ZIP_NAME) {
+            Remove-Item $env:ZIP_NAME -Force
+          }
+          Compress-Archive -Path "dist/Tsumugi" -DestinationPath $env:ZIP_NAME -Force
+          Get-Item $env:ZIP_NAME | Format-List Name, Length
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_NAME }}
+          generate_release_notes: true
+
+      - name: Upload test build artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tsumugi-Windows-x64-${{ env.RELEASE_TAG }}
+          path: ${{ env.ZIP_NAME }}
+          retention-days: 14

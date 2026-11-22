@@ -1,0 +1,115 @@
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.api import collections, games, library_tools, media, scraper, settings, stats, system
+from backend.core.config import (
+    APP_VERSION,
+    DATA_DIR,
+    DB_PATH,
+    FRONTEND_DIST_DIR,
+    ensure_data_dirs,
+)
+from backend.core.os_adapter import os_adapter
+from backend.db.database import get_db, init_db
+from backend.services.process_tracker import process_tracker
+
+# 在 StaticFiles 挂载前确保可写 data/ 目录存在，避免启动报错
+ensure_data_dirs()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    try:
+        yield
+    finally:
+        # 应用关闭时强制落盘尚未写入的游玩时长
+        await process_tracker.shutdown_flush()
+
+
+app = FastAPI(
+    title="Tsumugi Local Game Library API",
+    version=APP_VERSION,
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 将本地 data/ 目录挂载为静态资源路径（如 /static/data/assets/1/cover_thumb.webp）
+app.mount("/static/data", StaticFiles(directory=str(DATA_DIR)), name="static_data")
+
+# 统一注册全部业务模块路由
+app.include_router(games.router)
+app.include_router(settings.router)
+app.include_router(media.router)
+app.include_router(scraper.router)
+app.include_router(library_tools.router)
+app.include_router(stats.router)
+app.include_router(collections.router)
+app.include_router(system.router)
+app.include_router(system.tasks_router)
+
+
+@app.get("/api/health", tags=["System"])
+async def health_check(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(text("SELECT name FROM sqlite_master WHERE type='table';"))
+    tables = [row[0] for row in result.fetchall()]
+    return {
+        "status": "ok",
+        "os_adapter": os_adapter.platform_name,
+        "db_file": str(DB_PATH),
+        "initialized_tables": tables,
+        "frontend_dist_ready": (FRONTEND_DIST_DIR / "index.html").is_file(),
+        "running_game": process_tracker.get_status(),
+    }
+
+
+# 生产/桌面便携态：若 frontend/dist 存在且含 index.html，托管静态资源并兜底 SPA 路由
+_FRONTEND_INDEX = FRONTEND_DIST_DIR / "index.html"
+_FRONTEND_ASSETS = FRONTEND_DIST_DIR / "assets"
+
+if _FRONTEND_INDEX.is_file() and _FRONTEND_ASSETS.is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_FRONTEND_ASSETS)),
+        name="frontend_assets",
+    )
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa_frontend(full_path: str):
+    if (
+        full_path in ("docs", "redoc", "openapi.json")
+        or full_path.startswith(("api/", "static/", "docs/", "redoc/"))
+        or full_path == "api"
+    ):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    if not _FRONTEND_INDEX.is_file():
+        return {
+            "app": "Tsumugi Local Game Library Backend",
+            "version": APP_VERSION,
+            "message": "前端尚未构建（frontend/dist 不存在）。开发模式请访问 Vite 服务，或运行 npm run build。",
+            "docs": "/docs",
+        }
+
+    # 若命中 frontend/dist 下真实文件（如 favicon.ico / favicon.svg），直接返回该文件
+    if full_path:
+        dist_root = FRONTEND_DIST_DIR.resolve()
+        candidate = (FRONTEND_DIST_DIR / full_path).resolve()
+        if candidate.is_relative_to(dist_root) and candidate.is_file():
+            return FileResponse(candidate)
+
+    return FileResponse(_FRONTEND_INDEX)

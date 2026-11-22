@@ -1,0 +1,393 @@
+@import '../styles/tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+  color-scheme: dark;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.11) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  transition: background-color 160ms ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+select option {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtle Translucent Surface (no hard 1px boxes) */
+.glass-panel {
+  background: var(--bg-surface-subtle);
+  border: none;
+  box-shadow: inset 0 1px 0 var(--divider-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.acrylic-surface {
+  background: var(--bg-acrylic);
+  backdrop-filter: var(--backdrop-acrylic);
+  -webkit-backdrop-filter: var(--backdrop-acrylic);
+  box-shadow: inset 0 1px 0 var(--highlight-top);
+}
+
+/* Unified Restrained Button System */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo),
+    transform var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-fast) var(--ease-out-expo),
+    opacity var(--duration-fast) var(--ease-out-expo);
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+
+.btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+/* Primary CTA: Crisp White + Ink Black */
+.btn-primary {
+  background: var(--cta-bg);
+  color: var(--cta-text);
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.32);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--cta-bg-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.44);
+}
+
+/* Running State: Calm Deep Emerald Glass */
+.btn-emerald {
+  background: var(--emerald-bg);
+  color: var(--emerald-text);
+  font-weight: 600;
+  box-shadow:
+    inset 0 1px 0 rgba(110, 231, 183, 0.2),
+    0 8px 24px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.btn-emerald:hover:not(:disabled) {
+  background: var(--emerald-bg-hover);
+}
+
+.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-bg-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12.5px;
+  border-radius: 9px;
+}
+
+/* Raycast / macOS Native Form Controls */
+.input,
+.select,
+.textarea {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-weight: 400;
+  color: var(--text-primary);
+  outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-fast) var(--ease-out-expo);
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.input:hover:not(:focus),
+.select:hover:not(:focus),
+.textarea:hover:not(:focus) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.11);
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  background: rgba(255, 255, 255, 0.065);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 92px;
+  line-height: 1.65;
+}
+
+/* Raycast / Spotlight Acrylic Modals */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(4, 4, 6, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.modal-card {
+  width: 100%;
+  max-height: 88vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-acrylic-strong);
+  backdrop-filter: blur(32px) saturate(140%);
+  -webkit-backdrop-filter: blur(32px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  box-shadow: var(--shadow-modal);
+}
+
+/* Native macOS Toggle Switch (reusable for native checkbox inputs) */
+.native-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color var(--duration-fast) var(--ease-out-expo);
+}
+
+.native-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f4f4f5;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.38);
+  transition: transform var(--duration-fast) var(--ease-out-expo);
+}
+
+.native-switch:checked {
+  background: #f5f5f7;
+}
+
+.native-switch:checked::after {
+  background: #0a0a0c;
+  transform: translateX(16px);
+}
+
+/* Privacy Blur Shield */
+.privacy-blur-img {
+  filter: blur(24px) brightness(0.66) saturate(0.65) !important;
+  transform: scale(1.06);
+}
+
+/* Status Dots (6px pure solid circles) */
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot-todo {
+  background: var(--status-todo);
+}
+
+.status-dot-playing {
+  background: var(--status-playing);
+}
+
+.status-dot-done {
+  background: var(--status-done);
+}
+
+/* Smooth Image Reveal (200ms ease-out) */
+.img-fade {
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.img-fade.img-loaded {
+  opacity: 1;
+}
+
+/* Shared Transitions */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.22s var(--ease-out-expo);
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* View Switch (Gallery <-> Detail): 220ms subtle fade + micro-scale */
+.view-switch-enter-active,
+.view-switch-leave-active {
+  transition:
+    opacity 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.view-switch-enter-from {
+  opacity: 0;
+  transform: scale(0.992);
+}
+.view-switch-leave-to {
+  opacity: 0;
+  transform: scale(0.995);
+}
+
+/* Unified Modal Pop + Acrylic Backdrop Transition */
+.modal-pop-enter-active,
+.modal-pop-leave-active {
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.modal-pop-enter-active .modal-card,
+.modal-pop-leave-active .modal-card {
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.modal-pop-enter-from,
+.modal-pop-leave-to {
+  opacity: 0;
+}
+.modal-pop-enter-from .modal-card,
+.modal-pop-leave-to .modal-card {
+  opacity: 0;
+  transform: translateY(8px) scale(0.975);
+}
+
+/* Toast Stack Smooth Slide & Fade */
+.toast-slide-enter-active,
+.toast-slide-leave-active {
+  transition:
+    opacity 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.toast-slide-enter-from {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.97);
+}
+.toast-slide-leave-to {
+  opacity: 0;
+  transform: translateX(12px) scale(0.97);
+}
+
+.bg-fade-enter-active,
+.bg-fade-leave-active {
+  transition: opacity 0.42s ease-out;
+}
+.bg-fade-enter-from,
+.bg-fade-leave-to {
+  opacity: 0;
+}

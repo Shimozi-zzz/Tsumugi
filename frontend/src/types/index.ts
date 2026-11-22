@@ -1,0 +1,576 @@
+export type GameStatus = 'todo' | 'unplayed' | 'playing' | 'done' | 'completed'
+export type ActiveStatusFilter = 'all' | 'playing' | 'unplayed' | 'completed'
+export type GameEdition = 'standard' | 'collector'
+export type LaunchMode = 'direct' | 'le' | 'cli'
+export type ShelfViewMode = 'showcase' | 'spine'
+export type ShelfBgMode = 'linked' | 'random' | 'minimal'
+export type ImportTab = 'aggregated' | 'bgm' | 'vndb' | 'steam' | 'tgal' | 'local'
+export type SettingsSectionId = 'general' | 'network' | 'sources' | 'environment'
+export type LibrarySortBy = 'series_name' | 'recent_played' | 'release_date' | 'play_time' | 'created_at'
+export type LibrarySortOrder = 'asc' | 'desc'
+
+export interface GameMediaPath {
+  cover_path: string
+  cover_thumb_path: string
+  logo_path: string
+  hero_bg_path: string
+  custom_spine_path: string
+  pv_url_or_path: string
+  exe_path: string
+  launch_mode: LaunchMode | string
+  launch_args: string
+  save_dir: string
+  screenshot_dir: string
+  bgm_path: string
+}
+
+export interface PlayRecord {
+  total_seconds: number
+  last_played_at: string | null
+}
+
+export interface PlaySession {
+  id: number
+  game_id: number
+  started_at: string
+  duration_seconds: number
+}
+
+export interface Game {
+  id: number
+  title: string
+  sub_title: string
+  pinyin_initials: string
+  developer: string
+  publisher: string
+  release_date: string
+  synopsis: string
+  tags: string[]
+  external_ids: Record<string, string>
+  locked_fields: string[]
+  bangumi_id: string
+  series: string
+  status: GameStatus | string
+  edition: GameEdition | string
+  is_nsfw: boolean
+  source_platform: string
+  created_at: string
+  media: GameMediaPath | null
+  play_record: PlayRecord | null
+}
+
+export interface GameCreatePayload {
+  title: string
+  sub_title?: string
+  developer?: string
+  publisher?: string
+  release_date?: string
+  synopsis?: string
+  tags?: string[]
+  status?: GameStatus | string
+  edition?: GameEdition | string
+  is_nsfw?: boolean
+  source_platform?: string
+  bangumi_id?: string
+  series?: string
+  external_ids?: Record<string, string>
+  locked_fields?: string[]
+  media?: Partial<GameMediaPath>
+}
+
+export interface GameUpdatePayload {
+  title?: string
+  sub_title?: string
+  developer?: string
+  publisher?: string
+  release_date?: string
+  synopsis?: string
+  tags?: string[]
+  status?: GameStatus | string
+  edition?: GameEdition | string
+  is_nsfw?: boolean
+  source_platform?: string
+  bangumi_id?: string
+  series?: string
+  external_ids?: Record<string, string>
+  locked_fields?: string[]
+  media?: Partial<GameMediaPath>
+}
+
+export interface ApiKeysConfig {
+  steamgriddb: string
+  touchgal: string
+  bangumi: string
+  [key: string]: string
+}
+
+export interface AppSettings {
+  last_active_game_id: number | null
+  shelf_view_mode: ShelfViewMode | string
+  shelf_bg_mode: ShelfBgMode | string
+  bgm_autoplay: boolean
+  gallery_particles: boolean
+  proxy_url: string
+  le_exe_path: string
+  bangumi_token?: string
+  api_keys: ApiKeysConfig
+  allow_nsfw_scrape: boolean
+  privacy_blur_mode: boolean
+  library_sort_by?: LibrarySortBy | string
+  library_sort_order?: LibrarySortOrder | string
+  source_links?: {
+    bangumi?: string
+    steamgriddb?: string
+    [key: string]: string | undefined
+  }
+}
+
+export interface ScrapedGameItem {
+  source: string
+  external_id: string
+  title: string
+  sub_title: string
+  developer: string
+  publisher: string
+  release_date: string
+  synopsis: string
+  tags: string[]
+  is_nsfw: boolean
+  cover_url: string
+  logo_url: string
+  hero_bg_url: string
+  pv_url: string
+  screenshots: string[]
+  extra_ids: Record<string, string>
+  bangumi_id?: string
+}
+
+export interface ScraperSearchResponse {
+  source: string
+  query: string
+  count: number
+  sgdb_configured: boolean
+  items: ScrapedGameItem[]
+}
+
+export interface ScraperAggregateResponse {
+  item: ScrapedGameItem
+  matched_sources: string[]
+  sources_detail: Record<string, ScrapedGameItem>
+}
+
+export interface ScraperImportPayload {
+  title: string
+  sub_title: string
+  developer: string
+  publisher: string
+  release_date: string
+  synopsis: string
+  tags: string[]
+  status: string
+  edition: string
+  is_nsfw: boolean
+  source_platform: string
+  bangumi_id?: string
+  external_ids: Record<string, string>
+  cover_url: string
+  logo_url: string
+  hero_bg_url: string
+  pv_url: string
+  selected_pv_url?: string | null
+  selected_pv_source?: string | null
+  selected_pv_mime_hint?: string | null
+  selected_bgm_url?: string | null
+  screenshots: string[]
+  download_screenshots?: boolean
+  auto_fetch_bgm?: boolean
+  exe_path: string
+  launch_mode: string
+  launch_args: string
+  save_dir: string
+  screenshot_dir: string
+}
+
+export interface RunningStatus {
+  running: boolean
+  game_id: number | null
+  title: string
+  elapsed_seconds: number
+  total_seconds: number
+  pid: number | null
+  is_mock: boolean
+  started_at: string | null
+  platform: string
+}
+
+export interface ScreenshotItem {
+  name: string
+  path: string
+  mtime: number
+}
+
+export interface BackupItem {
+  game_id: number
+  filename: string
+  path: string
+  size_bytes: number
+  created_at: string
+  file_count?: number
+}
+
+export interface BatchScanCandidate {
+  folder_name: string
+  folder_path: string
+  clean_title: string
+  suggested_exe: string
+  candidate_exes: string[]
+  detected_save_dir: string
+  detected_screenshot_dir: string
+  already_imported: boolean
+}
+
+export interface BatchImportItemPayload {
+  title: string
+  folder_path: string
+  exe_path: string
+  launch_mode: string
+  save_dir: string
+  screenshot_dir: string
+  edition: string
+}
+
+export interface HealthInfo {
+  status: string
+  os_adapter: string
+  db_file: string
+  initialized_tables: string[]
+  frontend_dist_ready: boolean
+  running_game: RunningStatus
+}
+
+export interface DroppedFileInfo {
+  kind: string
+  folder_path: string
+  exe_path: string
+  suggested_title: string
+}
+
+export interface ToastMessage {
+  id: number
+  message: string
+  type: 'info' | 'success' | 'warning' | 'error'
+  actionLabel?: string
+  onAction?: () => void
+}
+
+export interface PathBrowseEntry {
+  name: string
+  path: string
+  is_dir: boolean
+}
+
+export interface PathBrowseResponse {
+  current_dir: string
+  parent_dir: string | null
+  platform: string
+  entries: PathBrowseEntry[]
+}
+
+export interface PathValidateResponse {
+  valid: boolean
+  exists: boolean
+  is_uri: boolean
+  is_file: boolean
+  normalized_path: string
+  platform: string
+}
+
+export interface RandomBackdropResponse {
+  path?: string
+  source?: string
+  game_id?: number | null
+  thumb_url?: string
+  pool_size?: number
+}
+
+export interface MusicCandidate {
+  id: string
+  title: string
+  artist: string
+  source: string
+  duration: number
+  thumbnail: string
+  preview_url: string
+  source_url: string
+}
+
+export interface MusicSearchResponse {
+  query: string
+  count: number
+  items: MusicCandidate[]
+}
+
+export type PickerAssetType = 'cover' | 'logo' | 'hero' | 'spine' | 'pv'
+
+export interface AssetCandidate {
+  id: string
+  url: string
+  thumb_url: string
+  source: string
+  title: string
+  width: number | null
+  height: number | null
+  duration: number | null
+  mime_hint: 'image' | 'hls' | 'mp4' | 'video_page' | string
+}
+
+export interface AssetSearchResponse {
+  asset_type: PickerAssetType
+  query: string
+  source: string
+  count: number
+  sgdb_configured: boolean
+  warnings: string[]
+  items: AssetCandidate[]
+}
+
+export interface AssetApplyPayload {
+  asset_type: PickerAssetType
+  url: string
+  source?: string
+  mime_hint?: string
+  async_mode?: boolean
+}
+
+export interface DownloadTaskItem {
+  game_id: number
+  asset_type: 'pv' | 'bgm' | string
+  status: 'queued' | 'downloading' | 'done' | 'error' | string
+  progress: number | null
+  message: string
+  updated_at: string
+}
+
+export interface DownloadTasksResponse {
+  count: number
+  items: DownloadTaskItem[]
+}
+
+export type AssetApplyResponse = Game & {
+  download_task?: DownloadTaskItem
+}
+
+export interface StorageBucket {
+  bytes: number
+  files: number
+  dirs?: number
+}
+
+export interface StorageUsageResponse {
+  videos: StorageBucket
+  audios: StorageBucket
+  images: StorageBucket
+  backups: StorageBucket
+  database: StorageBucket
+  orphans: StorageBucket
+  total_bytes: number
+  total_files: number
+}
+
+export interface StorageCleanupResponse {
+  deleted_files: number
+  deleted_dirs: number
+  freed_bytes: number
+}
+
+export interface ConvertWebpResponse {
+  converted_count: number
+  saved_bytes: number
+  skipped_count: number
+}
+
+export interface AppVersionInfo {
+  current_version: string
+  github_repo: string
+  repo_url: string
+}
+
+export type UpdateCheckStatus =
+  | 'update_available'
+  | 'up_to_date'
+  | 'not_published'
+  | 'rate_limited'
+  | 'error'
+
+export interface UpdateCheckResponse {
+  status: UpdateCheckStatus
+  current_version: string
+  latest_version?: string
+  release_name?: string
+  release_notes?: string
+  published_at?: string
+  release_url?: string
+  download_url?: string
+  message: string
+}
+
+export interface BangumiMeResponse {
+  valid: boolean
+  username?: string
+  nickname?: string
+  avatar?: string
+  detail?: string
+}
+
+export interface BangumiSyncResponse {
+  synced: boolean
+  bangumi_id: string
+  local_status: string
+  bangumi_type: number
+  bangumi_type_label: string
+}
+
+export type MetadataSourceKey = 'vndb' | 'bangumi' | 'touchgal' | 'steam'
+
+export type MetadataFieldKey =
+  | 'title'
+  | 'sub_title'
+  | 'developer'
+  | 'publisher'
+  | 'release_date'
+  | 'bangumi_id'
+  | 'tags'
+  | 'description'
+
+export interface MetadataCandidateItem {
+  external_id: string
+  source: MetadataSourceKey
+  title: string
+  sub_title: string
+  developer: string
+  release_date: string
+  cover_url: string
+  description_preview: string
+}
+
+export interface MetadataSearchResponse {
+  source: MetadataSourceKey
+  query: string
+  count: number
+  items: MetadataCandidateItem[]
+}
+
+export interface MetadataDetailResponse {
+  source: MetadataSourceKey
+  external_id: string
+  title: string
+  sub_title: string
+  developer: string
+  publisher: string
+  release_date: string
+  tags: string[]
+  description: string
+  bangumi_id: string
+  is_nsfw: boolean
+}
+
+export interface MetadataApplyPatch {
+  title?: string
+  sub_title?: string
+  developer?: string
+  publisher?: string
+  release_date?: string
+  bangumi_id?: string
+  tags?: string[]
+  tagsMode?: 'replace' | 'merge'
+  description?: string
+}
+
+export interface CollectionItem {
+  id: number
+  name: string
+  sort_order: number
+  created_at: string | null
+  game_ids: number[]
+}
+
+export interface LedgerDayGame {
+  game_id: number
+  title: string
+  duration_seconds: number
+}
+
+export interface LedgerHeatmapDay {
+  date: string
+  total_seconds: number
+  sessions_count: number
+  games: LedgerDayGame[]
+}
+
+export interface LedgerMonthlyItem {
+  month: string
+  total_seconds: number
+  sessions_count: number
+}
+
+export interface LedgerTopGame {
+  game_id: number
+  title: string
+  developer: string
+  status: string
+  is_nsfw: boolean
+  cover_thumb_path: string
+  total_seconds: number
+  session_count: number
+  first_played_at: string | null
+  last_played_at: string | null
+}
+
+export interface LedgerRecentSession {
+  id: number
+  game_id: number
+  title: string
+  is_nsfw: boolean
+  cover_thumb_path: string
+  started_at: string
+  duration_seconds: number
+}
+
+export interface TimeLedgerResponse {
+  days: number
+  summary: {
+    total_seconds: number
+    total_sessions: number
+    total_games: number
+    done_games: number
+    playing_games: number
+    active_days: number
+    longest_streak: number
+    current_streak: number
+  }
+  heatmap: LedgerHeatmapDay[]
+  monthly: LedgerMonthlyItem[]
+  top_games: LedgerTopGame[]
+  recent_sessions: LedgerRecentSession[]
+}
+
+export interface CollageGameItem {
+  id: number
+  title: string
+  sub_title: string
+  play_seconds: number
+  status: string
+  is_nsfw: boolean
+  cover_path: string
+  cover_thumb_path: string
+  hero_bg_path: string
+}
+
+export interface JourneyCollageResponse {
+  year: string
+  available_years: string[]
+  total_seconds: number
+  played_games_count: number
+  total_games_count: number
+  items: CollageGameItem[]
+}
