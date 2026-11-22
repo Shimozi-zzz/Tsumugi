@@ -8,6 +8,7 @@ import ImportModal from '@/components/ImportModal.vue'
 import QuickSearchModal from '@/components/QuickSearchModal.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
 import TimeLedgerModal from '@/components/TimeLedgerModal.vue'
+import WindowTitleBar from '@/components/WindowTitleBar.vue'
 import { useLibraryStore } from '@/stores/library'
 import { useTaskStore } from '@/stores/tasks'
 import type { DroppedFileInfo } from '@/types'
@@ -101,6 +102,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-shell">
+    <WindowTitleBar />
+
     <!-- 仅在初始化完成后挂载侧栏与主工作区，彻底杜绝空库页闪现 -->
     <template v-if="store.isInitialized">
       <HoverSidebar />

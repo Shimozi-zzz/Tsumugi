@@ -1,68 +1,56 @@
-# Tsumugi
+<div align="center">
+  <img src="frontend/public/favicon.png" alt="Tsumugi" width="140" />
 
-本地优先、轻量级的视觉小说与 PC 单机游戏库管理器。
+  <h1>Tsumugi</h1>
+
+  <p>本地优先的沉浸式视觉小说与单机游戏库管理器</p>
+
+  <p>
+    <a href="#下载与安装">下载安装</a>
+    &nbsp;·&nbsp;
+    <a href="#界面预览">界面预览</a>
+    &nbsp;·&nbsp;
+    <a href="#核心特性">核心特性</a>
+    &nbsp;·&nbsp;
+    <a href="docs/DEVELOPMENT.md">开发文档</a>
+  </p>
+</div>
+
+---
+
+## 界面预览
+
+  将实机截图放入 docs/screenshots/ 目录后取消下方注释即可展示：
+  - docs/screenshots/gallery.png  （回廊展架与 3D 实体侧封）
+  - docs/screenshots/detail.png   （作品详情页、视觉资产与影音播放）
+
+<p align="center">
+  <img src="docs/screenshots/gallery.png" alt="回廊展架" width="100%" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/detail.png" alt="作品详情与影音播放" width="100%" />
+</p>
+
+
+
+---
 
 ## 核心特性
 
-- **回廊展架**：支持侧封出盘与展柜视图、系列聚类与多种排序方式、键鼠平滑漫游与状态快筛。
-- **多源刮削与单字段替换**：聚合 VNDB、Bangumi、Steam、SteamGridDB、TouchGal 资料与视觉资产，支持封面 / Logo / Hero / 宣传片 PV 与单项元数据定向检索替换。
-- **游玩计时与时间账本**：自动追踪游戏进程并持久化每次游玩会话，提供年度热力图、月度分布、作品时长榜与会话明细。
-- **历程拼图导出**：按游玩时长分级生成等比模块化 Bento 封面网格，支持自适应海报及多种画幅的高清 PNG 本地导出。
-- **全局留声机**：支持检索试听并本地化作品主题曲，在回廊与详情页间无缝淡入淡出播放。
-- **Bangumi 单向状态上传**：绑定作品条目 ID 后，可将本地游玩状态单向推送至 Bangumi。
-- **WebP 瘦身与存储治理**：入库与在线抓图自动转码压缩为 WebP 并生成缩略图，内置分类磁盘占用分析、存量旧图批量转换与孤儿文件清理。
-- **独立数据目录与更新检查**：全部数据库与媒体资产保存在安装目录同级的 `data/` 文件夹，内置 GitHub Releases 版本检查。
+- **本地优先，数据自主**：游戏档案、封面图、主题曲、宣传片与存档快照全部保存在本地 `data/` 目录，不依赖云端账号，随时可整体备份迁移。
+- **沉浸式回廊与全屏体验**：支持 3D 实体侧封与展柜双视图、系列聚合排序、无边框极简顶栏与 `F11` 全屏漫游，搭配隐私模糊开关与全局留声机。
+- **多源资料与 Steam 优先影音刮削**：聚合 VNDB、Bangumi、Steam、SteamGridDB 与 TouchGal 资料，支持任意单字段或单项图片在线查找替换；宣传片默认优先获取 Steam 官方预告，并支持按平台切换查找。
+- **游玩计时与历程拼图**：自动记录每次游玩时长并生成年度热力图与时间账本；支持按游玩时长生成等比模块化封面拼图，一键导出高清 PNG 海报。
+- **单文件安装与无损覆盖升级**：免管理员权限安装、内置更新检查，后续新版本直接覆盖安装即可完整保留本地游戏库与存档。
 
-## Windows 安装与升级
+---
 
-1. 前往本仓库 [Releases](https://github.com/Shimozi/tsumugi-platform/releases) 下载最新的 **`Tsumugi-Setup-v*.exe`**。
-2. 双击安装包按向导完成安装（免管理员权限，支持自定义安装目录，默认安装至 `%LOCALAPPDATA%\Programs\Tsumugi`）。
-3. **无损覆盖升级**：新版本发布后，直接下载新版 `Tsumugi-Setup-*.exe` 覆盖安装到原目录即可；安装器会自动关闭运行中的程序，且升级与卸载均不会删除安装目录下的 `data/` 数据文件夹。
+## 下载与安装
 
-## 本地开发
+1. 前往 [Releases](https://github.com/Shimozi-zzz/Tsumugi/releases) 下载最新的 **`Tsumugi-Setup-*.exe`**。
+2. 双击安装程序，按向导选择安装位置即可完成安装。
+3. **无损升级**：后续版本直接运行新版安装包覆盖原目录即可，程序数据保存在安装目录下的 `data/` 文件夹，覆盖升级与卸载均不会删除你的游戏库与存档。
 
-需要 Python 3.12+（推荐使用 [uv](https://docs.astral.sh/uv/)）与 Node.js 20+。
+---
 
-### 启动后端
-
-```bash
-uv sync
-uv run uvicorn backend.main:app --reload --reload-dir backend --host 0.0.0.0 --port 8000
-```
-
-### 启动前端
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-前端开发服务默认运行在 `http://localhost:5173`，并将 `/api` 与 `/static` 请求代理至本地 `8000` 端口。
-
-### 本地生产模式 / 桌面窗口调试
-
-```bash
-# 构建前端静态产物
-cd frontend && npm ci && npm run build && cd ..
-
-# 浏览器单端口访问（http://127.0.0.1:8000）
-uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000
-
-# 或安装可选桌面依赖后拉起原生窗口（推荐在 Windows 环境下运行）
-uv sync --extra desktop
-uv run --extra desktop python desktop.py
-```
-
-### 构建 Windows 安装包
-
-需要已安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)（`ISCC.exe`）：
-
-```powershell
-cd frontend; npm ci; npm run build; cd ..
-uv sync --extra desktop
-uv run --extra desktop python packaging/build_windows.py
-ISCC.exe /DAppVersion=0.9.0 /DReleaseTag=v0.9.0 packaging/installer.iss
-```
-
-最终安装包产出在 `release_assets/Tsumugi-Setup-v0.9.0.exe`。推送 `v*` 格式标签（如 `git tag v0.9.0 && git push origin v0.9.0`）也会自动触发 GitHub Actions 编译并发布单文件 `.exe` 安装包。
+ **[开发者文档 (docs/DEVELOPMENT.md)](docs/DEVELOPMENT.md)**。

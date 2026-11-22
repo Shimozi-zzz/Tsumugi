@@ -18,7 +18,14 @@ from backend.scrapers.bilibili import (
     BILIBILI_USER_AGENT,
     search_bilibili_videos,
 )
-from backend.scrapers.steam import STEAM_CDN_BASE, STEAM_DETAIL_URL, STEAM_SEARCH_URL, SteamScraper
+from backend.scrapers.steam import (
+    STEAM_CDN_BASE,
+    STEAM_DETAIL_URL,
+    STEAM_SEARCH_URL,
+    SteamScraper,
+    fetch_steam_trailers,
+    match_steam_appid,
+)
 from backend.scrapers.steamgriddb import SGDB_API_BASE, SteamGridDBScraper
 from backend.scrapers.touchgal import TouchGalScraper
 from backend.scrapers.vndb import VNDB_API_URL, VNDBScraper
@@ -36,6 +43,7 @@ SAVED_VIDEO_EXTS = {".mp4", ".webm", ".mkv", ".mov"}
 
 SOURCE_ALIASES: dict[str, str] = {
     "all": "all",
+    "auto": "auto",
     "steamgriddb": "steamgriddb",
     "sgdb": "steamgriddb",
     "vndb": "vndb",
@@ -45,8 +53,8 @@ SOURCE_ALIASES: dict[str, str] = {
     "touchgal": "touchgal",
     "tgal": "touchgal",
     "video": "video",
-    "bilibili": "video",
-    "youtube": "video",
+    "bilibili": "bilibili",
+    "youtube": "youtube",
 }
 
 
@@ -71,6 +79,8 @@ class AssetCandidate(BaseModel):
     url: str
     thumb_url: str
     source: str
+    platform: str = ""
+    is_official: bool = False
     title: str
     width: int | None = None
     height: int | None = None
@@ -712,13 +722,57 @@ def _ytdlp_search_pv_sync(
     return results
 
 
-async def _search_bilibili_pv(term: str, proxy_url: str) -> list[AssetCandidate]:
+async def _fetch_steam_pv_candidates(
+    query: str,
+    *,
+    steam_appid: str = "",
+    alt_titles: list[str] | None = None,
+    proxy_url: str = "",
+) -> list[AssetCandidate]:
+    """优先按给定 steam_appid 拉取 Steam 官方 PV；缺失 appid 时按高可信度名称匹配兜底"""
+    clean_appid = (steam_appid or "").strip()
+    if not clean_appid:
+        clean_appid = (
+            await match_steam_appid(
+                query,
+                alt_titles=alt_titles,
+                proxy_url=proxy_url,
+            )
+            or ""
+        )
+    if not clean_appid:
+        return []
+
+    raw_trailers = await fetch_steam_trailers(clean_appid, proxy_url=proxy_url)
+    return [
+        AssetCandidate(
+            id=tr["id"],
+            url=tr["url"],
+            thumb_url=tr["thumb_url"],
+            source="Steam",
+            platform="Steam",
+            is_official=True,
+            title=tr["title"],
+            duration=tr.get("duration"),
+            mime_hint=tr.get("mime_hint") or "mp4",
+        )
+        for tr in raw_trailers[:8]
+    ]
+
+
+async def _search_bilibili_pv(
+    term: str,
+    proxy_url: str,
+    game_titles: list[str],
+) -> list[AssetCandidate]:
     raw_items = await search_bilibili_videos(
         term,
         page_size=8,
         min_duration=PV_MIN_DURATION_SEC,
         max_duration=PV_MAX_DURATION_SEC,
         proxy_url=proxy_url,
+        game_titles=game_titles,
+        kind="pv",
     )
     return [
         AssetCandidate(
@@ -726,6 +780,8 @@ async def _search_bilibili_pv(term: str, proxy_url: str) -> list[AssetCandidate]
             url=it["url"],
             thumb_url=it["thumbnail"],
             source="Bilibili",
+            platform="Bilibili",
+            is_official=False,
             title=it["title"],
             duration=it["duration"] or None,
             mime_hint="video_page",
@@ -734,53 +790,91 @@ async def _search_bilibili_pv(term: str, proxy_url: str) -> list[AssetCandidate]
     ]
 
 
-async def _fetch_video_pv_candidates(query: str, proxy_url: str) -> list[AssetCandidate]:
+async def _fetch_bilibili_pv_candidates(
+    query: str,
+    alt_titles: list[str],
+    proxy_url: str,
+) -> list[AssetCandidate]:
+    cleaned = query.strip()
+    if not cleaned:
+        return []
+    game_titles = [t for t in [cleaned, *alt_titles] if t and t.strip()]
+
+    merged: list[AssetCandidate] = []
+    seen_urls: set[str] = set()
+
+    for suffix in ("PV", "宣传片"):
+        batch = await _search_bilibili_pv(f"{cleaned} {suffix}", proxy_url, game_titles)
+        for item in batch:
+            if item.url and item.url not in seen_urls:
+                seen_urls.add(item.url)
+                merged.append(item)
+        if len(merged) >= 4:
+            break
+
+    return merged[:8]
+
+
+async def _fetch_youtube_pv_candidates(
+    query: str,
+    proxy_url: str,
+) -> list[AssetCandidate]:
     cleaned = query.strip()
     if not cleaned:
         return []
 
     async def _run_yt(term: str) -> list[AssetCandidate]:
         try:
-            return await asyncio.wait_for(
+            items = await asyncio.wait_for(
                 asyncio.to_thread(_ytdlp_search_pv_sync, "ytsearch8", term, "YouTube", proxy_url, 6),
                 timeout=PV_SEARCH_TIMEOUT_SEC,
             )
+            for it in items:
+                it.platform = "YouTube"
+            return items
         except Exception as exc:
             logger.debug("[YouTube] PV search timeout/error for %r: %s", term, exc)
             return []
 
-    bili_pv, yt_pv = await asyncio.gather(
-        _search_bilibili_pv(f"{cleaned} PV", proxy_url),
-        _run_yt(f"{cleaned} PV"),
-        return_exceptions=True,
-    )
-
-    bili_merged: list[AssetCandidate] = []
-    yt_merged: list[AssetCandidate] = []
+    merged: list[AssetCandidate] = []
     seen_urls: set[str] = set()
-
-    def _extend(target: list[AssetCandidate], batch: Any) -> None:
-        if not isinstance(batch, list):
-            return
+    for suffix in ("PV", "trailer"):
+        batch = await _run_yt(f"{cleaned} {suffix}")
         for item in batch:
             if item.url and item.url not in seen_urls:
                 seen_urls.add(item.url)
-                target.append(item)
+                merged.append(item)
+        if len(merged) >= 4:
+            break
+    return merged[:6]
 
-    _extend(bili_merged, bili_pv)
-    _extend(yt_merged, yt_pv)
 
-    # 若以 "PV" 命中的 B 站/视频结果偏少，自动补充 "{q} OP" 检索
-    if len(bili_merged) < 3:
-        bili_op = await _search_bilibili_pv(f"{cleaned} OP", proxy_url)
-        _extend(bili_merged, bili_op)
+async def _fetch_video_pv_candidates(
+    query: str,
+    proxy_url: str,
+    alt_titles: list[str] | None = None,
+) -> list[AssetCandidate]:
+    cleaned = query.strip()
+    if not cleaned:
+        return []
+    alts = alt_titles or []
 
-    if len(bili_merged) + len(yt_merged) < 4:
-        yt_op = await _run_yt(f"{cleaned} OP")
-        _extend(yt_merged, yt_op)
+    bili_res, yt_res = await asyncio.gather(
+        _fetch_bilibili_pv_candidates(cleaned, alts, proxy_url),
+        _fetch_youtube_pv_candidates(cleaned, proxy_url),
+        return_exceptions=True,
+    )
 
-    # 合并排序严格保证 Bilibili 排在 YouTube 之前
-    return (bili_merged + yt_merged)[:8]
+    merged: list[AssetCandidate] = []
+    seen_urls: set[str] = set()
+    for batch in (bili_res, yt_res):
+        if not isinstance(batch, list):
+            continue
+        for item in batch:
+            if item.url and item.url not in seen_urls:
+                seen_urls.add(item.url)
+                merged.append(item)
+    return merged[:8]
 
 
 # ──────────────────── 统一编排入口 ────────────────────
@@ -793,9 +887,13 @@ async def search_asset_candidates(
     proxy_url: str = "",
     api_keys: dict[str, Any] | None = None,
     allow_nsfw: bool = True,
+    steam_appid: str = "",
+    alt_title: str = "",
 ) -> dict[str, Any]:
     """按资产类型与指定数据源并发聚合多候选结果，单源异常静默跳过"""
     cleaned_q = (query or "").strip()
+    cleaned_alt = (alt_title or "").strip()
+    alt_titles = [cleaned_alt] if cleaned_alt and cleaned_alt != cleaned_q else []
     keys = api_keys or {}
     sgdb_key = str(keys.get("steamgriddb") or "").strip()
     bgm_key = str(keys.get("bangumi") or "").strip()
@@ -803,15 +901,59 @@ async def search_asset_candidates(
 
     norm_source = SOURCE_ALIASES.get((source or "all").strip().lower(), "all")
 
-    if not cleaned_q:
+    if not cleaned_q and not (asset_type == "pv" and (steam_appid or "").strip()):
         return {
             "asset_type": asset_type,
             "query": cleaned_q,
             "source": norm_source,
             "count": 0,
             "sgdb_configured": bool(sgdb_key),
+            "steam_empty": False,
             "warnings": [],
             "items": [],
+        }
+
+    # PV 专用智能编排：auto/all 模式下严格优先 Steam 官方预告片，无结果再降级其他平台
+    if asset_type == "pv":
+        pv_items: list[AssetCandidate] = []
+        steam_empty = False
+
+        if norm_source in ("auto", "all"):
+            steam_items = await _fetch_steam_pv_candidates(
+                cleaned_q,
+                steam_appid=steam_appid,
+                alt_titles=alt_titles,
+                proxy_url=proxy_url,
+            )
+            if steam_items:
+                pv_items = steam_items
+            else:
+                steam_empty = True
+                pv_items = await _fetch_video_pv_candidates(cleaned_q, proxy_url, alt_titles=alt_titles)
+        elif norm_source == "steam":
+            pv_items = await _fetch_steam_pv_candidates(
+                cleaned_q,
+                steam_appid=steam_appid,
+                alt_titles=alt_titles,
+                proxy_url=proxy_url,
+            )
+            steam_empty = len(pv_items) == 0
+        elif norm_source == "bilibili":
+            pv_items = await _fetch_bilibili_pv_candidates(cleaned_q, alt_titles, proxy_url)
+        elif norm_source == "youtube":
+            pv_items = await _fetch_youtube_pv_candidates(cleaned_q, proxy_url)
+        else:
+            pv_items = await _fetch_video_pv_candidates(cleaned_q, proxy_url, alt_titles=alt_titles)
+
+        return {
+            "asset_type": asset_type,
+            "query": cleaned_q,
+            "source": norm_source,
+            "count": len(pv_items),
+            "sgdb_configured": bool(sgdb_key),
+            "steam_empty": steam_empty,
+            "warnings": [],
+            "items": [it.model_dump() for it in pv_items],
         }
 
     sgdb = SteamGridDBScraper(proxy_url=proxy_url, api_key=sgdb_key, allow_nsfw=allow_nsfw)
@@ -820,16 +962,14 @@ async def search_asset_candidates(
     steam = SteamScraper(proxy_url=proxy_url, allow_nsfw=allow_nsfw)
     tgal = TouchGalScraper(proxy_url=proxy_url, api_key=tgal_key, allow_nsfw=allow_nsfw)
 
-    if asset_type == "pv":
-        default_sources = ["steam", "video"]
-    elif asset_type == "logo":
+    if asset_type == "logo":
         default_sources = ["steamgriddb", "steam"]
     elif asset_type == "hero":
         default_sources = ["steamgriddb", "vndb", "steam", "touchgal"]
     else:
         default_sources = ["steamgriddb", "vndb", "bangumi", "steam", "touchgal"]
 
-    target_sources = default_sources if norm_source == "all" else [norm_source]
+    target_sources = default_sources if norm_source in ("all", "auto") else [norm_source]
 
     warnings: list[str] = []
 
@@ -846,8 +986,6 @@ async def search_asset_candidates(
             return await _fetch_steam_candidates(asset_type, cleaned_q, steam)
         if src_name == "touchgal":
             return await _fetch_touchgal_candidates(asset_type, cleaned_q, tgal)
-        if src_name == "video":
-            return await _fetch_video_pv_candidates(cleaned_q, proxy_url)
         return []
 
     batches = await asyncio.gather(
@@ -864,6 +1002,8 @@ async def search_asset_candidates(
         for item in batch:
             if item.url and item.url not in seen_urls:
                 seen_urls.add(item.url)
+                if not item.platform:
+                    item.platform = item.source
                 merged.append(item)
 
     dedup_warnings = list(dict.fromkeys(warnings))
@@ -873,6 +1013,7 @@ async def search_asset_candidates(
         "source": norm_source,
         "count": len(merged),
         "sgdb_configured": bool(sgdb_key),
+        "steam_empty": False,
         "warnings": dedup_warnings,
         "items": [it.model_dump() for it in merged],
     }
@@ -891,42 +1032,28 @@ def is_direct_pv_url(url: str, mime_hint: str = "") -> bool:
     return suffix in DIRECT_VIDEO_EXTS
 
 
-def _is_direct_mp4_url(url: str, mime_hint: str = "") -> bool:
+def _direct_video_ext(url: str, mime_hint: str = "") -> str:
+    """若为直链 .mp4 或 .webm 则返回对应后缀，否则返回空字符串交由 yt-dlp（支持 .m3u8/.mpd/网页）"""
     suffix = Path(urlparse(url).path).suffix.lower()
-    if suffix == ".mp4":
-        return True
+    if suffix in (".mp4", ".webm"):
+        return suffix
     hint = (mime_hint or "").strip().lower()
-    if hint == "mp4" and suffix not in (".m3u8", ".webm"):
-        return True
-    return False
+    if hint == "mp4" and suffix not in (".m3u8", ".mpd"):
+        return ".mp4"
+    if hint == "webm" and suffix not in (".m3u8", ".mpd"):
+        return ".webm"
+    return ""
 
 
-def _cleanup_pv_temp_files(game_dir: Path) -> None:
-    for temp in game_dir.glob("pv.downloading*"):
-        if temp.is_file():
-            try:
-                temp.unlink()
-            except OSError:
-                pass
-
-
-def _cleanup_legacy_pv_files(game_dir: Path, keep_name: str = "pv.mp4") -> None:
-    for old in game_dir.glob("pv.*"):
-        if old.is_file() and old.name != keep_name:
-            try:
-                old.unlink()
-            except OSError:
-                pass
-
-
-async def _download_direct_mp4_stream(
+async def _download_direct_video_stream(
     game_id: int,
     url: str,
     game_dir: Path,
     proxy_url: str,
+    ext: str = ".mp4",
 ) -> Path:
-    """对直链 .mp4 使用 httpx 流式下载写入 pv.downloading.mp4 并实时回写进度"""
-    tmp_path = game_dir / "pv.downloading.mp4"
+    """对直链 .mp4 / .webm 使用 httpx 流式下载写入 pv.downloading.{ext} 并实时回写进度"""
+    tmp_path = game_dir / f"pv.downloading{ext}"
     _cleanup_pv_temp_files(game_dir)
 
     headers = {
@@ -967,6 +1094,24 @@ async def _download_direct_mp4_stream(
         raise RuntimeError("下载到的宣传片视频文件为空")
 
     return tmp_path
+
+
+def _cleanup_pv_temp_files(game_dir: Path) -> None:
+    for temp in game_dir.glob("pv.downloading*"):
+        if temp.is_file():
+            try:
+                temp.unlink()
+            except OSError:
+                pass
+
+
+def _cleanup_legacy_pv_files(game_dir: Path, keep_name: str = "pv.mp4") -> None:
+    for old in game_dir.glob("pv.*"):
+        if old.is_file() and old.name != keep_name:
+            try:
+                old.unlink()
+            except OSError:
+                pass
 
 
 def _download_pv_with_ytdlp_sync(
@@ -1059,17 +1204,23 @@ async def download_pv_to_local(
 
     game_dir = ASSETS_DIR / str(game_id)
     game_dir.mkdir(parents=True, exist_ok=True)
-    final_path = game_dir / "pv.mp4"
+    direct_ext = _direct_video_ext(cleaned, mime_hint)
+    final_ext = direct_ext if direct_ext else ".mp4"
+    final_path = game_dir / f"pv{final_ext}"
 
     task_manager.set_task(game_id, "pv", "downloading", 0, "正在下载宣传片…")
     try:
-        if _is_direct_mp4_url(cleaned, mime_hint):
-            tmp_file = await _download_direct_mp4_stream(game_id, cleaned, game_dir, proxy_url)
+        if direct_ext:
+            tmp_file = await _download_direct_video_stream(
+                game_id, cleaned, game_dir, proxy_url, ext=direct_ext
+            )
         else:
             tmp_file = await asyncio.wait_for(
                 asyncio.to_thread(_download_pv_with_ytdlp_sync, game_id, cleaned, game_dir, proxy_url),
                 timeout=180.0,
             )
+            if tmp_file.suffix.lower() in (".mp4", ".webm"):
+                final_path = game_dir / f"pv{tmp_file.suffix.lower()}"
 
         os.replace(tmp_file, final_path)
         _cleanup_pv_temp_files(game_dir)

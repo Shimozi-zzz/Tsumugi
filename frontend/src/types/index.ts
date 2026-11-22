@@ -306,6 +306,7 @@ export interface MusicCandidate {
 
 export interface MusicSearchResponse {
   query: string
+  source?: string
   count: number
   items: MusicCandidate[]
 }
@@ -317,11 +318,13 @@ export interface AssetCandidate {
   url: string
   thumb_url: string
   source: string
+  platform?: string
+  is_official?: boolean
   title: string
   width: number | null
   height: number | null
   duration: number | null
-  mime_hint: 'image' | 'hls' | 'mp4' | 'video_page' | string
+  mime_hint: 'image' | 'hls' | 'mp4' | 'webm' | 'dash' | 'video_page' | string
 }
 
 export interface AssetSearchResponse {
@@ -330,6 +333,7 @@ export interface AssetSearchResponse {
   source: string
   count: number
   sgdb_configured: boolean
+  steam_empty?: boolean
   warnings: string[]
   items: AssetCandidate[]
 }

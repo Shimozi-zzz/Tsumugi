@@ -876,7 +876,7 @@ async function handleSyncBangumi() {
   position: relative;
   z-index: 2;
   min-height: 94vh;
-  padding: 28px 64px 20px 76px;
+  padding: calc(28px + var(--titlebar-safe-top, 0px)) 64px 20px 76px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;

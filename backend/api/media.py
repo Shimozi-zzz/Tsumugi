@@ -11,7 +11,8 @@ from sqlalchemy.orm import selectinload
 from backend.core.config import DATA_DIR, WALLPAPERS_DIR
 from backend.core.os_adapter import os_adapter
 from backend.db.database import get_db
-from backend.db.models import Game
+from backend.db.models import AppStateSetting, Game
+from backend.scrapers.asset_search import search_asset_candidates
 from backend.services.media_service import get_or_create_thumbnail, save_game_asset_bytes
 
 router = APIRouter(prefix="/api/media", tags=["Media"])
@@ -81,6 +82,27 @@ def _collect_images(folder: Path, limit: int = MAX_FILES_PER_FOLDER) -> list[Pat
     except OSError:
         return []
     return found
+
+
+@router.get("/search-pv")
+async def search_pv_by_platform(
+    q: str = Query("", description="游戏名称或原名"),
+    source: str = Query("auto", description="PV 平台: auto / steam / bilibili / youtube"),
+    steam_appid: str = Query("", description="可选：已知 Steam AppID"),
+    alt_title: str = Query("", description="可选：游戏原名/别名"),
+    db: AsyncSession = Depends(get_db),
+):
+    """宣传片 PV 多平台分选检索入口（默认 auto 优先 Steam 官方预告片）"""
+    proxy_row = await db.get(AppStateSetting, "proxy_url")
+    proxy_url = str(proxy_row.value or "").strip() if proxy_row else ""
+    return await search_asset_candidates(
+        asset_type="pv",
+        query=q,
+        source=source,
+        proxy_url=proxy_url,
+        steam_appid=steam_appid,
+        alt_title=alt_title,
+    )
 
 
 @router.post("/upload/{game_id}")

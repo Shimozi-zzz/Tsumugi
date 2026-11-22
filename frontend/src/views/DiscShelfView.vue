@@ -1277,7 +1277,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 22px 44px 4px 54px;
+  padding: calc(22px + var(--titlebar-safe-top, 0px)) 44px 4px 54px;
 }
 
 .shelf-top-left {

@@ -231,6 +231,17 @@ export const mediaApi = {
       `/api/media/open-folder/${gameId}?target=${target}`,
       { method: 'POST' },
     ),
+  searchPv: (
+    q: string,
+    opts?: { source?: string; steam_appid?: string; alt_title?: string },
+  ) => {
+    const qs = new URLSearchParams()
+    qs.set('q', q)
+    qs.set('source', opts?.source || 'auto')
+    if (opts?.steam_appid) qs.set('steam_appid', opts.steam_appid)
+    if (opts?.alt_title) qs.set('alt_title', opts.alt_title)
+    return request<AssetSearchResponse>(`/api/media/search-pv?${qs.toString()}`)
+  },
 }
 
 export const scraperApi = {
@@ -254,8 +265,13 @@ export const scraperApi = {
     }),
   refresh: (gameId: number) =>
     request<Game>(`/api/scraper/refresh/${gameId}`, { method: 'POST' }),
-  searchMusic: (q: string) =>
-    request<MusicSearchResponse>(`/api/scraper/music/search?q=${encodeURIComponent(q)}`),
+  searchMusic: (q: string, opts?: { source?: string; alt_title?: string }) => {
+    const qs = new URLSearchParams()
+    qs.set('q', q)
+    if (opts?.source) qs.set('source', opts.source)
+    if (opts?.alt_title) qs.set('alt_title', opts.alt_title)
+    return request<MusicSearchResponse>(`/api/scraper/music/search?${qs.toString()}`)
+  },
   downloadMusic: (gameId: number, payload: { source_url?: string; preview_url?: string }) =>
     request<{ game_id: number; bgm_path: string }>(`/api/scraper/music/download/${gameId}`, {
       method: 'POST',
@@ -264,10 +280,20 @@ export const scraperApi = {
         preview_url: payload.preview_url || '',
       }),
     }),
-  searchAssets: (assetType: PickerAssetType, q: string, source = 'all') =>
-    request<AssetSearchResponse>(
-      `/api/scraper/assets/search?asset_type=${encodeURIComponent(assetType)}&q=${encodeURIComponent(q)}&source=${encodeURIComponent(source)}`,
-    ),
+  searchAssets: (
+    assetType: PickerAssetType,
+    q: string,
+    source = 'all',
+    opts?: { steam_appid?: string; alt_title?: string },
+  ) => {
+    const qs = new URLSearchParams()
+    qs.set('asset_type', assetType)
+    qs.set('q', q)
+    qs.set('source', source)
+    if (opts?.steam_appid) qs.set('steam_appid', opts.steam_appid)
+    if (opts?.alt_title) qs.set('alt_title', opts.alt_title)
+    return request<AssetSearchResponse>(`/api/scraper/assets/search?${qs.toString()}`)
+  },
   applyAsset: (gameId: number, payload: AssetApplyPayload) =>
     request<AssetApplyResponse>(`/api/scraper/assets/apply/${gameId}`, {
       method: 'POST',

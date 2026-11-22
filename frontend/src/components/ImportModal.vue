@@ -95,23 +95,49 @@ const previewDraft = ref<{
 } | null>(null)
 
 // 附带影音（可选）折叠挑选项
+type PvSourceKey = 'auto' | 'bilibili' | 'youtube'
+type BgmSourceKey = 'auto' | 'bilibili' | 'youtube' | 'itunes'
+
+const PV_SOURCE_OPTIONS: { key: PvSourceKey; label: string }[] = [
+  { key: 'auto', label: '优先 Steam' },
+  { key: 'bilibili', label: 'Bilibili' },
+  { key: 'youtube', label: 'YouTube' },
+]
+
+const BGM_SOURCE_OPTIONS: { key: BgmSourceKey; label: string }[] = [
+  { key: 'auto', label: '自动' },
+  { key: 'bilibili', label: 'Bilibili' },
+  { key: 'youtube', label: 'YouTube' },
+  { key: 'itunes', label: 'iTunes' },
+]
+
 const optionalMediaOpen = ref(false)
+const pvQuery = ref('')
+const pvSource = ref<PvSourceKey>('auto')
 const pvSearching = ref(false)
 const pvSearchedOnce = ref(false)
+const pvSteamEmpty = ref(false)
 const pvCandidates = ref<AssetCandidate[]>([])
 const selectedPv = ref<AssetCandidate | null>(null)
 
+const bgmQuery = ref('')
+const bgmSource = ref<BgmSourceKey>('auto')
 const bgmSearching = ref(false)
 const bgmSearchedOnce = ref(false)
 const bgmCandidates = ref<MusicCandidate[]>([])
 const selectedBgm = ref<MusicCandidate | null>(null)
 
-function resetOptionalMedia() {
+function resetOptionalMedia(defaultKeyword = '') {
   optionalMediaOpen.value = false
+  pvQuery.value = defaultKeyword
+  pvSource.value = 'auto'
   pvSearching.value = false
   pvSearchedOnce.value = false
+  pvSteamEmpty.value = false
   pvCandidates.value = []
   selectedPv.value = null
+  bgmQuery.value = defaultKeyword
+  bgmSource.value = 'auto'
   bgmSearching.value = false
   bgmSearchedOnce.value = false
   bgmCandidates.value = []
@@ -125,33 +151,64 @@ function formatDurationSec(sec: number | null | undefined): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-async function searchOptionalPv() {
+async function searchOptionalPv(overrideSource?: PvSourceKey) {
   const d = previewDraft.value
-  const q = (d?.sub_title || d?.title || '').trim()
-  if (!q || pvSearching.value) return
+  if (overrideSource) {
+    pvSource.value = overrideSource
+  }
+  const q = (pvQuery.value || d?.sub_title || d?.title || '').trim()
+  if (!pvQuery.value.trim() && q) {
+    pvQuery.value = q
+  }
+  const steamAppId = (d?.external_ids?.steam || '').trim()
+  if ((!q && !steamAppId) || pvSearching.value) return
+  const altTitle =
+    d && q !== (d.title || '').trim()
+      ? (d.title || '').trim()
+      : (d?.sub_title || '').trim()
+
   optionalMediaOpen.value = true
   pvSearching.value = true
   pvSearchedOnce.value = true
   try {
-    const res = await scraperApi.searchAssets('pv', q, 'all')
+    const res = await scraperApi.searchAssets('pv', q, pvSource.value, {
+      steam_appid: steamAppId,
+      alt_title: altTitle,
+    })
     pvCandidates.value = res.items || []
+    pvSteamEmpty.value = Boolean(res.steam_empty)
   } catch (err) {
     pvCandidates.value = []
+    pvSteamEmpty.value = false
     store.notify(err instanceof Error ? err.message : 'PV 查找失败', 'warning')
   } finally {
     pvSearching.value = false
   }
 }
 
-async function searchOptionalBgm() {
+async function searchOptionalBgm(overrideSource?: BgmSourceKey) {
   const d = previewDraft.value
-  const q = (d?.sub_title || d?.title || '').trim()
+  if (overrideSource) {
+    bgmSource.value = overrideSource
+  }
+  const q = (bgmQuery.value || d?.sub_title || d?.title || '').trim()
+  if (!bgmQuery.value.trim() && q) {
+    bgmQuery.value = q
+  }
   if (!q || bgmSearching.value) return
+  const altTitle =
+    d && q !== (d.title || '').trim()
+      ? (d.title || '').trim()
+      : (d?.sub_title || '').trim()
+
   optionalMediaOpen.value = true
   bgmSearching.value = true
   bgmSearchedOnce.value = true
   try {
-    const res = await scraperApi.searchMusic(q)
+    const res = await scraperApi.searchMusic(q, {
+      source: bgmSource.value,
+      alt_title: altTitle,
+    })
     bgmCandidates.value = res.items || []
   } catch (err) {
     bgmCandidates.value = []
@@ -246,7 +303,7 @@ async function runSearch() {
 }
 
 function buildDraftFromItem(item: ScrapedGameItem) {
-  resetOptionalMedia()
+  resetOptionalMedia((item.sub_title || item.title || '').trim())
   const extIds = { ...(item.extra_ids || {}) }
   previewDraft.value = {
     title: item.title,
@@ -703,7 +760,7 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                     type="button"
                     class="btn btn-sm"
                     :disabled="pvSearching"
-                    @click="searchOptionalPv"
+                    @click="searchOptionalPv()"
                   >
                     {{ pvSearching ? '查找中…' : '查找 PV' }}
                   </button>
@@ -711,7 +768,7 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                     type="button"
                     class="btn btn-sm"
                     :disabled="bgmSearching"
-                    @click="searchOptionalBgm"
+                    @click="searchOptionalBgm()"
                   >
                     {{ bgmSearching ? '查找中…' : '查找 OP' }}
                   </button>
@@ -727,6 +784,39 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                       取消选择
                     </button>
                   </div>
+
+                  <div class="opt-source-pills" role="tablist" aria-label="PV 平台选择">
+                    <button
+                      v-for="opt in PV_SOURCE_OPTIONS"
+                      :key="opt.key"
+                      type="button"
+                      class="opt-src-pill"
+                      :class="{ active: pvSource === opt.key }"
+                      :disabled="pvSearching"
+                      @click="searchOptionalPv(opt.key)"
+                    >
+                      {{ opt.label }}
+                    </button>
+                  </div>
+
+                  <form class="opt-search-row" @submit.prevent="searchOptionalPv()">
+                    <input
+                      v-model="pvQuery"
+                      class="input opt-search-input"
+                      placeholder="微调 PV 搜索词…"
+                    />
+                    <button type="submit" class="btn btn-sm opt-search-btn" :disabled="pvSearching">
+                      {{ pvSearching ? '…' : '搜' }}
+                    </button>
+                  </form>
+
+                  <div v-if="pvSteamEmpty && pvSource === 'auto' && !pvSearching" class="opt-hint-bar">
+                    <span>未在 Steam 找到官方宣传片，可切换</span>
+                    <button type="button" class="opt-inline-link" @click="searchOptionalPv('bilibili')">Bilibili</button>
+                    <span>/</span>
+                    <button type="button" class="opt-inline-link" @click="searchOptionalPv('youtube')">YouTube</button>
+                  </div>
+
                   <div v-if="pvCandidates.length > 0" class="opt-cand-list">
                     <button
                       v-for="item in pvCandidates"
@@ -743,7 +833,13 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                       <div class="opt-cand-info">
                         <div class="opt-cand-title" :title="item.title">{{ item.title }}</div>
                         <div class="opt-cand-meta">
-                          <span>{{ item.source }}</span>
+                          <span
+                            v-if="item.is_official || item.source === 'Steam'"
+                            class="opt-official-badge"
+                          >
+                            Steam 官方
+                          </span>
+                          <span v-else>{{ item.platform || item.source }}</span>
                           <span v-if="formatDurationSec(item.duration)" class="tabular-nums">
                             {{ formatDurationSec(item.duration) }}
                           </span>
@@ -753,10 +849,28 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                     </button>
                   </div>
                   <div v-else-if="pvSearchedOnce && !pvSearching" class="opt-empty">
-                    未找到宣传片候选
+                    <span>未找到宣传片候选</span>
+                    <div class="opt-empty-links">
+                      <button
+                        v-if="pvSource !== 'bilibili'"
+                        type="button"
+                        class="opt-inline-link"
+                        @click="searchOptionalPv('bilibili')"
+                      >
+                        切换 Bilibili
+                      </button>
+                      <button
+                        v-if="pvSource !== 'youtube'"
+                        type="button"
+                        class="opt-inline-link"
+                        @click="searchOptionalPv('youtube')"
+                      >
+                        切换 YouTube
+                      </button>
+                    </div>
                   </div>
                   <div v-else-if="!pvSearching" class="opt-empty">
-                    点击「查找 PV」挑选并后台下载
+                    点击「查找 PV」优先获取 Steam 官方宣传片
                   </div>
                 </div>
 
@@ -768,6 +882,32 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                       取消选择
                     </button>
                   </div>
+
+                  <div class="opt-source-pills" role="tablist" aria-label="OP 平台选择">
+                    <button
+                      v-for="opt in BGM_SOURCE_OPTIONS"
+                      :key="opt.key"
+                      type="button"
+                      class="opt-src-pill"
+                      :class="{ active: bgmSource === opt.key }"
+                      :disabled="bgmSearching"
+                      @click="searchOptionalBgm(opt.key)"
+                    >
+                      {{ opt.label }}
+                    </button>
+                  </div>
+
+                  <form class="opt-search-row" @submit.prevent="searchOptionalBgm()">
+                    <input
+                      v-model="bgmQuery"
+                      class="input opt-search-input"
+                      placeholder="微调主题曲搜索词…"
+                    />
+                    <button type="submit" class="btn btn-sm opt-search-btn" :disabled="bgmSearching">
+                      {{ bgmSearching ? '…' : '搜' }}
+                    </button>
+                  </form>
+
                   <div v-if="bgmCandidates.length > 0" class="opt-cand-list">
                     <button
                       v-for="item in bgmCandidates"
@@ -794,7 +934,7 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                     </button>
                   </div>
                   <div v-else-if="bgmSearchedOnce && !bgmSearching" class="opt-empty">
-                    未找到主题曲候选
+                    未找到主题曲候选，可修改搜索词或切换平台重试
                   </div>
                   <div v-else-if="!bgmSearching" class="opt-empty">
                     点击「查找 OP」手选，或勾选下方自动匹配
@@ -1736,12 +1876,113 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
 }
 
 .opt-empty {
-  padding: 16px 8px;
+  padding: 14px 8px;
   text-align: center;
   font-size: 12px;
   color: var(--text-muted);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.opt-source-pills {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  width: fit-content;
+}
+
+.opt-src-pill {
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.opt-src-pill:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.opt-src-pill.active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #f5f5f7;
+  font-weight: 500;
+}
+
+.opt-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.opt-search-input {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 11.5px;
+  border-radius: 7px;
+}
+
+.opt-search-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+
+.opt-hint-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.opt-empty-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.opt-inline-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #f4f4f5;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.opt-inline-link:hover {
+  opacity: 1;
+}
+
+.opt-official-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(244, 244, 245, 0.14);
+  color: #f5f5f7;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 @media (max-width: 720px) {

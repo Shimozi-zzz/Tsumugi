@@ -7,6 +7,16 @@ declare module '*.vue' {
 }
 
 interface PyWebviewAPI {
+  minimize?: () => Promise<boolean>
+  toggle_maximize?: () => Promise<boolean>
+  toggle_fullscreen?: () => Promise<boolean>
+  exit_fullscreen?: () => Promise<boolean>
+  close?: () => Promise<boolean>
+  get_window_state?: () => Promise<{
+    is_desktop: boolean
+    is_fullscreen: boolean
+    is_maximized: boolean
+  }>
   pick_file?: (title?: string, fileTypes?: string[]) => Promise<string>
   pick_folder?: (title?: string) => Promise<string>
   resolve_dropped_path?: (rawPath: string) => Promise<{

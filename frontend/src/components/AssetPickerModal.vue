@@ -49,9 +49,10 @@ const IMAGE_SOURCES: SourceOption[] = [
 ]
 
 const PV_SOURCES: SourceOption[] = [
-  { key: 'all', label: '全部' },
-  { key: 'steam', label: 'Steam' },
-  { key: 'video', label: 'Bilibili / YouTube' },
+  { key: 'auto', label: '优先 Steam' },
+  { key: 'steam', label: '仅 Steam' },
+  { key: 'bilibili', label: 'Bilibili' },
+  { key: 'youtube', label: 'YouTube' },
 ]
 
 const modalTitle = computed(() => SLOT_TITLES[props.assetType])
@@ -71,9 +72,12 @@ const quickKeywords = computed(() => {
 })
 
 const query = ref((props.game.sub_title || props.game.title || '').trim())
-const selectedSource = ref<string>(props.assetType === 'logo' ? 'steamgriddb' : 'all')
+const selectedSource = ref<string>(
+  props.assetType === 'logo' ? 'steamgriddb' : props.assetType === 'pv' ? 'auto' : 'all',
+)
 const loading = ref(false)
 const searchedOnce = ref(false)
+const steamEmpty = ref(false)
 const items = ref<AssetCandidate[]>([])
 const warnings = ref<string[]>([])
 const sgdbConfigured = ref(Boolean(store.settings.api_keys?.steamgriddb))
@@ -90,20 +94,31 @@ function markBroken(id: string) {
 
 async function runSearch() {
   const q = query.value.trim()
-  if (!q) return
+  const steamAppId = (props.game.external_ids?.steam || '').trim()
+  if (!q && !(isPvMode.value && steamAppId)) return
+  const altTitle =
+    q !== (props.game.title || '').trim()
+      ? (props.game.title || '').trim()
+      : (props.game.sub_title || '').trim()
+
   const seq = ++searchSeq
   loading.value = true
   searchedOnce.value = true
   brokenIds.value = new Set()
   try {
-    const res = await scraperApi.searchAssets(props.assetType, q, selectedSource.value)
+    const res = await scraperApi.searchAssets(props.assetType, q, selectedSource.value, {
+      steam_appid: isPvMode.value ? steamAppId : '',
+      alt_title: isPvMode.value ? altTitle : '',
+    })
     if (seq !== searchSeq) return
     items.value = res.items || []
+    steamEmpty.value = Boolean(res.steam_empty)
     warnings.value = res.warnings || []
     sgdbConfigured.value = Boolean(res.sgdb_configured)
   } catch (err) {
     if (seq !== searchSeq) return
     items.value = []
+    steamEmpty.value = false
     warnings.value = []
     store.notify(err instanceof Error ? err.message : '在线检索失败', 'warning')
   } finally {
@@ -282,6 +297,16 @@ onBeforeUnmount(() => {
         <div v-if="warnings.length > 0 && items.length > 0" class="inline-warning">
           {{ warnings[0] }}
         </div>
+        <div
+          v-if="isPvMode && steamEmpty && !loading && (selectedSource === 'auto' || selectedSource === 'steam')"
+          class="inline-warning steam-empty-tip"
+        >
+          <span>未在 Steam 找到官方宣传片，可切换</span>
+          <button type="button" class="inline-switch-btn" @click="selectSource('bilibili')">Bilibili</button>
+          <span>或</span>
+          <button type="button" class="inline-switch-btn" @click="selectSource('youtube')">YouTube</button>
+          <span>查找</span>
+        </div>
 
         <!-- 骨架加载态 -->
         <div v-if="loading" class="candidate-grid" :class="gridModeClass">
@@ -318,7 +343,12 @@ onBeforeUnmount(() => {
                   <polygon points="8 5 19 12 8 19 8 5" />
                 </svg>
               </div>
-              <span class="badge-source">{{ item.source }}</span>
+              <span
+                class="badge-source"
+                :class="{ 'badge-official': item.is_official || item.source === 'Steam' }"
+              >
+                {{ item.is_official || item.source === 'Steam' ? 'Steam 官方' : item.platform || item.source }}
+              </span>
               <span v-if="formatDuration(item.duration)" class="badge-meta tabular-nums">
                 {{ formatDuration(item.duration) }}
               </span>
@@ -844,5 +874,33 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.steam-empty-tip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.inline-switch-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #f5f5f7;
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.inline-switch-btn:hover {
+  opacity: 0.85;
+}
+
+.badge-official {
+  background: rgba(244, 244, 245, 0.92);
+  color: #0a0a0c;
+  font-weight: 600;
 }
 </style>

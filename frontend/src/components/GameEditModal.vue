@@ -122,14 +122,32 @@ function stopPreviewAudio() {
   previewingId.value = ''
 }
 
-async function searchOnlineMusic() {
+const musicSource = ref<'auto' | 'bilibili' | 'youtube' | 'itunes'>('auto')
+const MUSIC_SOURCES: { key: 'auto' | 'bilibili' | 'youtube' | 'itunes'; label: string }[] = [
+  { key: 'auto', label: '自动' },
+  { key: 'bilibili', label: 'Bilibili' },
+  { key: 'youtube', label: 'YouTube' },
+  { key: 'itunes', label: 'iTunes' },
+]
+
+async function searchOnlineMusic(overrideSource?: 'auto' | 'bilibili' | 'youtube' | 'itunes') {
+  if (overrideSource) {
+    musicSource.value = overrideSource
+  }
   const q = musicQuery.value.trim()
   if (!q || musicSearching.value) return
   stopPreviewAudio()
   musicSearching.value = true
   musicSearchedOnce.value = true
   try {
-    const res = await scraperApi.searchMusic(q)
+    const altTitle =
+      q !== (form.title || '').trim()
+        ? (form.title || '').trim()
+        : (form.sub_title || '').trim()
+    const res = await scraperApi.searchMusic(q, {
+      source: musicSource.value,
+      alt_title: altTitle,
+    })
     musicCandidates.value = res.items
   } catch (err) {
     store.notify(err instanceof Error ? err.message : '原声搜寻失败', 'warning')
@@ -1016,20 +1034,32 @@ onBeforeUnmount(stopPreviewAudio)
             <div class="music-finder">
               <div class="music-finder-head">
                 <span class="music-finder-title">在线搜索主题曲</span>
-                <span class="music-finder-sub">Bilibili / YouTube / iTunes</span>
+                <div class="music-source-pills">
+                  <button
+                    v-for="src in MUSIC_SOURCES"
+                    :key="src.key"
+                    type="button"
+                    class="music-src-pill"
+                    :class="{ active: musicSource === src.key }"
+                    :disabled="musicSearching"
+                    @click="searchOnlineMusic(src.key)"
+                  >
+                    {{ src.label }}
+                  </button>
+                </div>
               </div>
               <div class="row-with-btn">
                 <input
                   v-model="musicQuery"
                   class="input"
                   placeholder="输入日文原名或中文名搜索主题曲…"
-                  @keydown.enter.prevent="searchOnlineMusic"
+                  @keydown.enter.prevent="searchOnlineMusic()"
                 />
                 <button
                   type="button"
                   class="btn btn-sm"
                   :disabled="musicSearching || !musicQuery.trim()"
-                  @click="searchOnlineMusic"
+                  @click="searchOnlineMusic()"
                 >
                   {{ musicSearching ? '搜寻中…' : '搜寻 OP' }}
                 </button>
@@ -1818,5 +1848,35 @@ onBeforeUnmount(stopPreviewAudio)
 .foot-right {
   display: flex;
   gap: 10px;
+}
+
+.music-source-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.music-src-pill {
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.music-src-pill:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.music-src-pill.active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #f5f5f7;
+  font-weight: 500;
 }
 </style>

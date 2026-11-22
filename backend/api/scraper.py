@@ -440,13 +440,15 @@ async def refresh_game_metadata(
 @router.get("/music/search")
 async def search_music_candidates(
     q: str = Query(..., min_length=1, description="游戏原名或中文名"),
+    source: str = Query("auto", description="数据源: auto / bilibili / youtube / itunes"),
+    alt_title: str = Query("", description="可选：作品别名/原名用于相关性过滤"),
     db: AsyncSession = Depends(get_db),
 ):
-    """并发搜寻 Bilibili / YouTube 全曲 OP 与 iTunes JP 试听候选项"""
+    """按平台分选或并发搜寻 Bilibili / YouTube 全曲 OP 与 iTunes JP 试听候选项"""
     _, cfg = await _load_aggregator(db)
     proxy_url = str(cfg.get("proxy_url") or "")
-    items = await search_op_music(q, proxy_url=proxy_url)
-    return {"query": q, "count": len(items), "items": items}
+    items = await search_op_music(q, proxy_url=proxy_url, source=source, alt_title=alt_title)
+    return {"query": q, "source": source, "count": len(items), "items": items}
 
 
 @router.post("/music/download/{game_id}")
@@ -541,11 +543,13 @@ async def search_single_asset_candidates(
     asset_type: Literal["cover", "logo", "hero", "spine", "pv"] = Query(
         ..., description="目标资产槽位: cover / logo / hero / spine / pv"
     ),
-    q: str = Query(..., min_length=1, description="检索关键词"),
+    q: str = Query("", description="检索关键词"),
     source: str = Query(
         "all",
-        description="数据源: all / steamgriddb / vndb / bangumi / steam / touchgal / video",
+        description="数据源: auto / all / steamgriddb / vndb / bangumi / steam / touchgal / bilibili / youtube / video",
     ),
+    steam_appid: str = Query("", description="可选：已知 Steam AppID，用于优先拉取官方 PV"),
+    alt_title: str = Query("", description="可选：游戏原名或中文名，辅助精确匹配与相关性过滤"),
     db: AsyncSession = Depends(get_db),
 ):
     """按资产类型与数据源并发检索多候选视觉资产或宣传片 PV"""
@@ -561,6 +565,8 @@ async def search_single_asset_candidates(
         proxy_url=proxy_url,
         api_keys=api_keys,
         allow_nsfw=allow_nsfw,
+        steam_appid=steam_appid,
+        alt_title=alt_title,
     )
 
 

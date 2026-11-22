@@ -121,48 +121,72 @@ def _ytdlp_search_sync(prefix: str, query: str, source_label: str, proxy_url: st
     return results
 
 
-async def _search_bilibili_op(query: str, proxy_url: str) -> list[dict[str, Any]]:
-    """通过真实 Bilibili WBI 接口搜索游戏 OP/主题曲候选"""
-    raw_items = await search_bilibili_videos(
-        f"{query.strip()} OP",
-        page_size=8,
-        min_duration=MIN_DURATION_SEC,
-        max_duration=MAX_DURATION_SEC,
-        proxy_url=proxy_url,
-    )
-    return [
-        {
-            "id": it["id"],
-            "title": it["title"],
-            "artist": it["author"] or "Bilibili",
-            "source": "Bilibili",
-            "duration": it["duration"],
-            "thumbnail": it["thumbnail"],
-            "preview_url": "",
-            "source_url": it["url"],
-        }
-        for it in raw_items[:5]
-    ]
+async def _search_bilibili_op(
+    query: str,
+    proxy_url: str,
+    game_titles: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """通过真实 Bilibili WBI 接口搜索游戏 OP/主题曲候选（带相关性过滤与加权排序）"""
+    cleaned = query.strip()
+    if not cleaned:
+        return []
+    titles = [t for t in (game_titles or [cleaned]) if t and t.strip()]
+
+    merged: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for suffix in ("OP", "主题曲"):
+        raw_items = await search_bilibili_videos(
+            f"{cleaned} {suffix}",
+            page_size=8,
+            min_duration=MIN_DURATION_SEC,
+            max_duration=MAX_DURATION_SEC,
+            proxy_url=proxy_url,
+            game_titles=titles,
+            kind="op",
+        )
+        for it in raw_items:
+            if it["url"] in seen_urls:
+                continue
+            seen_urls.add(it["url"])
+            merged.append(
+                {
+                    "id": it["id"],
+                    "title": it["title"],
+                    "artist": it["author"] or "Bilibili",
+                    "source": "Bilibili",
+                    "duration": it["duration"],
+                    "thumbnail": it["thumbnail"],
+                    "preview_url": "",
+                    "source_url": it["url"],
+                }
+            )
+            if len(merged) >= 6:
+                return merged
+        if len(merged) >= 4:
+            break
+    return merged[:6]
+
+
+async def _search_youtube_op(query: str, proxy_url: str) -> list[dict[str, Any]]:
+    search_term = f"{query.strip()} OP"
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_ytdlp_search_sync, "ytsearch8", search_term, "YouTube", proxy_url),
+            timeout=SEARCH_TIMEOUT_SEC,
+        )
+    except Exception as exc:
+        logger.debug("[YouTube] search timeout/error: %s", exc)
+        return []
 
 
 async def _search_bilibili_or_youtube(
-    query: str, proxy_url: str
+    query: str,
+    proxy_url: str,
+    game_titles: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    search_term = f"{query.strip()} OP"
-
-    async def _run_yt() -> list[dict[str, Any]]:
-        try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(_ytdlp_search_sync, "ytsearch8", search_term, "YouTube", proxy_url),
-                timeout=SEARCH_TIMEOUT_SEC,
-            )
-        except Exception as exc:
-            logger.debug("[YouTube] search timeout/error: %s", exc)
-            return []
-
     bili_res, yt_res = await asyncio.gather(
-        _search_bilibili_op(query, proxy_url),
-        _run_yt(),
+        _search_bilibili_op(query, proxy_url, game_titles=game_titles),
+        _search_youtube_op(query, proxy_url),
         return_exceptions=True,
     )
 
@@ -230,14 +254,26 @@ async def _search_itunes_jp(query: str, proxy_url: str) -> list[dict[str, Any]]:
 async def search_op_music(
     query: str,
     proxy_url: str = "",
+    source: str = "auto",
+    alt_title: str = "",
 ) -> list[dict[str, Any]]:
-    """并发检索 Bilibili / YouTube 全曲源与 iTunes JP 极速试听源，单源失败静默降级"""
+    """支持多平台分选（auto / bilibili / youtube / itunes）检索 OP/主题曲，单源失败静默降级"""
     cleaned = (query or "").strip()
     if not cleaned:
         return []
 
+    norm_src = (source or "auto").strip().lower()
+    titles = [t for t in (cleaned, (alt_title or "").strip()) if t]
+
+    if norm_src == "bilibili":
+        return await _search_bilibili_op(cleaned, proxy_url, game_titles=titles)
+    if norm_src == "youtube":
+        return await _search_youtube_op(cleaned, proxy_url)
+    if norm_src in ("itunes", "music"):
+        return await _search_itunes_jp(cleaned, proxy_url)
+
     full_res, itunes_res = await asyncio.gather(
-        _search_bilibili_or_youtube(cleaned, proxy_url),
+        _search_bilibili_or_youtube(cleaned, proxy_url, game_titles=titles),
         _search_itunes_jp(cleaned, proxy_url),
         return_exceptions=True,
     )

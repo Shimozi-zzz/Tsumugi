@@ -1,9 +1,9 @@
 """
-Tsumugi 轻量桌面端单进程入口（PyWebView + 内置 FastAPI）
+Tsumugi 轻量桌面端单进程入口（PyWebView 无边框沉浸窗口 + 内置 FastAPI）
 - 兼容 PyInstaller --noconsole 无控制台模式（避免 sys.stdout/stderr 为 None 导致 .isatty() 崩溃）
 - 自动申请空闲本地端口，守护线程拉起内置 Uvicorn 服务
-- 本地健康检查绕过系统代理，轮询 /api/system/version 就绪后在主线程打开原生 WebView2 窗口
-- 关闭窗口时优雅落盘游玩时长并退出进程
+- 本地健康检查绕过系统代理，轮询 /api/system/version 就绪后在主线程打开无边框 WebView2 窗口
+- 暴露 DesktopWindowApi 供前端自定义标题栏控制最小化、最大化/还原、全屏与优雅关闭
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class _WinError10054Filter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
-        if "WinError 10054" in msg or "10054" in msg and "ConnectionResetError" in msg:
+        if "WinError 10054" in msg or ("10054" in msg and "ConnectionResetError" in msg):
             return False
         if record.exc_info and record.exc_info[1]:
             exc = record.exc_info[1]
@@ -139,14 +139,93 @@ def _apply_windows_dark_titlebar(window_title: str) -> None:
         pass
 
 
-class DesktopBridge:
-    """暴露给前端 window.pywebview.api 的轻量原生文件/目录选择桥接"""
+class DesktopWindowApi:
+    """暴露给前端 window.pywebview.api 的桌面窗口控制与本地文件/目录选择桥接"""
 
-    def __init__(self) -> None:
+    def __init__(self, logger: logging.Logger) -> None:
+        self._logger = logger
         self._window: Any = None
+        self._is_maximized: bool = False
+        self._is_fullscreen: bool = False
 
     def attach(self, window: Any) -> None:
         self._window = window
+        # 同步原生窗口事件，保证最大化状态在拖拽贴边后依然准确
+        maximized_ev = getattr(window.events, "maximized", None)
+        restored_ev = getattr(window.events, "restored", None)
+        if maximized_ev is not None:
+            maximized_ev += self._on_maximized
+        if restored_ev is not None:
+            restored_ev += self._on_restored
+
+    def _on_maximized(self) -> None:
+        self._is_maximized = True
+
+    def _on_restored(self) -> None:
+        self._is_maximized = False
+
+    def minimize(self) -> bool:
+        if not self._window:
+            return False
+        try:
+            self._window.minimize()
+            return True
+        except Exception as exc:
+            self._logger.debug("minimize failed: %s", exc)
+            return False
+
+    def toggle_maximize(self) -> bool:
+        if not self._window:
+            return self._is_maximized
+        try:
+            if self._is_fullscreen:
+                self.exit_fullscreen()
+            if self._is_maximized:
+                self._window.restore()
+                self._is_maximized = False
+            else:
+                self._window.maximize()
+                self._is_maximized = True
+        except Exception as exc:
+            self._logger.debug("toggle_maximize failed: %s", exc)
+        return self._is_maximized
+
+    def toggle_fullscreen(self) -> bool:
+        if not self._window:
+            return self._is_fullscreen
+        try:
+            self._window.toggle_fullscreen()
+            self._is_fullscreen = not self._is_fullscreen
+        except Exception as exc:
+            self._logger.debug("toggle_fullscreen failed: %s", exc)
+        return self._is_fullscreen
+
+    def exit_fullscreen(self) -> bool:
+        if not self._window or not self._is_fullscreen:
+            return False
+        try:
+            self._window.toggle_fullscreen()
+            self._is_fullscreen = False
+        except Exception as exc:
+            self._logger.debug("exit_fullscreen failed: %s", exc)
+        return self._is_fullscreen
+
+    def close(self) -> bool:
+        if not self._window:
+            return False
+        try:
+            self._window.destroy()
+            return True
+        except Exception as exc:
+            self._logger.debug("close window failed: %s", exc)
+            return False
+
+    def get_window_state(self) -> dict[str, bool]:
+        return {
+            "is_desktop": True,
+            "is_fullscreen": self._is_fullscreen,
+            "is_maximized": self._is_maximized,
+        }
 
     def pick_file(
         self,
@@ -155,34 +234,46 @@ class DesktopBridge:
     ) -> str:
         if not self._window:
             return ""
-        import webview
+        try:
+            import webview
 
-        ft = tuple(file_types) if file_types else ("Executable (*.exe;*.lnk;*.bat)", "All files (*.*)")
-        dialog_type = getattr(webview, "FileDialog", None)
-        open_flag = dialog_type.OPEN if dialog_type else webview.OPEN_DIALOG
-        result = self._window.create_file_dialog(
-            open_flag,
-            allow_multiple=False,
-            file_types=ft,
-        )
-        if not result:
+            ft = (
+                tuple(file_types)
+                if file_types
+                else ("Executable (*.exe;*.lnk;*.bat)", "All files (*.*)")
+            )
+            dialog_type = getattr(webview, "FileDialog", None)
+            open_flag = dialog_type.OPEN if dialog_type else webview.OPEN_DIALOG
+            result = self._window.create_file_dialog(
+                open_flag,
+                allow_multiple=False,
+                file_types=ft,
+            )
+            if not result:
+                return ""
+            chosen = Path(result[0])
+            if chosen.suffix.lower() == ".lnk":
+                return _resolve_lnk_target(chosen)
+            return str(chosen)
+        except Exception as exc:
+            self._logger.debug("pick_file failed: %s", exc)
             return ""
-        chosen = Path(result[0])
-        if chosen.suffix.lower() == ".lnk":
-            return _resolve_lnk_target(chosen)
-        return str(chosen)
 
     def pick_folder(self, title: str = "选择文件夹") -> str:
         if not self._window:
             return ""
-        import webview
+        try:
+            import webview
 
-        dialog_type = getattr(webview, "FileDialog", None)
-        folder_flag = dialog_type.FOLDER if dialog_type else webview.FOLDER_DIALOG
-        result = self._window.create_file_dialog(folder_flag)
-        if not result:
+            dialog_type = getattr(webview, "FileDialog", None)
+            folder_flag = dialog_type.FOLDER if dialog_type else webview.FOLDER_DIALOG
+            result = self._window.create_file_dialog(folder_flag)
+            if not result:
+                return ""
+            return str(result[0])
+        except Exception as exc:
+            self._logger.debug("pick_folder failed: %s", exc)
             return ""
-        return str(result[0])
 
 
 def main() -> None:
@@ -233,7 +324,7 @@ def main() -> None:
         server.should_exit = True
         sys.exit(1)
 
-    bridge = DesktopBridge()
+    window_api = DesktopWindowApi(logger)
     window = webview.create_window(
         title="Tsumugi",
         url=f"http://127.0.0.1:{port}",
@@ -241,9 +332,12 @@ def main() -> None:
         height=840,
         min_size=(1080, 680),
         background_color="#0a0a0c",
-        js_api=bridge,
+        frameless=True,
+        easy_drag=False,
+        resizable=True,
+        js_api=window_api,
     )
-    bridge.attach(window)
+    window_api.attach(window)
     window.events.loaded += lambda: _apply_windows_dark_titlebar("Tsumugi")
 
     start_kwargs: dict[str, Any] = {}
@@ -261,7 +355,7 @@ def main() -> None:
     def _log_runtime_renderer() -> None:
         renderer = getattr(webview, "renderer", None) or start_kwargs.get("gui", "default")
         logger.info(
-            "WebView 启动就绪: renderer=%s, storage_path=%s",
+            "WebView 启动就绪: renderer=%s, frameless=True, storage_path=%s",
             renderer,
             start_kwargs.get("storage_path", "default"),
         )
