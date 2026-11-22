@@ -20,17 +20,12 @@
 
 ## 界面预览
 
-  将实机截图放入 docs/screenshots/ 目录后取消下方注释即可展示：
-  - docs/screenshots/gallery.png  （回廊展架与 3D 实体侧封）
-  - docs/screenshots/detail.png   （作品详情页、视觉资产与影音播放）
-
 <p align="center">
   <img src="docs/screenshots/gallery.png" alt="回廊展架" width="100%" />
 </p>
 <p align="center">
   <img src="docs/screenshots/detail.png" alt="作品详情与影音播放" width="100%" />
 </p>
-
 
 
 ---
