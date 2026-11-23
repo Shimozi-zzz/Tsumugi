@@ -1253,10 +1253,12 @@ function statusDotClass(status: string) {
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
+  white-space: nowrap;
   transition:
     background-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo),
     transform var(--duration-fast) var(--ease-out-expo);
 }
 

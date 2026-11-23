@@ -6,19 +6,30 @@ import {
   scraperApi,
   systemApi,
 } from '@/api/client'
-import { SCRAPER_SOURCES, type ScraperSourceConfig } from '@/config/scraperSources'
+import {
+  FREE_SCRAPER_SOURCES,
+  KEY_SCRAPER_SOURCES,
+  type ScraperFieldConfig,
+  type ScraperSourceConfig,
+} from '@/config/scraperSources'
 import { useLibraryStore } from '@/stores/library'
 import type {
   AppVersionInfo,
   BangumiMeResponse,
+  ScraperSettingsResponse,
+  ScraperTestResponse,
   SettingsSectionId,
   StorageUsageResponse,
   UpdateCheckResponse,
 } from '@/types'
 
 const DEFAULT_SOURCE_LINKS: Record<string, string> = {
+  ymgal: 'https://www.ymgal.games/developer',
+  kungal: 'https://www.kungal.com',
   bangumi: 'https://next.bgm.tv/demo/access-token',
+  touchgal: 'https://www.touchgal.io',
   steamgriddb: 'https://www.steamgriddb.com/profile/preferences/api',
+  igdb: 'https://dev.twitch.tv/console/apps',
 }
 
 const store = useLibraryStore()
@@ -29,21 +40,19 @@ const activeSection = ref<SettingsSectionId>(store.settingsInitialSection || 'ge
 const navSections: { id: SettingsSectionId; label: string }[] = [
   { id: 'general', label: '常规与隐私' },
   { id: 'network', label: '网络与启动' },
-  { id: 'sources', label: '数据源管理' },
+  { id: 'sources', label: '元数据刮削源' },
+  { id: 'data', label: '数据管理' },
   { id: 'environment', label: '运行环境' },
 ]
 
-const initialApiKeys: Record<string, string> = {
-  ...(store.settings.api_keys || {}),
-}
-if (!initialApiKeys.bangumi && store.settings.bangumi_token) {
-  initialApiKeys.bangumi = store.settings.bangumi_token
-}
-for (const src of SCRAPER_SOURCES) {
-  if (src.keyField && initialApiKeys[src.keyField] == null) {
-    initialApiKeys[src.keyField] = ''
-  }
-}
+const SECRET_KEYS = new Set([
+  'ymgal_client_secret',
+  'kungal_token',
+  'bangumi_token',
+  'touchgal_api_key',
+  'steamgriddb_api_key',
+  'igdb_client_secret',
+])
 
 const form = reactive({
   proxy_url: store.settings.proxy_url || '',
@@ -52,15 +61,88 @@ const form = reactive({
   privacy_blur_mode: Boolean(store.settings.privacy_blur_mode),
   bgm_autoplay: store.settings.bgm_autoplay !== false,
   gallery_particles: store.settings.gallery_particles !== false,
-  api_keys: initialApiKeys,
 })
+
+// 多源刮削配置（对应本地 DATA_DIR/settings.json，敏感字段脱敏管理）
+const scraperLoading = ref(false)
+const enabledSources = reactive<Record<string, boolean>>({
+  ymgal: true,
+  kungal: true,
+  dlsite: true,
+  vndb: true,
+  bangumi: true,
+  steam: true,
+  touchgal: true,
+  steamgriddb: true,
+  igdb: true,
+})
+const scraperFields = reactive<Record<string, string>>({
+  ymgal_client_id: '',
+  ymgal_client_secret: '',
+  kungal_base_url: 'https://www.kungal.com',
+  kungal_token: '',
+  bangumi_token: '',
+  touchgal_api_key: '',
+  steamgriddb_api_key: '',
+  igdb_client_id: '',
+  igdb_client_secret: '',
+})
+const maskedSecrets = reactive<Record<string, string>>({})
+const configuredSecrets = reactive<Record<string, boolean>>({})
+const clearedSecrets = reactive<Record<string, boolean>>({})
 
 const expandedSourceId = ref<string | null>(store.settingsInitialExpandSource || null)
 const revealedKeys = reactive<Record<string, boolean>>({})
 
-// Bangumi Token 验证状态
+// 单源连通性测试状态
+const testingSource = reactive<Record<string, boolean>>({})
+const testResults = reactive<Record<string, ScraperTestResponse | null>>({})
+
+// Bangumi 账号验证状态
 const verifyingBgm = ref(false)
 const bgmVerifyResult = ref<BangumiMeResponse | null>(null)
+
+function hydrateScraperSettings(cfg?: ScraperSettingsResponse | null) {
+  if (!cfg) return
+  if (cfg.enabled_sources) {
+    for (const [k, v] of Object.entries(cfg.enabled_sources)) {
+      enabledSources[k] = Boolean(v)
+    }
+  }
+  scraperFields.ymgal_client_id = cfg.ymgal_client_id || ''
+  scraperFields.kungal_base_url = cfg.kungal_base_url || 'https://www.kungal.com'
+  scraperFields.igdb_client_id = cfg.igdb_client_id || ''
+
+  const secValues: Record<string, string> = {
+    ymgal_client_secret: cfg.ymgal_client_secret || '',
+    kungal_token: cfg.kungal_token || '',
+    bangumi_token: cfg.bangumi_token || '',
+    touchgal_api_key: cfg.touchgal_api_key || '',
+    steamgriddb_api_key: cfg.steamgriddb_api_key || '',
+    igdb_client_secret: cfg.igdb_client_secret || '',
+  }
+  for (const k of Object.keys(secValues)) {
+    maskedSecrets[k] = secValues[k]
+    configuredSecrets[k] = Boolean(cfg.configured_secrets?.[k] ?? secValues[k])
+    scraperFields[k] = ''
+    clearedSecrets[k] = false
+  }
+}
+
+hydrateScraperSettings(store.settings.scraper_settings)
+
+async function loadScraperSettings() {
+  scraperLoading.value = true
+  try {
+    const res = await systemApi.getScraperSettings()
+    hydrateScraperSettings(res)
+    store.settings = { ...store.settings, scraper_settings: res }
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '读取刮削源配置失败', 'warning')
+  } finally {
+    scraperLoading.value = false
+  }
+}
 
 // 运行环境：版本与更新检查状态
 const versionInfo = ref<AppVersionInfo | null>(null)
@@ -76,14 +158,25 @@ const convertingWebp = ref(false)
 const sourceLinks = computed<Record<string, string | undefined>>(() => ({
   ...DEFAULT_SOURCE_LINKS,
   ...(store.settings.source_links || {}),
+  ...(store.settings.scraper_settings?.source_links || {}),
 }))
 
-function getSourceDocUrl(srcId: string): string {
-  return sourceLinks.value[srcId] || ''
+function getSourceDocUrl(src: ScraperSourceConfig): string {
+  return sourceLinks.value[src.id] || src.docUrl || ''
 }
 
-function getSourceLinkLabel(srcId: string): string {
-  return srcId === 'bangumi' ? '获取 Token ↗' : '获取 API Key ↗'
+function getFieldPlaceholder(field: ScraperFieldConfig): string {
+  if (field.isSecret && configuredSecrets[field.key] && !clearedSecrets[field.key]) {
+    return `已保存 (${maskedSecrets[field.key] || '••••••'})，输入新值替换`
+  }
+  return field.placeholder
+}
+
+function clearSecretField(fieldKey: string) {
+  scraperFields[fieldKey] = ''
+  clearedSecrets[fieldKey] = true
+  configuredSecrets[fieldKey] = false
+  maskedSecrets[fieldKey] = ''
 }
 
 async function handleVerifyBangumi() {
@@ -91,8 +184,8 @@ async function handleVerifyBangumi() {
   verifyingBgm.value = true
   bgmVerifyResult.value = null
   try {
-    const token = (form.api_keys.bangumi || '').trim()
-    bgmVerifyResult.value = await scraperApi.verifyBangumiMe(token)
+    const token = (scraperFields.bangumi_token || '').trim()
+    bgmVerifyResult.value = await scraperApi.verifyBangumiMe(token || undefined)
   } catch (err) {
     bgmVerifyResult.value = {
       valid: false,
@@ -100,6 +193,31 @@ async function handleVerifyBangumi() {
     }
   } finally {
     verifyingBgm.value = false
+  }
+}
+
+async function handleTestSource(src: ScraperSourceConfig) {
+  if (testingSource[src.id]) return
+  testingSource[src.id] = true
+  testResults[src.id] = null
+  try {
+    const overrides: Record<string, string> = {}
+    for (const f of src.fields || []) {
+      const val = (scraperFields[f.key] || '').trim()
+      if (val) {
+        overrides[f.key] = val
+      }
+    }
+    testResults[src.id] = await scraperApi.testSource(src.id, overrides)
+  } catch (err) {
+    testResults[src.id] = {
+      ok: false,
+      source: src.id,
+      latency_ms: 0,
+      detail: err instanceof Error ? err.message : '连通性测试失败',
+    }
+  } finally {
+    testingSource[src.id] = false
   }
 }
 
@@ -235,12 +353,15 @@ async function handleConvertWebp() {
 watch(
   activeSection,
   (sec) => {
-    if (sec === 'environment') {
-      if (!versionInfo.value) {
-        void loadVersionInfo()
-      }
+    if (sec === 'sources') {
+      void loadScraperSettings()
+    } else if (sec === 'data') {
       if (!storageStats.value) {
         void loadStorageStats()
+      }
+    } else if (sec === 'environment') {
+      if (!versionInfo.value) {
+        void loadVersionInfo()
       }
     }
   },
@@ -252,8 +373,12 @@ onMounted(() => {
   store.settingsInitialExpandSource = null
 })
 
+function hasExpandableFields(src: ScraperSourceConfig): boolean {
+  return Boolean(src.fields && src.fields.length > 0)
+}
+
 function toggleSourceAccordion(src: ScraperSourceConfig) {
-  if (src.authType === 'none') return
+  if (!hasExpandableFields(src)) return
   expandedSourceId.value = expandedSourceId.value === src.id ? null : src.id
 }
 
@@ -261,21 +386,66 @@ function toggleKeyVisibility(field: string) {
   revealedKeys[field] = !revealedKeys[field]
 }
 
+function isSourceKeyReady(src: ScraperSourceConfig): boolean {
+  if (src.id === 'touchgal') {
+    return Boolean(
+      (scraperFields.touchgal_api_key || '').trim() ||
+        (configuredSecrets.touchgal_api_key && !clearedSecrets.touchgal_api_key),
+    )
+  }
+  if (src.id === 'steamgriddb') {
+    return Boolean(
+      (scraperFields.steamgriddb_api_key || '').trim() ||
+        (configuredSecrets.steamgriddb_api_key && !clearedSecrets.steamgriddb_api_key),
+    )
+  }
+  if (src.id === 'igdb') {
+    const hasId = Boolean((scraperFields.igdb_client_id || '').trim())
+    const hasSec = Boolean(
+      (scraperFields.igdb_client_secret || '').trim() ||
+        (configuredSecrets.igdb_client_secret && !clearedSecrets.igdb_client_secret),
+    )
+    return hasId && hasSec
+  }
+  if (src.id === 'bangumi') {
+    return Boolean(
+      (scraperFields.bangumi_token || '').trim() ||
+        (configuredSecrets.bangumi_token && !clearedSecrets.bangumi_token),
+    )
+  }
+  if (src.id === 'ymgal') {
+    const hasId = Boolean((scraperFields.ymgal_client_id || '').trim())
+    const hasSec = Boolean(
+      (scraperFields.ymgal_client_secret || '').trim() ||
+        (configuredSecrets.ymgal_client_secret && !clearedSecrets.ymgal_client_secret),
+    )
+    return hasId && hasSec
+  }
+  if (src.id === 'kungal') {
+    return Boolean(
+      (scraperFields.kungal_token || '').trim() ||
+        (configuredSecrets.kungal_token && !clearedSecrets.kungal_token),
+    )
+  }
+  return false
+}
+
 function getSourceStatus(src: ScraperSourceConfig): {
   label: string
   tone: 'free' | 'ok' | 'missing' | 'optional'
 } {
-  if (src.authType === 'none') {
-    return { label: '免密直连', tone: 'free' }
+  if (!enabledSources[src.id]) {
+    return { label: '已停用', tone: 'optional' }
   }
-  const hasVal = Boolean(src.keyField && (form.api_keys[src.keyField] || '').trim())
-  if (hasVal) {
-    return { label: '已配置', tone: 'ok' }
+  if (src.group === 'key') {
+    return isSourceKeyReady(src)
+      ? { label: '已解锁', tone: 'ok' }
+      : { label: '未配置 Key', tone: 'missing' }
   }
-  return {
-    label: '未配置',
-    tone: src.authType === 'required' ? 'missing' : 'optional',
+  if (src.authType === 'optional' && isSourceKeyReady(src)) {
+    return { label: '已配凭证', tone: 'ok' }
   }
+  return { label: '免 Key 启用', tone: 'free' }
 }
 
 async function browseLE() {
@@ -289,27 +459,51 @@ async function browseLE() {
 async function saveAll() {
   saving.value = true
   try {
-    const cleanedKeys: Record<string, string> = {}
-    for (const [k, v] of Object.entries(form.api_keys)) {
-      cleanedKeys[k] = (v || '').trim()
+    const clearFields = Object.entries(clearedSecrets)
+      .filter(([, cleared]) => cleared)
+      .map(([k]) => k)
+
+    const scraperPayload: Record<string, unknown> = {
+      enabled_sources: { ...enabledSources },
+      ymgal_client_id: (scraperFields.ymgal_client_id || '').trim(),
+      kungal_base_url: (scraperFields.kungal_base_url || '').trim() || 'https://www.kungal.com',
+      igdb_client_id: (scraperFields.igdb_client_id || '').trim(),
+      clear_fields: clearFields,
+    }
+    for (const secKey of SECRET_KEYS) {
+      const typed = (scraperFields[secKey] || '').trim()
+      if (typed) {
+        scraperPayload[secKey] = typed
+      }
     }
 
-    await Promise.all([
+    const [, , , , , , savedScraper] = await Promise.all([
       store.updateSetting('proxy_url', form.proxy_url.trim()),
       store.updateSetting('le_exe_path', form.le_exe_path.trim()),
       store.updateSetting('allow_nsfw_scrape', form.allow_nsfw_scrape),
       store.updateSetting('privacy_blur_mode', form.privacy_blur_mode),
       store.updateSetting('bgm_autoplay', form.bgm_autoplay),
       store.updateSetting('gallery_particles', form.gallery_particles),
-      store.updateSetting('api_keys', {
-        steamgriddb: cleanedKeys.steamgriddb || '',
-        touchgal: cleanedKeys.touchgal || '',
-        bangumi: cleanedKeys.bangumi || '',
-        ...cleanedKeys,
-      }),
+      systemApi.updateScraperSettings(scraperPayload),
     ])
-    store.notify('设置已保存', 'success')
+
+    hydrateScraperSettings(savedScraper)
+    store.settings = {
+      ...store.settings,
+      scraper_settings: savedScraper,
+      bangumi_token: savedScraper.bangumi_token,
+      api_keys: {
+        ...(store.settings.api_keys || { steamgriddb: '', touchgal: '', bangumi: '' }),
+        touchgal: savedScraper.touchgal_api_key,
+        steamgriddb: savedScraper.steamgriddb_api_key,
+        bangumi: savedScraper.bangumi_token,
+      },
+    }
+
+    store.notify('设置已保存（刮削源配置已持久化至 settings.json）', 'success')
     store.showSettingsModal = false
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '保存设置失败', 'error')
   } finally {
     saving.value = false
   }
@@ -368,6 +562,18 @@ async function saveAll() {
                 <ellipse cx="10" cy="5.5" rx="6" ry="2.5" />
                 <path d="M4 5.5v9c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-9" />
                 <path d="M4 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" />
+              </svg>
+              <svg
+                v-else-if="item.id === 'data'"
+                viewBox="0 0 20 20"
+                width="15"
+                height="15"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.65"
+              >
+                <path d="M4 7.5V5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 14.5v-2" />
+                <path d="M3 10h8.5M8.5 7.5L11.5 10l-3 2.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
               <svg
                 v-else
@@ -478,138 +684,451 @@ async function saveAll() {
               </div>
             </div>
 
-            <!-- 3. 数据源管理：合并式原生分组手风琴 -->
+            <!-- 3. 元数据刮削源：免 Key 开箱源 + 可选 API Key 扩展源 -->
             <div v-else-if="activeSection === 'sources'" class="pane-section">
-              <div class="grouped-card">
-                <div
-                  v-for="src in SCRAPER_SOURCES"
-                  :key="src.id"
-                  class="group-row source-item"
-                  :class="{
-                    expandable: src.authType !== 'none',
-                    expanded: expandedSourceId === src.id,
-                  }"
-                >
-                  <button
-                    type="button"
-                    class="source-row"
-                    :disabled="src.authType === 'none'"
-                    @click="toggleSourceAccordion(src)"
-                  >
-                    <div class="source-meta">
-                      <span class="row-title">{{ src.name }}</span>
-                      <span class="row-desc">{{ src.description }}</span>
-                    </div>
-
-                    <div class="source-right">
-                      <span class="status-capsule" :class="`tone-${getSourceStatus(src).tone}`">
-                        {{ getSourceStatus(src).label }}
-                      </span>
-
-                      <svg
-                        v-if="src.authType !== 'none'"
-                        class="accordion-chevron"
-                        :class="{ open: expandedSourceId === src.id }"
-                        viewBox="0 0 16 16"
-                        width="14"
-                        height="14"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.7"
-                      >
-                        <path d="M4.5 6.25L8 9.75l3.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
-                      </svg>
-                    </div>
-                  </button>
-
+              <div class="group-block">
+                <div class="group-label">免 Key 开箱即用源（默认全部启用，可单独开关与测试连通）</div>
+                <div class="grouped-card">
                   <div
-                    v-if="src.authType !== 'none' && src.keyField && expandedSourceId === src.id"
-                    class="source-body"
+                    v-for="src in FREE_SCRAPER_SOURCES"
+                    :key="src.id"
+                    class="group-row source-item"
+                    :class="{
+                      expandable: hasExpandableFields(src),
+                      expanded: expandedSourceId === src.id,
+                    }"
                   >
-                    <div class="source-input-row">
-                      <div class="secret-input-wrap">
-                        <input
-                          v-model="form.api_keys[src.keyField]"
-                          class="input secret-input"
-                          :type="revealedKeys[src.keyField] ? 'text' : 'password'"
-                          autocomplete="off"
-                          :placeholder="src.placeholder || '输入 API Key'"
-                          @input="src.id === 'bangumi' && (bgmVerifyResult = null)"
-                        />
+                    <div class="source-row-wrap">
+                      <button
+                        type="button"
+                        class="source-row"
+                        :disabled="!hasExpandableFields(src)"
+                        @click="toggleSourceAccordion(src)"
+                      >
+                        <div class="source-meta">
+                          <span class="row-title">{{ src.name }}</span>
+                          <span class="row-desc">{{ src.description }}</span>
+                        </div>
+                      </button>
+
+                      <div class="source-right">
+                        <span class="status-capsule" :class="`tone-${getSourceStatus(src).tone}`">
+                          {{ getSourceStatus(src).label }}
+                        </span>
+
                         <button
                           type="button"
-                          class="eye-btn"
-                          :title="revealedKeys[src.keyField] ? '隐藏' : '显示'"
-                          @click="toggleKeyVisibility(src.keyField)"
+                          class="btn btn-sm source-test-btn"
+                          :disabled="testingSource[src.id]"
+                          @click.stop="handleTestSource(src)"
+                        >
+                          {{ testingSource[src.id] ? '测试中…' : '测试' }}
+                        </button>
+
+                        <input
+                          v-model="enabledSources[src.id]"
+                          type="checkbox"
+                          class="native-switch"
+                          :title="`启用或停用 ${src.name}`"
+                          @click.stop
+                        />
+
+                        <button
+                          v-if="hasExpandableFields(src)"
+                          type="button"
+                          class="accordion-btn"
+                          :aria-label="`展开 ${src.name} 高级配置`"
+                          @click.stop="toggleSourceAccordion(src)"
                         >
                           <svg
-                            v-if="revealedKeys[src.keyField]"
-                            viewBox="0 0 24 24"
-                            width="15"
-                            height="15"
+                            class="accordion-chevron"
+                            :class="{ open: expandedSourceId === src.id }"
+                            viewBox="0 0 16 16"
+                            width="14"
+                            height="14"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="1.8"
+                            stroke-width="1.7"
                           >
-                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24M1 1l22 22" />
-                          </svg>
-                          <svg
-                            v-else
-                            viewBox="0 0 24 24"
-                            width="15"
-                            height="15"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                          >
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                            <circle cx="12" cy="12" r="3" />
+                            <path d="M4.5 6.25L8 9.75l3.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
                           </svg>
                         </button>
                       </div>
+                    </div>
 
-                      <button
-                        v-if="src.id === 'bangumi'"
-                        type="button"
-                        class="btn btn-sm verify-btn"
-                        :disabled="verifyingBgm"
-                        @click="handleVerifyBangumi"
+                    <!-- 连通性测试即时反馈 -->
+                    <div
+                      v-if="testResults[src.id]"
+                      class="source-test-feedback"
+                      :class="testResults[src.id]?.ok ? 'ok' : 'err'"
+                    >
+                      <span>{{ testResults[src.id]?.detail }}</span>
+                      <span v-if="testResults[src.id]?.latency_ms" class="tabular-nums">
+                        · {{ testResults[src.id]?.latency_ms }}ms
+                      </span>
+                    </div>
+
+                    <!-- 可选高级配置展开区 -->
+                    <div v-if="hasExpandableFields(src) && expandedSourceId === src.id" class="source-body">
+                      <div v-for="field in src.fields" :key="field.key" class="source-field-block">
+                        <div class="source-field-head">
+                          <label class="source-field-label">{{ field.label }}</label>
+                          <button
+                            v-if="field.isSecret && configuredSecrets[field.key] && !clearedSecrets[field.key]"
+                            type="button"
+                            class="clear-secret-btn"
+                            @click="clearSecretField(field.key)"
+                          >
+                            清除已存密钥
+                          </button>
+                        </div>
+
+                        <div class="source-input-row">
+                          <div class="secret-input-wrap">
+                            <input
+                              v-model="scraperFields[field.key]"
+                              class="input"
+                              :class="{ 'secret-input': field.isSecret }"
+                              :type="field.isSecret && !revealedKeys[field.key] ? 'password' : 'text'"
+                              autocomplete="off"
+                              :placeholder="getFieldPlaceholder(field)"
+                              @input="
+                                clearedSecrets[field.key] = false;
+                                src.id === 'bangumi' && (bgmVerifyResult = null)
+                              "
+                            />
+                            <button
+                              v-if="field.isSecret"
+                              type="button"
+                              class="eye-btn"
+                              :title="revealedKeys[field.key] ? '隐藏' : '显示'"
+                              @click="toggleKeyVisibility(field.key)"
+                            >
+                              <svg
+                                v-if="revealedKeys[field.key]"
+                                viewBox="0 0 24 24"
+                                width="15"
+                                height="15"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.8"
+                              >
+                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24M1 1l22 22" />
+                              </svg>
+                              <svg
+                                v-else
+                                viewBox="0 0 24 24"
+                                width="15"
+                                height="15"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.8"
+                              >
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                              </svg>
+                            </button>
+                          </div>
+
+                          <button
+                            v-if="src.id === 'bangumi' && field.key === 'bangumi_token'"
+                            type="button"
+                            class="btn btn-sm verify-btn"
+                            :disabled="verifyingBgm"
+                            @click="handleVerifyBangumi"
+                          >
+                            {{ verifyingBgm ? '验证中…' : '验证账号' }}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div
+                        v-if="src.id === 'bangumi' && bgmVerifyResult"
+                        class="verify-feedback"
+                        :class="bgmVerifyResult.valid ? 'ok' : 'err'"
                       >
-                        {{ verifyingBgm ? '验证中…' : '验证' }}
+                        <template v-if="bgmVerifyResult.valid">
+                          已验证账号：{{ bgmVerifyResult.nickname || bgmVerifyResult.username }}
+                        </template>
+                        <template v-else>
+                          {{ bgmVerifyResult.detail || 'Access Token 无效或已过期' }}
+                        </template>
+                      </div>
+
+                      <div class="source-hint-row">
+                        <span v-if="src.docHint" class="source-hint">{{ src.docHint }}</span>
+                        <a
+                          v-if="getSourceDocUrl(src)"
+                          :href="getSourceDocUrl(src)"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="source-ext-link"
+                        >
+                          {{ src.docLinkLabel || '查看文档 ↗' }}
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="group-block">
+                <div class="group-label">可选 API Key 扩展源（填入 Key 保存后自动解锁，明文仅存本地 data/settings.json）</div>
+                <div class="grouped-card">
+                  <div
+                    v-for="src in KEY_SCRAPER_SOURCES"
+                    :key="src.id"
+                    class="group-row source-item expandable"
+                    :class="{ expanded: expandedSourceId === src.id }"
+                  >
+                    <div class="source-row-wrap">
+                      <button
+                        type="button"
+                        class="source-row"
+                        @click="toggleSourceAccordion(src)"
+                      >
+                        <div class="source-meta">
+                          <span class="row-title">{{ src.name }}</span>
+                          <span class="row-desc">{{ src.description }}</span>
+                        </div>
                       </button>
+
+                      <div class="source-right">
+                        <span class="status-capsule" :class="`tone-${getSourceStatus(src).tone}`">
+                          {{ getSourceStatus(src).label }}
+                        </span>
+
+                        <button
+                          type="button"
+                          class="btn btn-sm source-test-btn"
+                          :disabled="testingSource[src.id]"
+                          @click.stop="handleTestSource(src)"
+                        >
+                          {{ testingSource[src.id] ? '测试中…' : '测试' }}
+                        </button>
+
+                        <input
+                          v-model="enabledSources[src.id]"
+                          type="checkbox"
+                          class="native-switch"
+                          :title="`启用或停用 ${src.name}`"
+                          @click.stop
+                        />
+
+                        <button
+                          type="button"
+                          class="accordion-btn"
+                          :aria-label="`展开 ${src.name} 密钥配置`"
+                          @click.stop="toggleSourceAccordion(src)"
+                        >
+                          <svg
+                            class="accordion-chevron"
+                            :class="{ open: expandedSourceId === src.id }"
+                            viewBox="0 0 16 16"
+                            width="14"
+                            height="14"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.7"
+                          >
+                            <path d="M4.5 6.25L8 9.75l3.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
 
                     <div
-                      v-if="src.id === 'bangumi' && bgmVerifyResult"
-                      class="verify-feedback"
-                      :class="bgmVerifyResult.valid ? 'ok' : 'err'"
+                      v-if="testResults[src.id]"
+                      class="source-test-feedback"
+                      :class="testResults[src.id]?.ok ? 'ok' : 'err'"
                     >
-                      <template v-if="bgmVerifyResult.valid">
-                        已验证：{{ bgmVerifyResult.nickname || bgmVerifyResult.username }}
-                      </template>
-                      <template v-else>
-                        {{ bgmVerifyResult.detail || 'Access Token 无效或已过期' }}
-                      </template>
+                      <span>{{ testResults[src.id]?.detail }}</span>
+                      <span v-if="testResults[src.id]?.latency_ms" class="tabular-nums">
+                        · {{ testResults[src.id]?.latency_ms }}ms
+                      </span>
                     </div>
 
-                    <div class="source-hint-row">
-                      <span v-if="src.docHint" class="source-hint">{{ src.docHint }}</span>
-                      <a
-                        v-if="getSourceDocUrl(src.id)"
-                        :href="getSourceDocUrl(src.id)"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="source-ext-link"
-                      >
-                        {{ getSourceLinkLabel(src.id) }}
-                      </a>
+                    <div v-if="expandedSourceId === src.id" class="source-body">
+                      <div v-for="field in src.fields" :key="field.key" class="source-field-block">
+                        <div class="source-field-head">
+                          <label class="source-field-label">{{ field.label }}</label>
+                          <button
+                            v-if="field.isSecret && configuredSecrets[field.key] && !clearedSecrets[field.key]"
+                            type="button"
+                            class="clear-secret-btn"
+                            @click="clearSecretField(field.key)"
+                          >
+                            清除已存密钥
+                          </button>
+                        </div>
+
+                        <div class="secret-input-wrap">
+                          <input
+                            v-model="scraperFields[field.key]"
+                            class="input"
+                            :class="{ 'secret-input': field.isSecret }"
+                            :type="field.isSecret && !revealedKeys[field.key] ? 'password' : 'text'"
+                            autocomplete="off"
+                            :placeholder="getFieldPlaceholder(field)"
+                            @input="clearedSecrets[field.key] = false"
+                          />
+                          <button
+                            v-if="field.isSecret"
+                            type="button"
+                            class="eye-btn"
+                            :title="revealedKeys[field.key] ? '隐藏' : '显示'"
+                            @click="toggleKeyVisibility(field.key)"
+                          >
+                            <svg
+                              v-if="revealedKeys[field.key]"
+                              viewBox="0 0 24 24"
+                              width="15"
+                              height="15"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="1.8"
+                            >
+                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24M1 1l22 22" />
+                            </svg>
+                            <svg
+                              v-else
+                              viewBox="0 0 24 24"
+                              width="15"
+                              height="15"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="1.8"
+                            >
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="source-hint-row">
+                        <span v-if="src.docHint" class="source-hint">{{ src.docHint }}</span>
+                        <a
+                          v-if="getSourceDocUrl(src)"
+                          :href="getSourceDocUrl(src)"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="source-ext-link"
+                        >
+                          {{ src.docLinkLabel || '获取 API Key ↗' }}
+                        </a>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- 4. 运行环境与存储治理 -->
+            <!-- 4. 数据管理与数据迁移 -->
+            <div v-else-if="activeSection === 'data'" class="pane-section">
+              <div class="group-block">
+                <div class="group-label">数据迁移</div>
+                <div class="grouped-card">
+                  <div class="group-row action-row">
+                    <div class="toggle-text">
+                      <div class="row-title">导入外部游戏库（Playnite / Vnite）</div>
+                      <div class="row-desc">从 Playnite 或 Vnite 一次性迁移收藏、游玩时长与本地封面</div>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      @click="store.openExternalImport('playnite')"
+                    >
+                      导入外部库
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="group-block">
+                <div class="group-label">存储空间</div>
+                <div class="grouped-card">
+                  <div class="group-row storage-overview-row">
+                    <div class="storage-top-line">
+                      <span class="row-title">本地数据占用</span>
+                      <span class="storage-total tabular-nums">
+                        {{ storageStats ? formatBytes(storageStats.total_bytes) : (storageLoading ? '计算中…' : '—') }}
+                      </span>
+                    </div>
+
+                    <!-- macOS 风格横向分类占用条 -->
+                    <div class="storage-bar" role="img" aria-label="存储分类占用分布">
+                      <template v-if="storageStats && storageStats.total_bytes > 0">
+                        <div
+                          v-for="seg in storageSegments"
+                          v-show="seg.bytes > 0"
+                          :key="seg.key"
+                          class="storage-seg"
+                          :style="{
+                            width: `${Math.max(seg.percent, 1.2)}%`,
+                            backgroundColor: seg.color,
+                          }"
+                          :title="`${seg.label}：${formatBytes(seg.bytes)}`"
+                        />
+                      </template>
+                    </div>
+
+                    <!-- 双列图例明细 -->
+                    <div v-if="storageStats" class="storage-legend">
+                      <div v-for="seg in storageSegments" :key="seg.key" class="legend-item">
+                        <span class="legend-left">
+                          <span class="legend-dot" :style="{ backgroundColor: seg.color }" />
+                          <span class="legend-name">{{ seg.label }}</span>
+                        </span>
+                        <span class="legend-val tabular-nums">{{ formatBytes(seg.bytes) }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 维护操作 1：清理残留文件 -->
+                  <div class="group-row action-row">
+                    <div class="toggle-text">
+                      <div class="row-title">清理残留文件</div>
+                      <div class="row-desc tabular-nums">
+                        {{
+                          storageStats
+                            ? hasReleasableOrphans
+                              ? `可释放 ${formatBytes(storageStats.orphans.bytes)}`
+                              : '当前无可清理残留（0 B）'
+                            : '扫描孤儿目录与未完成下载临时文件'
+                        }}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :disabled="cleaningStorage || !hasReleasableOrphans"
+                      @click="handleCleanupOrphans"
+                    >
+                      {{ cleaningStorage ? '清理中…' : '清理' }}
+                    </button>
+                  </div>
+
+                  <!-- 维护操作 2：旧图转为 WebP -->
+                  <div class="group-row action-row">
+                    <div class="toggle-text">
+                      <div class="row-title">旧图转为 WebP</div>
+                      <div class="row-desc">将存量 PNG / JPG 资产压缩为 WebP 并补齐封面缩略图</div>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :disabled="convertingWebp"
+                      @click="handleConvertWebp"
+                    >
+                      {{ convertingWebp ? '转换中…' : '开始转换' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5. 运行环境 -->
             <div v-else class="pane-section">
               <div class="group-block">
                 <div class="group-label">版本与更新</div>
@@ -695,88 +1214,6 @@ async function saveAll() {
                         直接下载安装包
                       </a>
                     </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="group-block">
-                <div class="group-label">存储空间</div>
-                <div class="grouped-card">
-                  <div class="group-row storage-overview-row">
-                    <div class="storage-top-line">
-                      <span class="row-title">本地数据占用</span>
-                      <span class="storage-total tabular-nums">
-                        {{ storageStats ? formatBytes(storageStats.total_bytes) : (storageLoading ? '计算中…' : '—') }}
-                      </span>
-                    </div>
-
-                    <!-- macOS 风格横向分类占用条 -->
-                    <div class="storage-bar" role="img" aria-label="存储分类占用分布">
-                      <template v-if="storageStats && storageStats.total_bytes > 0">
-                        <div
-                          v-for="seg in storageSegments"
-                          v-show="seg.bytes > 0"
-                          :key="seg.key"
-                          class="storage-seg"
-                          :style="{
-                            width: `${Math.max(seg.percent, 1.2)}%`,
-                            backgroundColor: seg.color,
-                          }"
-                          :title="`${seg.label}：${formatBytes(seg.bytes)}`"
-                        />
-                      </template>
-                    </div>
-
-                    <!-- 双列图例明细 -->
-                    <div v-if="storageStats" class="storage-legend">
-                      <div v-for="seg in storageSegments" :key="seg.key" class="legend-item">
-                        <span class="legend-left">
-                          <span class="legend-dot" :style="{ backgroundColor: seg.color }" />
-                          <span class="legend-name">{{ seg.label }}</span>
-                        </span>
-                        <span class="legend-val tabular-nums">{{ formatBytes(seg.bytes) }}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- 维护操作 1：清理残留文件 -->
-                  <div class="group-row action-row">
-                    <div class="toggle-text">
-                      <div class="row-title">清理残留文件</div>
-                      <div class="row-desc tabular-nums">
-                        {{
-                          storageStats
-                            ? hasReleasableOrphans
-                              ? `可释放 ${formatBytes(storageStats.orphans.bytes)}`
-                              : '当前无可清理残留（0 B）'
-                            : '扫描孤儿目录与未完成下载临时文件'
-                        }}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      class="btn btn-sm"
-                      :disabled="cleaningStorage || !hasReleasableOrphans"
-                      @click="handleCleanupOrphans"
-                    >
-                      {{ cleaningStorage ? '清理中…' : '清理' }}
-                    </button>
-                  </div>
-
-                  <!-- 维护操作 2：旧图转为 WebP -->
-                  <div class="group-row action-row">
-                    <div class="toggle-text">
-                      <div class="row-title">旧图转为 WebP</div>
-                      <div class="row-desc">将存量 PNG / JPG 资产压缩为 WebP 并补齐封面缩略图</div>
-                    </div>
-                    <button
-                      type="button"
-                      class="btn btn-sm"
-                      :disabled="convertingWebp"
-                      @click="handleConvertWebp"
-                    >
-                      {{ convertingWebp ? '转换中…' : '开始转换' }}
-                    </button>
                   </div>
                 </div>
               </div>
@@ -1069,13 +1506,20 @@ async function saveAll() {
   background: rgba(255, 255, 255, 0.035);
 }
 
-.source-row {
-  width: 100%;
+.source-row-wrap {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px 16px;
+  padding: 12px 16px;
+}
+
+.source-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0;
   border: none;
   background: transparent;
   text-align: left;
@@ -1097,6 +1541,76 @@ async function saveAll() {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.source-test-btn {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.accordion-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.accordion-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.source-test-feedback {
+  padding: 0 16px 10px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.source-test-feedback.ok {
+  color: var(--emerald-text);
+}
+
+.source-test-feedback.err {
+  color: var(--danger-text);
+}
+
+.source-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.source-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.source-field-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.clear-secret-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+  color: var(--danger-text);
+  opacity: 0.85;
+  cursor: pointer;
+}
+
+.clear-secret-btn:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
 
 .status-capsule {

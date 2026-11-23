@@ -11,9 +11,11 @@ body,
 #app {
   margin: 0;
   padding: 0;
+  border: 0;
+  outline: 0;
   width: 100%;
   min-height: 100vh;
-  background-color: var(--bg-canvas);
+  background-color: var(--bg-canvas, #0a0a0c);
   color: var(--text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

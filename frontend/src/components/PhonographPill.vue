@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useAudioStore } from '@/stores/audio'
+import { resolveGameBgmPlayback, useAudioStore } from '@/stores/audio'
 import { useLibraryStore } from '@/stores/library'
 import type { Game } from '@/types'
 
@@ -11,7 +11,9 @@ const props = defineProps<{
 const audio = useAudioStore()
 const store = useLibraryStore()
 
-const hasBgm = computed(() => Boolean((props.game.media?.bgm_path || '').trim()))
+const resolvedBgm = computed(() => resolveGameBgmPlayback(props.game, store.assetVersion))
+const hasBgm = computed(() => Boolean(resolvedBgm.value))
+const isRemoteBgm = computed(() => Boolean(resolvedBgm.value?.isRemote))
 const isThisTrack = computed(() => audio.currentGameId === props.game.id && Boolean(audio.currentBgmPath))
 const isPlayingThis = computed(() => isThisTrack.value && audio.isPlaying)
 const displayProgress = computed(() => (isThisTrack.value ? audio.progress : 0))
@@ -75,7 +77,17 @@ function handleVolumeInput(ev: Event) {
     <div class="phono-center">
       <div class="phono-head">
         <span class="phono-label">
-          {{ isPlayingThis ? 'OST 播放中' : audio.autoplayBlocked && isThisTrack ? '点击播放原声' : '主题原声' }}
+          {{
+            isPlayingThis
+              ? isRemoteBgm
+                ? 'OST 在线播放'
+                : 'OST 播放中'
+              : audio.autoplayBlocked && isThisTrack
+                ? '点击播放原声'
+                : isRemoteBgm
+                  ? '主题原声 · 在线'
+                  : '主题原声'
+          }}
         </span>
         <span class="phono-time tabular-nums">
           {{ formatTime(displayCurrent) }}

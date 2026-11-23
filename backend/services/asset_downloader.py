@@ -65,6 +65,14 @@ def _build_asset_headers(url: str) -> dict[str, str]:
         headers["Referer"] = "https://www.touchgal.io/"
     elif "vndb.org" in host:
         headers["Referer"] = "https://vndb.org/"
+    elif "dlsite.com" in host or "dlsite.jp" in host:
+        headers["Referer"] = "https://www.dlsite.com/"
+    elif "ymgal" in host:
+        headers["Referer"] = "https://www.ymgal.games/"
+    elif "kungal" in host:
+        headers["Referer"] = "https://www.kungal.com/"
+    elif "igdb.com" in host:
+        headers["Referer"] = "https://www.igdb.com/"
     return headers
 
 

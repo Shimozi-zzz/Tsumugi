@@ -18,6 +18,9 @@ from backend.scrapers.bilibili import (
     BILIBILI_USER_AGENT,
     search_bilibili_videos,
 )
+from backend.scrapers.dlsite import DLsiteScraper
+from backend.scrapers.igdb import IGDBScraper
+from backend.scrapers.kungal import KungalScraper
 from backend.scrapers.steam import (
     STEAM_CDN_BASE,
     STEAM_DETAIL_URL,
@@ -29,6 +32,10 @@ from backend.scrapers.steam import (
 from backend.scrapers.steamgriddb import SGDB_API_BASE, SteamGridDBScraper
 from backend.scrapers.touchgal import TouchGalScraper
 from backend.scrapers.vndb import VNDB_API_URL, VNDBScraper
+from backend.scrapers.ymgal import YMGalScraper
+from backend.services.media_service import (
+    download_pv_to_local as _media_download_pv_to_local,
+)
 from backend.services.task_manager import task_manager
 
 logger = logging.getLogger("tsumugi.scrapers.asset_search")
@@ -50,6 +57,10 @@ SOURCE_ALIASES: dict[str, str] = {
     "bangumi": "bangumi",
     "bgm": "bangumi",
     "steam": "steam",
+    "ymgal": "ymgal",
+    "kungal": "kungal",
+    "dlsite": "dlsite",
+    "igdb": "igdb",
     "touchgal": "touchgal",
     "tgal": "touchgal",
     "video": "video",
@@ -77,6 +88,7 @@ class AssetCandidate(BaseModel):
 
     id: str
     url: str
+    fallback_urls: list[str] = []
     thumb_url: str
     source: str
     platform: str = ""
@@ -141,9 +153,10 @@ async def _fetch_sgdb_candidates(
     asset_type: AssetType,
     query: str,
     scraper: SteamGridDBScraper,
+    steam_appid: str = "",
 ) -> tuple[list[AssetCandidate], list[str]]:
     if not scraper.api_key:
-        return [], ["尚未配置 SteamGridDB API Key，可在全局设置 -> 数据源管理中填写"]
+        return [], ["尚未配置 SteamGridDB API Key，可在全局设置 -> 元数据刮削源中填写"]
 
     if asset_type == "pv":
         return [], []
@@ -159,10 +172,18 @@ async def _fetch_sgdb_candidates(
 
     try:
         async with scraper._build_client(headers=scraper._auth_headers(), timeout=12.0) as client:
-            search_resp = await client.get(f"{SGDB_API_BASE}/search/autocomplete/{quote(query)}")
-            if search_resp.status_code != 200:
-                return [], []
-            games = search_resp.json().get("data") or []
+            games: list[dict[str, Any]] = []
+            if steam_appid and steam_appid.strip().isdigit():
+                by_steam = await client.get(f"{SGDB_API_BASE}/games/steam/{steam_appid.strip()}")
+                if by_steam.status_code == 200:
+                    g = by_steam.json().get("data")
+                    if isinstance(g, dict) and g.get("id"):
+                        games.append(g)
+
+            if not games and query:
+                search_resp = await client.get(f"{SGDB_API_BASE}/search/autocomplete/{quote(query)}")
+                if search_resp.status_code == 200:
+                    games = search_resp.json().get("data") or []
             if not games:
                 return [], []
 
@@ -628,7 +649,7 @@ async def _fetch_touchgal_candidates(
     candidates: list[AssetCandidate] = []
     seen_urls: set[str] = set()
     for it in items:
-        raw_url = it.hero_bg_url if asset_type == "hero" else it.cover_url
+        raw_url = it.background_url if asset_type == "hero" else it.cover_url
         url = _normalize_url(raw_url)
         if not url or url in seen_urls:
             continue
@@ -639,6 +660,36 @@ async def _fetch_touchgal_candidates(
                 url=url,
                 thumb_url=url,
                 source="TouchGal",
+                title=it.title,
+                mime_hint="image",
+            )
+        )
+    return candidates
+
+
+async def _fetch_generic_scraper_image_candidates(
+    asset_type: AssetType,
+    query: str,
+    scraper,
+    source_label: str,
+) -> list[AssetCandidate]:
+    if asset_type not in ("cover", "spine", "hero"):
+        return []
+    items = await scraper.search(query, limit=8)
+    candidates: list[AssetCandidate] = []
+    seen_urls: set[str] = set()
+    for it in items:
+        raw_url = (it.background_url or it.cover_url) if asset_type == "hero" else it.cover_url
+        url = _normalize_url(raw_url)
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        candidates.append(
+            AssetCandidate(
+                id=_make_id(source_label, url),
+                url=url,
+                thumb_url=url,
+                source=source_label,
                 title=it.title,
                 mime_hint="image",
             )
@@ -748,6 +799,7 @@ async def _fetch_steam_pv_candidates(
         AssetCandidate(
             id=tr["id"],
             url=tr["url"],
+            fallback_urls=list(tr.get("fallback_urls") or []),
             thumb_url=tr["thumb_url"],
             source="Steam",
             platform="Steam",
@@ -961,13 +1013,32 @@ async def search_asset_candidates(
     bgm = BangumiScraper(proxy_url=proxy_url, api_key=bgm_key, allow_nsfw=allow_nsfw)
     steam = SteamScraper(proxy_url=proxy_url, allow_nsfw=allow_nsfw)
     tgal = TouchGalScraper(proxy_url=proxy_url, api_key=tgal_key, allow_nsfw=allow_nsfw)
+    ymgal = YMGalScraper(
+        proxy_url=proxy_url,
+        client_id=str(keys.get("ymgal_client_id") or ""),
+        client_secret=str(keys.get("ymgal_client_secret") or ""),
+        allow_nsfw=allow_nsfw,
+    )
+    kungal = KungalScraper(
+        proxy_url=proxy_url,
+        api_key=str(keys.get("kungal_token") or ""),
+        base_url=str(keys.get("kungal_base_url") or ""),
+        allow_nsfw=allow_nsfw,
+    )
+    dlsite = DLsiteScraper(proxy_url=proxy_url, allow_nsfw=allow_nsfw)
+    igdb = IGDBScraper(
+        proxy_url=proxy_url,
+        client_id=str(keys.get("igdb_client_id") or ""),
+        client_secret=str(keys.get("igdb_client_secret") or ""),
+        allow_nsfw=allow_nsfw,
+    )
 
     if asset_type == "logo":
         default_sources = ["steamgriddb", "steam"]
     elif asset_type == "hero":
-        default_sources = ["steamgriddb", "vndb", "steam", "touchgal"]
+        default_sources = ["steamgriddb", "vndb", "steam", "kungal", "igdb"]
     else:
-        default_sources = ["steamgriddb", "vndb", "bangumi", "steam", "touchgal"]
+        default_sources = ["steamgriddb", "ymgal", "vndb", "bangumi", "kungal", "dlsite", "steam"]
 
     target_sources = default_sources if norm_source in ("all", "auto") else [norm_source]
 
@@ -975,7 +1046,9 @@ async def search_asset_candidates(
 
     async def _run_source(src_name: str) -> list[AssetCandidate]:
         if src_name == "steamgriddb":
-            items, w = await _fetch_sgdb_candidates(asset_type, cleaned_q, sgdb)
+            items, w = await _fetch_sgdb_candidates(
+                asset_type, cleaned_q, sgdb, steam_appid=steam_appid
+            )
             warnings.extend(w)
             return items
         if src_name == "vndb":
@@ -984,6 +1057,16 @@ async def search_asset_candidates(
             return await _fetch_bangumi_candidates(asset_type, cleaned_q, bgm)
         if src_name == "steam":
             return await _fetch_steam_candidates(asset_type, cleaned_q, steam)
+        if src_name == "ymgal":
+            return await _fetch_generic_scraper_image_candidates(asset_type, cleaned_q, ymgal, "YMGal")
+        if src_name == "kungal":
+            return await _fetch_generic_scraper_image_candidates(asset_type, cleaned_q, kungal, "Kungal")
+        if src_name == "dlsite":
+            return await _fetch_generic_scraper_image_candidates(asset_type, cleaned_q, dlsite, "DLsite")
+        if src_name == "igdb":
+            if not igdb.is_configured():
+                return []
+            return await _fetch_generic_scraper_image_candidates(asset_type, cleaned_q, igdb, "IGDB")
         if src_name == "touchgal":
             return await _fetch_touchgal_candidates(asset_type, cleaned_q, tgal)
         return []
@@ -1024,7 +1107,7 @@ async def search_asset_candidates(
 
 def is_direct_pv_url(url: str, mime_hint: str = "") -> bool:
     hint = (mime_hint or "").strip().lower()
-    if hint in ("hls", "mp4"):
+    if hint in ("hls", "mp4", "webm"):
         return True
     if hint == "video_page":
         return False
@@ -1032,207 +1115,21 @@ def is_direct_pv_url(url: str, mime_hint: str = "") -> bool:
     return suffix in DIRECT_VIDEO_EXTS
 
 
-def _direct_video_ext(url: str, mime_hint: str = "") -> str:
-    """若为直链 .mp4 或 .webm 则返回对应后缀，否则返回空字符串交由 yt-dlp（支持 .m3u8/.mpd/网页）"""
-    suffix = Path(urlparse(url).path).suffix.lower()
-    if suffix in (".mp4", ".webm"):
-        return suffix
-    hint = (mime_hint or "").strip().lower()
-    if hint == "mp4" and suffix not in (".m3u8", ".mpd"):
-        return ".mp4"
-    if hint == "webm" and suffix not in (".m3u8", ".mpd"):
-        return ".webm"
-    return ""
-
-
-async def _download_direct_video_stream(
-    game_id: int,
-    url: str,
-    game_dir: Path,
-    proxy_url: str,
-    ext: str = ".mp4",
-) -> Path:
-    """对直链 .mp4 / .webm 使用 httpx 流式下载写入 pv.downloading.{ext} 并实时回写进度"""
-    tmp_path = game_dir / f"pv.downloading{ext}"
-    _cleanup_pv_temp_files(game_dir)
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        ),
-        "Accept": "*/*",
-    }
-
-    async with httpx.AsyncClient(
-        headers=headers,
-        timeout=httpx.Timeout(20.0, read=120.0),
-        follow_redirects=True,
-        proxy=(proxy_url.strip() or None),
-    ) as client:
-        async with client.stream("GET", url) as resp:
-            resp.raise_for_status()
-            total_raw = resp.headers.get("content-length")
-            total_bytes = int(total_raw) if (total_raw and total_raw.isdigit()) else 0
-            downloaded = 0
-            last_pct = -1
-
-            with tmp_path.open("wb") as fp:
-                async for chunk in resp.aiter_bytes(chunk_size=65536):
-                    if not chunk:
-                        continue
-                    fp.write(chunk)
-                    downloaded += len(chunk)
-                    if total_bytes > 0:
-                        pct = min(99, int(downloaded * 100 / total_bytes))
-                        if pct != last_pct:
-                            last_pct = pct
-                            task_manager.update_progress(game_id, "pv", pct, "正在下载宣传片…")
-
-    if not tmp_path.exists() or tmp_path.stat().st_size == 0:
-        _cleanup_pv_temp_files(game_dir)
-        raise RuntimeError("下载到的宣传片视频文件为空")
-
-    return tmp_path
-
-
-def _cleanup_pv_temp_files(game_dir: Path) -> None:
-    for temp in game_dir.glob("pv.downloading*"):
-        if temp.is_file():
-            try:
-                temp.unlink()
-            except OSError:
-                pass
-
-
-def _cleanup_legacy_pv_files(game_dir: Path, keep_name: str = "pv.mp4") -> None:
-    for old in game_dir.glob("pv.*"):
-        if old.is_file() and old.name != keep_name:
-            try:
-                old.unlink()
-            except OSError:
-                pass
-
-
-def _download_pv_with_ytdlp_sync(
-    game_id: int,
-    url: str,
-    game_dir: Path,
-    proxy_url: str,
-) -> Path:
-    """使用 yt-dlp 下载宣传片至 pv.downloading.*（自动检测 ffmpeg，实时回写进度）"""
-    _cleanup_pv_temp_files(game_dir)
-    has_ffmpeg = bool(shutil.which("ffmpeg"))
-
-    def _progress_hook(d: dict[str, Any]) -> None:
-        st = d.get("status")
-        if st == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-            done = d.get("downloaded_bytes") or 0
-            if total and total > 0:
-                pct = min(99, int(done * 100 / total))
-                task_manager.update_progress(game_id, "pv", pct, "正在下载宣传片…")
-            else:
-                frag_idx = d.get("fragment_index")
-                frag_cnt = d.get("fragment_count")
-                if frag_idx and frag_cnt:
-                    pct = min(99, int(frag_idx * 100 / frag_cnt))
-                    task_manager.update_progress(game_id, "pv", pct, "正在下载宣传片分片…")
-        elif st == "finished":
-            task_manager.update_progress(game_id, "pv", 99, "正在封装本地视频…")
-
-    if has_ffmpeg:
-        fmt = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"
-    else:
-        fmt = "best[ext=mp4][height<=720]/best[ext=mp4]/best[height<=720]"
-
-    ydl_opts: dict[str, Any] = {
-        "format": fmt,
-        "outtmpl": str(game_dir / "pv.downloading.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "logger": _SILENT_YDL_LOGGER,
-        "socket_timeout": 20,
-        "retries": 1,
-        "overwrites": True,
-        "nopart": True,
-        "progress_hooks": [_progress_hook],
-    }
-    if has_ffmpeg:
-        ydl_opts["merge_output_format"] = "mp4"
-    if proxy_url:
-        ydl_opts["proxy"] = proxy_url
-    if "bilibili.com" in url.lower():
-        ydl_opts["http_headers"] = {
-            "Referer": BILIBILI_REFERER,
-            "User-Agent": BILIBILI_USER_AGENT,
-        }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        if not info:
-            raise RuntimeError("yt-dlp 未返回有效视频信息")
-
-    for candidate in sorted(game_dir.glob("pv.downloading.*")):
-        if candidate.is_file() and candidate.suffix.lower() in SAVED_VIDEO_EXTS and candidate.stat().st_size > 0:
-            return candidate
-    for candidate in sorted(game_dir.glob("pv.downloading.*")):
-        if candidate.is_file() and candidate.stat().st_size > 0:
-            return candidate
-
-    raise FileNotFoundError("未能定位下载后的宣传片临时文件")
-
-
 async def download_pv_to_local(
     game_id: int,
     url: str,
     proxy_url: str = "",
     mime_hint: str = "",
+    fallback_urls: list[str] | None = None,
 ) -> str:
-    """
-    强制本地化下载宣传片 PV 至 data/assets/{game_id}/pv.mp4（先写临时文件再原子重命名）：
-    - 直链 .mp4：直接通过 httpx 流式下载
-    - Bilibili / YouTube / .m3u8：通过 yt-dlp（asyncio.to_thread，按 ffmpeg 环境择优格式）下载
-    - 全程实时向 task_manager 回写下载状态与进度
-    返回 data/ 相对路径 'assets/{game_id}/pv.mp4'
-    """
-    cleaned = (url or "").strip()
-    if not cleaned.startswith(("http://", "https://")):
-        task_manager.mark_error(game_id, "pv", "无效的视频链接")
-        raise ValueError("无效的视频链接")
-
-    game_dir = ASSETS_DIR / str(game_id)
-    game_dir.mkdir(parents=True, exist_ok=True)
-    direct_ext = _direct_video_ext(cleaned, mime_hint)
-    final_ext = direct_ext if direct_ext else ".mp4"
-    final_path = game_dir / f"pv{final_ext}"
-
-    task_manager.set_task(game_id, "pv", "downloading", 0, "正在下载宣传片…")
-    try:
-        if direct_ext:
-            tmp_file = await _download_direct_video_stream(
-                game_id, cleaned, game_dir, proxy_url, ext=direct_ext
-            )
-        else:
-            tmp_file = await asyncio.wait_for(
-                asyncio.to_thread(_download_pv_with_ytdlp_sync, game_id, cleaned, game_dir, proxy_url),
-                timeout=180.0,
-            )
-            if tmp_file.suffix.lower() in (".mp4", ".webm"):
-                final_path = game_dir / f"pv{tmp_file.suffix.lower()}"
-
-        os.replace(tmp_file, final_path)
-        _cleanup_pv_temp_files(game_dir)
-        _cleanup_legacy_pv_files(game_dir, keep_name=final_path.name)
-
-        rel_path = final_path.relative_to(DATA_DIR).as_posix()
-        task_manager.mark_done(game_id, "pv", "宣传片已缓存到本地")
-        return rel_path
-    except Exception as exc:
-        _cleanup_pv_temp_files(game_dir)
-        task_manager.mark_error(game_id, "pv", f"下载失败: {exc}")
-        raise
+    """委托至 media_service.download_pv_to_local（直链优先 + HLS 兼容重试 + 中文错误映射）"""
+    return await _media_download_pv_to_local(
+        game_id=game_id,
+        url=url,
+        proxy_url=proxy_url,
+        mime_hint=mime_hint,
+        fallback_urls=fallback_urls,
+    )
 
 
 async def download_pv_video(
@@ -1240,6 +1137,7 @@ async def download_pv_video(
     url: str,
     proxy_url: str = "",
     mime_hint: str = "",
+    fallback_urls: list[str] | None = None,
 ) -> str:
     """向后兼容别名：统一委托给 download_pv_to_local"""
     return await download_pv_to_local(
@@ -1247,4 +1145,5 @@ async def download_pv_video(
         url=url,
         proxy_url=proxy_url,
         mime_hint=mime_hint,
+        fallback_urls=fallback_urls,
     )

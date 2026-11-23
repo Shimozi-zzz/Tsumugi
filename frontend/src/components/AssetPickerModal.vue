@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { assetProxyUrl, scraperApi } from '@/api/client'
 import { useLibraryStore } from '@/stores/library'
 import { useTaskStore } from '@/stores/tasks'
-import type { AssetCandidate, Game, PickerAssetType } from '@/types'
+import type { AssetCandidate, Game, MediaSaveMode, PickerAssetType } from '@/types'
 
 const props = defineProps<{
   game: Game
@@ -42,10 +42,13 @@ interface SourceOption {
 const IMAGE_SOURCES: SourceOption[] = [
   { key: 'all', label: '全部' },
   { key: 'steamgriddb', label: 'SteamGridDB' },
+  { key: 'ymgal', label: 'YMGal' },
+  { key: 'kungal', label: 'Kungal' },
+  { key: 'touchgal', label: 'TouchGal' },
   { key: 'vndb', label: 'VNDB' },
   { key: 'bangumi', label: 'Bangumi' },
+  { key: 'dlsite', label: 'DLsite' },
   { key: 'steam', label: 'Steam' },
-  { key: 'touchgal', label: 'TouchGal' },
 ]
 
 const PV_SOURCES: SourceOption[] = [
@@ -74,6 +77,9 @@ const quickKeywords = computed(() => {
 const query = ref((props.game.sub_title || props.game.title || '').trim())
 const selectedSource = ref<string>(
   props.assetType === 'logo' ? 'steamgriddb' : props.assetType === 'pv' ? 'auto' : 'all',
+)
+const pvSaveMode = ref<Exclude<MediaSaveMode, 'none'>>(
+  props.game.media?.pv_mode === 'download' ? 'download' : 'link_only',
 )
 const loading = ref(false)
 const searchedOnce = ref(false)
@@ -107,7 +113,7 @@ async function runSearch() {
   brokenIds.value = new Set()
   try {
     const res = await scraperApi.searchAssets(props.assetType, q, selectedSource.value, {
-      steam_appid: isPvMode.value ? steamAppId : '',
+      steam_appid: steamAppId,
       alt_title: isPvMode.value ? altTitle : '',
     })
     if (seq !== searchSeq) return
@@ -143,21 +149,28 @@ async function applyCandidate(item: AssetCandidate) {
   if (applyingId.value) return
   applyingId.value = item.id
   try {
+    const mode: MediaSaveMode = props.assetType === 'pv' ? pvSaveMode.value : 'download'
     const updated = await scraperApi.applyAsset(props.game.id, {
       asset_type: props.assetType,
       url: item.url,
+      fallback_urls: item.fallback_urls || [],
       source: item.source,
       mime_hint: item.mime_hint,
-      async_mode: props.assetType === 'pv',
+      mode,
+      async_mode: props.assetType === 'pv' && mode === 'download',
     })
     store.syncGameFromServer(updated)
-    if (props.assetType === 'pv' && updated.download_task) {
+    if (props.assetType === 'pv' && mode === 'download' && updated.download_task) {
       taskStore.trackTask(updated.download_task, {
         url: item.url,
         source: item.source,
         mime_hint: item.mime_hint,
+        fallback_urls: item.fallback_urls || [],
       })
-      store.notify('宣传片已加入后台下载，完成后自动更新', 'info')
+      store.notify('宣传片已加入后台下载，期间可直接在线播放', 'info')
+    } else if (props.assetType === 'pv' && mode === 'link_only') {
+      taskStore.dismissTask(props.game.id, 'pv')
+      store.notify('已保存宣传片在线链接（不占用本地硬盘空间）', 'success')
     } else {
       store.notify(`已更新${SLOT_SHORT_NAMES[props.assetType]}`, 'success')
     }
@@ -184,9 +197,10 @@ function formatDims(item: AssetCandidate): string {
 }
 
 function pvHintLabel(item: AssetCandidate): string {
-  if (item.mime_hint === 'hls') return 'HLS 直链'
   if (item.mime_hint === 'mp4') return 'MP4 直链'
-  return '下载本地 MP4'
+  if (item.mime_hint === 'webm') return 'WebM 直链'
+  if (item.mime_hint === 'hls') return 'HLS 流'
+  return '在线视频'
 }
 
 const showSgdbKeyEmpty = computed(
@@ -278,17 +292,38 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="source-bar" role="tablist">
-          <button
-            v-for="src in sourceOptions"
-            :key="src.key"
-            type="button"
-            class="source-pill"
-            :class="{ active: selectedSource === src.key }"
-            @click="selectSource(src.key)"
-          >
-            {{ src.label }}
-          </button>
+        <div class="source-bar-wrap">
+          <div class="source-bar" role="tablist">
+            <button
+              v-for="src in sourceOptions"
+              :key="src.key"
+              type="button"
+              class="source-pill"
+              :class="{ active: selectedSource === src.key }"
+              @click="selectSource(src.key)"
+            >
+              {{ src.label }}
+            </button>
+          </div>
+
+          <div v-if="isPvMode" class="pv-save-mode-bar" role="radiogroup" aria-label="PV 保存方式">
+            <button
+              type="button"
+              class="pv-mode-opt"
+              :class="{ active: pvSaveMode === 'link_only' }"
+              @click="pvSaveMode = 'link_only'"
+            >
+              仅保留链接
+            </button>
+            <button
+              type="button"
+              class="pv-mode-opt"
+              :class="{ active: pvSaveMode === 'download' }"
+              @click="pvSaveMode = 'download'"
+            >
+              下载到本地
+            </button>
+          </div>
         </div>
       </div>
 
@@ -560,6 +595,44 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.source-bar-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pv-save-mode-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.pv-mode-opt {
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.pv-mode-opt:hover {
+  color: var(--text-primary);
+}
+
+.pv-mode-opt.active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #f5f5f7;
+  font-weight: 500;
 }
 
 .source-bar {

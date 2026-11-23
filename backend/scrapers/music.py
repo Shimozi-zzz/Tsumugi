@@ -14,6 +14,7 @@ from backend.scrapers.bilibili import (
     BILIBILI_USER_AGENT,
     search_bilibili_videos,
 )
+from backend.services.media_service import MediaDownloadError, format_download_error_zh
 
 logger = logging.getLogger("tsumugi.scrapers.music")
 
@@ -330,43 +331,51 @@ async def _download_direct_audio(
 
 
 def _download_with_ytdlp_sync(url: str, game_dir: Path, proxy_url: str) -> Path:
-    """使用 yt-dlp 直接下载浏览器可播原生音频流（bestaudio[ext=m4a]/bestaudio），不依赖 ffmpeg"""
+    """使用 yt-dlp 下载原生音频流（bestaudio/best），遇到格式不可用自动降级重试"""
     _cleanup_old_bgm(game_dir)
-    ydl_opts: dict[str, Any] = {
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
-        "outtmpl": str(game_dir / "bgm.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "logger": _SILENT_YDL_LOGGER,
-        "socket_timeout": 15,
-        "retries": 1,
-        "overwrites": True,
-        "nopart": True,
-    }
-    if proxy_url:
-        ydl_opts["proxy"] = proxy_url
-    if "bilibili.com" in url.lower():
-        ydl_opts["http_headers"] = {
-            "Referer": BILIBILI_REFERER,
-            "User-Agent": BILIBILI_USER_AGENT,
+
+    def _run_once(fmt: str) -> Path:
+        ydl_opts: dict[str, Any] = {
+            "format": fmt,
+            "outtmpl": str(game_dir / "bgm.%(ext)s"),
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "logger": _SILENT_YDL_LOGGER,
+            "socket_timeout": 15,
+            "retries": 1,
+            "overwrites": True,
+            "nopart": True,
         }
+        if proxy_url:
+            ydl_opts["proxy"] = proxy_url
+        if "bilibili.com" in url.lower():
+            ydl_opts["http_headers"] = {
+                "Referer": BILIBILI_REFERER,
+                "User-Agent": BILIBILI_USER_AGENT,
+            }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        if not info:
-            raise RuntimeError("yt-dlp 未返回有效媒体信息")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if not info:
+                raise RuntimeError("yt-dlp 未返回有效媒体信息")
 
-    for candidate in sorted(game_dir.glob("bgm.*")):
-        if candidate.is_file() and candidate.suffix.lower() in DIRECT_AUDIO_EXTS:
-            return candidate
+        for candidate in sorted(game_dir.glob("bgm.*")):
+            if candidate.is_file() and candidate.suffix.lower() in DIRECT_AUDIO_EXTS:
+                return candidate
+        for candidate in sorted(game_dir.glob("bgm.*")):
+            if candidate.is_file():
+                return candidate
+        raise FileNotFoundError("未能定位下载后的原声音频文件")
 
-    # 兜底：若下载后缀不在标准集合中仍返回实际生成文件
-    for candidate in sorted(game_dir.glob("bgm.*")):
-        if candidate.is_file():
-            return candidate
-
-    raise FileNotFoundError("未能定位下载后的原声音频文件")
+    try:
+        return _run_once("bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best")
+    except Exception as exc:
+        if "requested format is not available" in str(exc).lower():
+            logger.warning("BGM yt-dlp format unavailable for %s (%s); retrying with b/ba/best", url, exc)
+            _cleanup_old_bgm(game_dir)
+            return _run_once("b/ba/best")
+        raise
 
 
 async def download_op_music(
@@ -406,7 +415,9 @@ async def download_op_music(
             last_error = exc
 
     if saved_file is None:
-        raise RuntimeError(f"原声下载失败: {last_error or '无可用音频地址'}")
+        logger.error("OP audio download failed for game_id=%s src=%s prev=%s: %s", game_id, src, prev, last_error)
+        zh_msg = format_download_error_zh(last_error or "无可用音频地址", media_kind="audio")
+        raise MediaDownloadError(zh_msg, raw_error=str(last_error or ""))
 
     return saved_file.relative_to(DATA_DIR).as_posix()
 

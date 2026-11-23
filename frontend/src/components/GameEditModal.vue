@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   assetUrl,
   isDesktopBridgeAvailable,
@@ -11,7 +11,7 @@ import {
 } from '@/api/client'
 import AssetPickerModal from '@/components/AssetPickerModal.vue'
 import MetadataPickerModal from '@/components/MetadataPickerModal.vue'
-import { useAudioStore } from '@/stores/audio'
+import { PAUSE_MEDIA_EVENT, useAudioStore } from '@/stores/audio'
 import { useLibraryStore } from '@/stores/library'
 import { useTaskStore } from '@/stores/tasks'
 import type {
@@ -27,8 +27,9 @@ const store = useLibraryStore()
 const audioStore = useAudioStore()
 const taskStore = useTaskStore()
 const game = computed(() => store.activeGame)
-const tab = ref<'meta' | 'media' | 'launch'>('meta')
+const tab = ref<'meta' | 'media' | 'launch'>(store.editInitialTab || 'meta')
 const saving = ref(false)
+const mediaActionBusy = ref(false)
 const uploadingType = ref<string>('')
 const confirmDelete = ref(false)
 const hasBridge = isDesktopBridgeAvailable()
@@ -186,23 +187,36 @@ function togglePreviewCandidate(item: MusicCandidate) {
   })
 }
 
-async function downloadCandidate(item: MusicCandidate) {
+async function downloadCandidate(item: MusicCandidate, mode: 'link_only' | 'download' = 'download') {
   if (!game.value || musicDownloadingId.value) return
   stopPreviewAudio()
-  musicDownloadingId.value = item.id
+  musicDownloadingId.value = `${item.id}:${mode}`
   try {
     const res = await scraperApi.downloadMusic(game.value.id, {
       source_url: item.source_url,
       preview_url: item.preview_url,
+      mode,
+      async_mode: mode === 'download',
     })
     form.media.bgm_path = res.bgm_path
     const fresh = await store.refreshGame(game.value.id)
-    if (fresh) {
-      void audioStore.syncGameBgm(fresh, { autoPlay: false, cacheBust: store.assetVersion })
+    if (mode === 'download' && res.download_task) {
+      taskStore.trackTask(res.download_task)
+      store.notify(`已加入后台下载主题曲《${item.title}》，期间可直接在线播放`, 'info')
+    } else if (mode === 'link_only') {
+      taskStore.dismissTask(game.value.id, 'bgm')
+      if (fresh) {
+        void audioStore.syncGameBgm(fresh, { autoPlay: false, cacheBust: store.assetVersion })
+      }
+      store.notify(`已保存主题曲在线链接《${item.title}》`, 'success')
+    } else {
+      if (fresh) {
+        void audioStore.syncGameBgm(fresh, { autoPlay: false, cacheBust: store.assetVersion })
+      }
+      store.notify(`已下载并绑定原声《${item.title}》`, 'success')
     }
-    store.notify(`已下载并绑定原声《${item.title}》`, 'success')
   } catch (err) {
-    store.notify(err instanceof Error ? err.message : '下载原声失败', 'error')
+    store.notify(err instanceof Error ? err.message : '保存主题曲失败', 'error')
   } finally {
     musicDownloadingId.value = ''
   }
@@ -275,9 +289,122 @@ async function clearBgm() {
   stopPreviewAudio()
   form.media.bgm_path = ''
   if (game.value) {
-    await store.updateGamePatch(game.value.id, { media: { bgm_path: '' } })
+    await store.updateGamePatch(game.value.id, {
+      media: { bgm_path: '', bgm_remote_url: '', bgm_mode: 'none' },
+    })
+    taskStore.dismissTask(game.value.id, 'bgm')
     void audioStore.stopSmooth()
     store.notify('已清除该作品的绑定原声', 'info')
+  }
+}
+
+function isHttpUrl(raw?: string | null): boolean {
+  return /^https?:\/\//i.test((raw || '').trim())
+}
+
+const pvLocalActive = computed(() => {
+  const v = (form.media.pv_url_or_path || '').trim()
+  return Boolean(v && !isHttpUrl(v))
+})
+const pvRemoteUrl = computed(() => {
+  const stored = (game.value?.media?.pv_remote_url || '').trim()
+  if (isHttpUrl(stored)) return stored
+  const typed = (form.media.pv_url_or_path || '').trim()
+  return isHttpUrl(typed) ? typed : ''
+})
+const bgmLocalActive = computed(() => {
+  const v = (form.media.bgm_path || '').trim()
+  return Boolean(v && !isHttpUrl(v))
+})
+const bgmRemoteUrl = computed(() => {
+  const stored = (game.value?.media?.bgm_remote_url || '').trim()
+  if (isHttpUrl(stored)) return stored
+  const typed = (form.media.bgm_path || '').trim()
+  return isHttpUrl(typed) ? typed : ''
+})
+
+async function cacheRemoteMedia(assetType: 'pv' | 'bgm') {
+  if (!game.value || mediaActionBusy.value) return
+  const typedUrl = assetType === 'pv' ? form.media.pv_url_or_path.trim() : form.media.bgm_path.trim()
+  const remote = assetType === 'pv' ? pvRemoteUrl.value : bgmRemoteUrl.value
+  if (!remote) {
+    store.notify(assetType === 'pv' ? '请先填写或查找在线宣传片链接' : '请先填写或查找在线主题曲链接', 'warning')
+    return
+  }
+  mediaActionBusy.value = true
+  try {
+    // 若用户在输入框里刚粘贴了新链接尚未保存，先落库再触发下载
+    if (isHttpUrl(typedUrl) && typedUrl !== (assetType === 'pv' ? game.value.media?.pv_remote_url : game.value.media?.bgm_remote_url)) {
+      await store.updateGamePatch(game.value.id, {
+        media:
+          assetType === 'pv'
+            ? { pv_url_or_path: typedUrl, pv_remote_url: typedUrl, pv_mode: 'link_only' }
+            : { bgm_path: typedUrl, bgm_remote_url: typedUrl, bgm_mode: 'link_only' },
+      })
+    }
+    const res = await mediaApi.cacheRemote(game.value.id, assetType)
+    store.syncGameFromServer(res)
+    if (assetType === 'pv') {
+      form.media.pv_url_or_path = res.media?.pv_url_or_path || form.media.pv_url_or_path
+      taskStore.trackTask(
+        res.download_task || {
+          game_id: game.value.id,
+          asset_type: 'pv',
+          status: 'queued',
+          progress: 0,
+          message: '等待下载宣传片…',
+        },
+        { url: remote },
+      )
+      store.notify('宣传片已加入后台下载，完成后自动切换本地播放', 'info')
+    } else {
+      form.media.bgm_path = res.media?.bgm_path || form.media.bgm_path
+      taskStore.trackTask(
+        res.download_task || {
+          game_id: game.value.id,
+          asset_type: 'bgm',
+          status: 'queued',
+          progress: 0,
+          message: '等待下载主题曲…',
+        },
+      )
+      store.notify('主题曲已加入后台下载，完成后自动切换本地播放', 'info')
+    }
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '触发本地下载失败', 'error')
+  } finally {
+    mediaActionBusy.value = false
+  }
+}
+
+async function dropLocalCacheMedia(assetType: 'pv' | 'bgm') {
+  if (!game.value || mediaActionBusy.value) return
+  mediaActionBusy.value = true
+  try {
+    const updated = await mediaApi.dropLocalCache(game.value.id, assetType)
+    store.syncGameFromServer(updated)
+    if (assetType === 'pv') {
+      form.media.pv_url_or_path = updated.media?.pv_url_or_path || ''
+      store.notify(
+        updated.media?.pv_remote_url
+          ? '已删除本地视频缓存，保留在线链接可直接播放'
+          : '已删除本地视频文件',
+        'success',
+      )
+    } else {
+      form.media.bgm_path = updated.media?.bgm_path || ''
+      void audioStore.syncGameBgm(updated, { autoPlay: false, cacheBust: store.assetVersion })
+      store.notify(
+        updated.media?.bgm_remote_url
+          ? '已删除本地音频缓存，保留在线链接可直接播放'
+          : '已删除本地音频文件',
+        'success',
+      )
+    }
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '删除本地缓存失败', 'error')
+  } finally {
+    mediaActionBusy.value = false
   }
 }
 
@@ -344,6 +471,11 @@ const clearingAsset = ref<string>('')
 const showMetadataPicker = ref(false)
 const metadataFocusField = ref<MetadataFieldKey | null>(null)
 const pvTask = computed(() => taskStore.getTask(game.value?.id, 'pv'))
+const bgmTask = computed(() => taskStore.getTask(game.value?.id, 'bgm'))
+
+onMounted(() => {
+  store.editInitialTab = 'meta'
+})
 
 function openMetadataPicker(focus: MetadataFieldKey | null = null) {
   metadataFocusField.value = focus
@@ -401,8 +533,17 @@ function handleMetadataApplied(patch: MetadataApplyPatch) {
 watch(
   () => game.value?.media?.pv_url_or_path,
   (nextPath) => {
-    if (nextPath && nextPath !== form.media.pv_url_or_path) {
+    if (nextPath !== undefined && nextPath !== form.media.pv_url_or_path) {
       form.media.pv_url_or_path = nextPath
+    }
+  },
+)
+
+watch(
+  () => game.value?.media?.bgm_path,
+  (nextPath) => {
+    if (nextPath !== undefined && nextPath !== form.media.bgm_path) {
+      form.media.bgm_path = nextPath
     }
   },
 )
@@ -473,7 +614,14 @@ const assetCards = computed(() => {
   ]
 })
 
-onBeforeUnmount(stopPreviewAudio)
+onMounted(() => {
+  window.addEventListener(PAUSE_MEDIA_EVENT, stopPreviewAudio)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener(PAUSE_MEDIA_EVENT, stopPreviewAudio)
+  stopPreviewAudio()
+})
 </script>
 
 <template>
@@ -898,7 +1046,12 @@ onBeforeUnmount(stopPreviewAudio)
             <h3 class="group-title">宣传片与主题原声</h3>
             <div class="field">
               <div class="label-row">
-                <label>官方宣传片 PV（.m3u8 / .mp4 或本地视频）</label>
+                <div class="media-label-with-badge">
+                  <label>官方宣传片 PV</label>
+                  <span v-if="pvLocalActive" class="media-state-pill is-local">本地缓存</span>
+                  <span v-else-if="pvRemoteUrl" class="media-state-pill is-remote">仅在线链接</span>
+                  <span v-else class="media-state-pill">未配置</span>
+                </div>
                 <button
                   type="button"
                   class="lock-icon-btn"
@@ -920,7 +1073,7 @@ onBeforeUnmount(stopPreviewAudio)
                 <input
                   v-model="form.media.pv_url_or_path"
                   class="input"
-                  placeholder="https://.../movie.m3u8 或上传本地视频"
+                  placeholder="https://.../movie.mp4 / .m3u8 或上传本地视频"
                 />
                 <label class="btn btn-sm">
                   <span>{{ uploadingType === 'pv' ? '上传中…' : '上传视频' }}</span>
@@ -940,6 +1093,45 @@ onBeforeUnmount(stopPreviewAudio)
                 </button>
               </div>
 
+              <!-- PV 模式互转快捷条 -->
+              <div v-if="pvLocalActive || pvRemoteUrl" class="media-convert-bar">
+                <span v-if="pvLocalActive && pvRemoteUrl" class="media-remote-caption" :title="pvRemoteUrl">
+                  关联在线链接：{{ pvRemoteUrl }}
+                </span>
+                <span v-else-if="!pvLocalActive && pvRemoteUrl" class="media-remote-caption">
+                  当前仅保留在线链接（节约磁盘空间）
+                </span>
+                <div class="media-convert-actions">
+                  <button
+                    v-if="!pvLocalActive && pvRemoteUrl"
+                    type="button"
+                    class="subtle-link-btn"
+                    :disabled="mediaActionBusy"
+                    @click="cacheRemoteMedia('pv')"
+                  >
+                    下载到本地
+                  </button>
+                  <button
+                    v-if="pvLocalActive && pvRemoteUrl"
+                    type="button"
+                    class="subtle-link-btn"
+                    :disabled="mediaActionBusy"
+                    @click="dropLocalCacheMedia('pv')"
+                  >
+                    仅删除本地文件、保留在线链接
+                  </button>
+                  <button
+                    v-if="pvLocalActive && !pvRemoteUrl"
+                    type="button"
+                    class="subtle-link-btn"
+                    :disabled="mediaActionBusy"
+                    @click="dropLocalCacheMedia('pv')"
+                  >
+                    删除本地文件
+                  </button>
+                </div>
+              </div>
+
               <!-- PV 后台下载进度感知 -->
               <div
                 v-if="pvTask && pvTask.status !== 'done'"
@@ -949,28 +1141,28 @@ onBeforeUnmount(stopPreviewAudio)
                 <div class="pv-inline-top">
                   <span>
                     <template v-if="pvTask.status === 'error'">
-                      {{ pvTask.message || '宣传片下载失败' }}
+                      {{ pvTask.message || '本地视频下载失败，已保留在线链接可直接播放' }}
                     </template>
                     <template v-else>
-                      正在下载宣传片
+                      正在缓存宣传片到本地
                       <span v-if="pvTask.progress != null" class="tabular-nums">{{ pvTask.progress }}%</span>
                     </template>
                   </span>
                   <div v-if="pvTask.status === 'error'" class="pv-inline-ops">
                     <button
-                      v-if="taskStore.canRetryPv(game.id)"
+                      v-if="taskStore.canRetryPv(game.id, pvRemoteUrl)"
                       type="button"
                       class="subtle-link-btn"
-                      @click="taskStore.retryPvDownload(game.id)"
+                      @click="taskStore.retryPvDownload(game.id, pvRemoteUrl)"
                     >
-                      重试
+                      重试下载
                     </button>
                     <button
                       type="button"
                       class="subtle-link-btn"
-                      @click="taskStore.dismissTask(game.id, 'pv')"
+                      @click="taskStore.keepLinkOnlyAndDismiss(game.id, 'pv', pvRemoteUrl)"
                     >
-                      忽略
+                      仅保留链接（忽略）
                     </button>
                   </div>
                 </div>
@@ -983,10 +1175,15 @@ onBeforeUnmount(stopPreviewAudio)
               </div>
             </div>
 
-            <!-- 主题原声 / OP 本地绑定 -->
+            <!-- 主题原声 / OP 绑定与互转 -->
             <div class="field">
               <div class="label-row">
-                <label>主题原声 / OP 音频（本地上传或绝对路径）</label>
+                <div class="media-label-with-badge">
+                  <label>主题原声 / OP 音频（支持本地缓存与在线链接）</label>
+                  <span v-if="bgmLocalActive" class="media-state-pill is-local">本地缓存</span>
+                  <span v-else-if="bgmRemoteUrl" class="media-state-pill is-remote">仅在线链接</span>
+                  <span v-else class="media-state-pill">未配置</span>
+                </div>
                 <button
                   type="button"
                   class="lock-icon-btn"
@@ -1008,7 +1205,7 @@ onBeforeUnmount(stopPreviewAudio)
                 <input
                   v-model="form.media.bgm_path"
                   class="input"
-                  placeholder="上传 .mp3 / .m4a / .flac / .ogg 或输入本地路径"
+                  placeholder="上传 .mp3 / .m4a / .flac / .ogg，或粘贴在线链接/本地路径"
                 />
                 <label class="btn btn-sm">
                   <span>{{ uploadingType === 'bgm' ? '上传中…' : '上传音频' }}</span>
@@ -1020,13 +1217,79 @@ onBeforeUnmount(stopPreviewAudio)
                   />
                 </label>
                 <button
-                  v-if="form.media.bgm_path"
+                  v-if="form.media.bgm_path || bgmRemoteUrl"
                   type="button"
                   class="btn btn-sm btn-ghost"
                   @click="clearBgm"
                 >
                   清除
                 </button>
+              </div>
+
+              <!-- OP 模式互转快捷条 -->
+              <div v-if="bgmLocalActive || bgmRemoteUrl" class="media-convert-bar">
+                <span v-if="bgmLocalActive && bgmRemoteUrl" class="media-remote-caption" :title="bgmRemoteUrl">
+                  关联在线链接：{{ bgmRemoteUrl }}
+                </span>
+                <span v-else-if="!bgmLocalActive && bgmRemoteUrl" class="media-remote-caption">
+                  当前仅保留在线链接（节约磁盘空间）
+                </span>
+                <div class="media-convert-actions">
+                  <button
+                    v-if="!bgmLocalActive && bgmRemoteUrl"
+                    type="button"
+                    class="subtle-link-btn"
+                    :disabled="mediaActionBusy"
+                    @click="cacheRemoteMedia('bgm')"
+                  >
+                    下载到本地
+                  </button>
+                  <button
+                    v-if="bgmLocalActive && bgmRemoteUrl"
+                    type="button"
+                    class="subtle-link-btn"
+                    :disabled="mediaActionBusy"
+                    @click="dropLocalCacheMedia('bgm')"
+                  >
+                    仅删除本地文件、保留在线链接
+                  </button>
+                </div>
+              </div>
+
+              <!-- OP 后台下载进度/错误感知 -->
+              <div
+                v-if="bgmTask && bgmTask.status !== 'done'"
+                class="pv-inline-task"
+                :class="{ error: bgmTask.status === 'error' }"
+              >
+                <div class="pv-inline-top">
+                  <span>
+                    <template v-if="bgmTask.status === 'error'">
+                      {{ bgmTask.message || '本地音频下载失败，已保留在线链接可直接播放' }}
+                    </template>
+                    <template v-else>
+                      正在缓存主题曲到本地
+                      <span v-if="bgmTask.progress != null" class="tabular-nums">{{ bgmTask.progress }}%</span>
+                    </template>
+                  </span>
+                  <div v-if="bgmTask.status === 'error'" class="pv-inline-ops">
+                    <button
+                      v-if="bgmRemoteUrl"
+                      type="button"
+                      class="subtle-link-btn"
+                      @click="taskStore.retryBgmDownload(game.id)"
+                    >
+                      重试下载
+                    </button>
+                    <button
+                      type="button"
+                      class="subtle-link-btn"
+                      @click="taskStore.keepLinkOnlyAndDismiss(game.id, 'bgm', bgmRemoteUrl)"
+                    >
+                      仅保留链接（忽略）
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1091,11 +1354,19 @@ onBeforeUnmount(stopPreviewAudio)
                     </button>
                     <button
                       type="button"
+                      class="btn btn-sm btn-ghost"
+                      :disabled="Boolean(musicDownloadingId)"
+                      @click="downloadCandidate(item, 'link_only')"
+                    >
+                      {{ musicDownloadingId === `${item.id}:link_only` ? '保存中…' : '仅保留链接' }}
+                    </button>
+                    <button
+                      type="button"
                       class="btn btn-sm"
                       :disabled="Boolean(musicDownloadingId)"
-                      @click="downloadCandidate(item)"
+                      @click="downloadCandidate(item, 'download')"
                     >
-                      {{ musicDownloadingId === item.id ? '下载中…' : '下载并绑定' }}
+                      {{ musicDownloadingId === `${item.id}:download` ? '下载中…' : '下载到本地' }}
                     </button>
                   </div>
                 </div>
@@ -1670,6 +1941,60 @@ onBeforeUnmount(stopPreviewAudio)
 
 .asset-action-btn {
   width: 100%;
+}
+
+.media-label-with-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.media-state-pill {
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}
+
+.media-state-pill.is-local {
+  background: rgba(52, 211, 153, 0.14);
+  color: #6ee7b7;
+}
+
+.media-state-pill.is-remote {
+  background: rgba(96, 165, 250, 0.14);
+  color: #93c5fd;
+}
+
+.media-convert-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.media-remote-caption {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
+.media-convert-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 /* 在线搜寻 OP 原声 */

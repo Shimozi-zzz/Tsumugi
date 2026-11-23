@@ -8,7 +8,17 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.api import collections, games, library_tools, media, scraper, settings, stats, system
+from backend.api import (
+    collections,
+    games,
+    import_external,
+    library_tools,
+    media,
+    scraper,
+    settings,
+    stats,
+    system,
+)
 from backend.core.config import (
     APP_VERSION,
     DATA_DIR,
@@ -70,6 +80,7 @@ app.include_router(settings.router)
 app.include_router(media.router)
 app.include_router(scraper.router)
 app.include_router(library_tools.router)
+app.include_router(import_external.router)
 app.include_router(stats.router)
 app.include_router(collections.router)
 app.include_router(system.router)
@@ -100,6 +111,22 @@ if _FRONTEND_INDEX.is_file() and _FRONTEND_ASSETS.is_dir():
         StaticFiles(directory=str(_FRONTEND_ASSETS)),
         name="frontend_assets",
     )
+
+
+# 显式拦截所有未匹配的 /api/* 任意 HTTP 方法请求，直接返回 404
+# （避免 POST/PUT/DELETE 等 API 路径落到下方的 @app.get("/{full_path:path}") 而误报 405 Method Not Allowed）
+@app.api_route(
+    "/api",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/api/{full_path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    include_in_schema=False,
+)
+async def api_not_found_fallback(full_path: str = ""):
+    raise HTTPException(status_code=404, detail="Not Found")
 
 
 @app.get("/{full_path:path}", include_in_schema=False)

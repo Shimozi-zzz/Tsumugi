@@ -54,6 +54,8 @@ class GameMediaPath(Base):
     hero_bg_path: Mapped[str] = mapped_column(String(512), default="")
     custom_spine_path: Mapped[str] = mapped_column(String(512), default="")
     pv_url_or_path: Mapped[str] = mapped_column(String(512), default="")
+    pv_remote_url: Mapped[str] = mapped_column(String(1024), default="")
+    pv_mode: Mapped[str] = mapped_column(String(20), default="none")
 
     exe_path: Mapped[str] = mapped_column(String(512), default="")
     launch_mode: Mapped[str] = mapped_column(String(20), default="direct")
@@ -61,6 +63,8 @@ class GameMediaPath(Base):
     save_dir: Mapped[str] = mapped_column(String(512), default="")
     screenshot_dir: Mapped[str] = mapped_column(String(512), default="")
     bgm_path: Mapped[str] = mapped_column(String(500), default="")
+    bgm_remote_url: Mapped[str] = mapped_column(String(1024), default="")
+    bgm_mode: Mapped[str] = mapped_column(String(20), default="none")
 
     game: Mapped["Game"] = relationship(back_populates="media")
 

@@ -3,6 +3,9 @@ from typing import Any, Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
+MediaSaveMode = Literal["none", "link_only", "download"]
+
+
 class MediaPathSchema(BaseModel):
     """游戏媒体资产路径与本地启动配置（完整视图/创建用）"""
 
@@ -14,12 +17,16 @@ class MediaPathSchema(BaseModel):
     hero_bg_path: str = ""
     custom_spine_path: str = ""
     pv_url_or_path: str = ""
+    pv_remote_url: str = ""
+    pv_mode: str = "none"
     exe_path: str = ""
     launch_mode: str = "direct"
     launch_args: str = ""
     save_dir: str = ""
     screenshot_dir: str = ""
     bgm_path: str = ""
+    bgm_remote_url: str = ""
+    bgm_mode: str = "none"
 
 
 class MediaPathUpdateSchema(BaseModel):
@@ -31,12 +38,16 @@ class MediaPathUpdateSchema(BaseModel):
     hero_bg_path: str | None = None
     custom_spine_path: str | None = None
     pv_url_or_path: str | None = None
+    pv_remote_url: str | None = None
+    pv_mode: MediaSaveMode | None = None
     exe_path: str | None = None
     launch_mode: str | None = None
     launch_args: str | None = None
     save_dir: str | None = None
     screenshot_dir: str | None = None
     bgm_path: str | None = None
+    bgm_remote_url: str | None = None
+    bgm_mode: MediaSaveMode | None = None
 
 
 class PlayRecordSchema(BaseModel):
@@ -166,9 +177,12 @@ class ScraperImportRequest(BaseModel):
     logo_url: str = ""
     hero_bg_url: str = ""
     pv_url: str = ""
+    pv_mode: MediaSaveMode | None = None
     selected_pv_url: str | None = None
     selected_pv_source: str | None = None
     selected_pv_mime_hint: str | None = None
+    selected_pv_fallback_urls: list[str] = Field(default_factory=list)
+    op_mode: MediaSaveMode | None = None
     selected_bgm_url: str | None = None
     screenshots: list[str] = Field(default_factory=list)
     download_screenshots: bool = True
@@ -254,6 +268,8 @@ class CollectionOut(BaseModel):
 class MusicDownloadRequest(BaseModel):
     source_url: str = ""
     preview_url: str = ""
+    mode: MediaSaveMode = "download"
+    async_mode: bool = False
 
 
 class AssetApplyRequest(BaseModel):
@@ -263,6 +279,8 @@ class AssetApplyRequest(BaseModel):
     url: str = Field(..., min_length=4)
     source: str = ""
     mime_hint: str = ""
+    fallback_urls: list[str] = Field(default_factory=list)
+    mode: MediaSaveMode = "download"
     async_mode: bool = True
 
 
@@ -270,3 +288,47 @@ class BangumiSyncRequest(BaseModel):
     """单作手动单向推送游玩状态到 Bangumi"""
 
     bangumi_id: str | None = None
+
+
+class ScraperEnrichRequest(BaseModel):
+    """跨源字段补全请求（从其他源拉取中文简介或高清封面/背景）"""
+
+    title: str = Field(..., min_length=1)
+    original_title: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    release_date: str = ""
+    source: str = ""
+    source_id: str = ""
+    external_ids: dict[str, str] = Field(default_factory=dict)
+    target_sources: list[str] | None = None
+    mode: Literal["all", "description", "covers"] = "all"
+
+
+class ScraperSettingsUpdateRequest(BaseModel):
+    """本地 DATA_DIR/settings.json 多源刮削配置更新请求"""
+
+    enabled_sources: dict[str, bool] | None = None
+    ymgal_client_id: str | None = None
+    ymgal_client_secret: str | None = None
+    kungal_base_url: str | None = None
+    kungal_token: str | None = None
+    bangumi_token: str | None = None
+    touchgal_api_key: str | None = None
+    steamgriddb_api_key: str | None = None
+    igdb_client_id: str | None = None
+    igdb_client_secret: str | None = None
+    clear_fields: list[str] = Field(default_factory=list)
+
+
+class ScraperTestRequest(BaseModel):
+    """数据源连通性测试请求（可选传入未保存的临时凭证进行实时验证）"""
+
+    ymgal_client_id: str | None = None
+    ymgal_client_secret: str | None = None
+    kungal_base_url: str | None = None
+    kungal_token: str | None = None
+    bangumi_token: str | None = None
+    touchgal_api_key: str | None = None
+    steamgriddb_api_key: str | None = None
+    igdb_client_id: str | None = None
+    igdb_client_secret: str | None = None

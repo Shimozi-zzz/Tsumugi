@@ -184,6 +184,37 @@ async def update_game(
             if m_val is not None and hasattr(game.media, m_field):
                 setattr(game.media, m_field, m_val)
 
+        # 保持 pv_url_or_path / pv_remote_url / pv_mode 一致性（兼容旧表单仅传 pv_url_or_path）
+        if "pv_url_or_path" in media_updates and media_updates["pv_url_or_path"] is not None:
+            pv_val = str(media_updates["pv_url_or_path"]).strip()
+            if not pv_val:
+                if "pv_remote_url" not in media_updates:
+                    game.media.pv_remote_url = ""
+                if "pv_mode" not in media_updates:
+                    game.media.pv_mode = "none"
+            elif pv_val.lower().startswith(("http://", "https://")):
+                if "pv_remote_url" not in media_updates:
+                    game.media.pv_remote_url = pv_val
+                if "pv_mode" not in media_updates:
+                    game.media.pv_mode = "link_only"
+            elif "pv_mode" not in media_updates:
+                game.media.pv_mode = "download"
+
+        if "bgm_path" in media_updates and media_updates["bgm_path"] is not None:
+            bgm_val = str(media_updates["bgm_path"]).strip()
+            if not bgm_val:
+                if "bgm_remote_url" not in media_updates:
+                    game.media.bgm_remote_url = ""
+                if "bgm_mode" not in media_updates:
+                    game.media.bgm_mode = "none"
+            elif bgm_val.lower().startswith(("http://", "https://")):
+                if "bgm_remote_url" not in media_updates:
+                    game.media.bgm_remote_url = bgm_val
+                if "bgm_mode" not in media_updates:
+                    game.media.bgm_mode = "link_only"
+            elif "bgm_mode" not in media_updates:
+                game.media.bgm_mode = "download"
+
     await db.commit()
     refreshed = await _load_game_full(db, game_id)
     assert refreshed is not None

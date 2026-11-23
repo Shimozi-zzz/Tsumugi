@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Hls from 'hls.js'
 import { assetUrl } from '@/api/client'
+import { PAUSE_MEDIA_EVENT, useAudioStore } from '@/stores/audio'
 
 const props = defineProps<{
   src: string
@@ -9,6 +10,7 @@ const props = defineProps<{
   blurred?: boolean
 }>()
 
+const audioStore = useAudioStore()
 const videoRef = ref<HTMLVideoElement | null>(null)
 const errorMsg = ref('')
 const isLoading = ref(false)
@@ -72,9 +74,26 @@ function handleNativeError() {
   }
 }
 
-onMounted(setupVideo)
+function handleGlobalPauseMedia() {
+  const video = videoRef.value
+  if (video && !video.paused) {
+    video.pause()
+  }
+}
+
+function handlePlay() {
+  void audioStore.stopSmooth()
+}
+
+onMounted(() => {
+  setupVideo()
+  window.addEventListener(PAUSE_MEDIA_EVENT, handleGlobalPauseMedia)
+})
 watch(() => props.src, setupVideo)
-onBeforeUnmount(cleanupHls)
+onBeforeUnmount(() => {
+  window.removeEventListener(PAUSE_MEDIA_EVENT, handleGlobalPauseMedia)
+  cleanupHls()
+})
 </script>
 
 <template>
@@ -104,6 +123,7 @@ onBeforeUnmount(cleanupHls)
         controls
         playsinline
         preload="metadata"
+        @play="handlePlay"
         @error="handleNativeError"
       />
       <div v-if="isLoading" class="video-overlay">

@@ -38,6 +38,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 # 轻量级无损增量列迁移清单：(表名, 列名, 列 DDL)
 _ADDITIVE_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
     ("game_media_paths", "bgm_path", "VARCHAR(500) DEFAULT ''"),
+    ("game_media_paths", "pv_remote_url", "VARCHAR(1024) DEFAULT ''"),
+    ("game_media_paths", "pv_mode", "VARCHAR(20) DEFAULT 'none'"),
+    ("game_media_paths", "bgm_remote_url", "VARCHAR(1024) DEFAULT ''"),
+    ("game_media_paths", "bgm_mode", "VARCHAR(20) DEFAULT 'none'"),
     ("games", "bangumi_id", "VARCHAR(64) DEFAULT ''"),
     ("games", "series", "VARCHAR(120) DEFAULT ''"),
 ]

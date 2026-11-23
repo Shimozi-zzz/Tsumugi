@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import CollectionManagerModal from '@/components/CollectionManagerModal.vue'
 import EmptyLibraryView from '@/components/EmptyLibraryView.vue'
+import ExternalImportModal from '@/components/ExternalImportModal.vue'
 import GameEditModal from '@/components/GameEditModal.vue'
 import HoverSidebar from '@/components/HoverSidebar.vue'
 import ImportModal from '@/components/ImportModal.vue'
@@ -41,6 +42,7 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     else if (store.showCollectionModal) store.showCollectionModal = false
     else if (store.showTimeLedger) store.showTimeLedger = false
     else if (store.showEditModal) store.showEditModal = false
+    else if (store.showExternalImportModal) store.showExternalImportModal = false
     else if (store.showImportModal) store.showImportModal = false
     else if (store.showSettingsModal) store.showSettingsModal = false
   }
@@ -133,6 +135,9 @@ onBeforeUnmount(() => {
     <!-- 全局弹窗（统一缩放淡入与亚克力遮罩过渡） -->
     <Transition name="modal-pop">
       <ImportModal v-if="store.showImportModal" />
+    </Transition>
+    <Transition name="modal-pop">
+      <ExternalImportModal v-if="store.showExternalImportModal" />
     </Transition>
     <Transition name="modal-pop">
       <QuickSearchModal v-if="store.showQuickSearch" />

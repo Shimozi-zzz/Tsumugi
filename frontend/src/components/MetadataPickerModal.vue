@@ -56,12 +56,21 @@ const LOCK_KEY_MAP: Record<MetadataFieldKey, string> = {
   description: 'synopsis',
 }
 
-const SOURCE_TABS: { key: MetadataSourceKey; label: string }[] = [
-  { key: 'vndb', label: 'VNDB' },
-  { key: 'bangumi', label: 'Bangumi' },
-  { key: 'touchgal', label: 'TouchGal' },
-  { key: 'steam', label: 'Steam' },
-]
+const SOURCE_TABS = computed<{ key: MetadataSourceKey; label: string }[]>(() => {
+  const tabs: { key: MetadataSourceKey; label: string }[] = [
+    { key: 'ymgal', label: 'YMGal' },
+    { key: 'kungal', label: 'Kungal' },
+    { key: 'touchgal', label: 'TouchGal' },
+    { key: 'vndb', label: 'VNDB' },
+    { key: 'bangumi', label: 'Bangumi' },
+    { key: 'dlsite', label: 'DLsite' },
+    { key: 'steam', label: 'Steam' },
+  ]
+  if (store.settings.scraper_settings?.source_status?.igdb?.configured) {
+    tabs.push({ key: 'igdb', label: 'IGDB' })
+  }
+  return tabs
+})
 
 const modalTitle = computed(() =>
   props.focusField ? `查找并替换：${FIELD_LABELS[props.focusField]}` : '查找并替换资料',

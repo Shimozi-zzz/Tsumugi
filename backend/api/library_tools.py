@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.api.settings import DEFAULT_SETTINGS
 from backend.core.os_adapter import os_adapter
+from backend.core.scraper_settings import load_scraper_settings
 from backend.db.database import get_db
 from backend.db.models import AppStateSetting, Game, GameMediaPath, PlayRecord
 from backend.schemas import (
@@ -109,6 +110,7 @@ async def batch_import_games(
         proxy_url=proxy_url,
         api_keys=api_keys,
         allow_nsfw=allow_nsfw,
+        scraper_settings=load_scraper_settings(db_cfg=cfg),
     )
 
     imported_ids: list[int] = []

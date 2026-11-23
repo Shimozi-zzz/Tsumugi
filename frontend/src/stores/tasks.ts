@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { scraperApi, tasksApi } from '@/api/client'
+import { mediaApi, scraperApi, tasksApi } from '@/api/client'
 import { useLibraryStore } from '@/stores/library'
 import type { DownloadTaskItem } from '@/types'
 
@@ -8,6 +8,7 @@ interface PvRetryPayload {
   url: string
   source?: string
   mime_hint?: string
+  fallback_urls?: string[]
 }
 
 const POLL_INTERVAL_MS = 1500
@@ -33,9 +34,14 @@ export const useTaskStore = defineStore('tasks', () => {
     return tasks.value.find((t) => t.game_id === gameId && t.asset_type === assetType) || null
   }
 
-  function canRetryPv(gameId: number | null | undefined): boolean {
+  function getPvRetryUrl(gameId: number | null | undefined): string {
+    if (gameId == null) return ''
+    return (retryPvMap.value[gameId]?.url || '').trim()
+  }
+
+  function canRetryPv(gameId: number | null | undefined, fallbackRemoteUrl?: string): boolean {
     if (gameId == null) return false
-    return Boolean(retryPvMap.value[gameId]?.url)
+    return Boolean(retryPvMap.value[gameId]?.url || (fallbackRemoteUrl || '').trim())
   }
 
   function stopPolling() {
@@ -93,23 +99,26 @@ export const useTaskStore = defineStore('tasks', () => {
       const incoming = res.items || []
       const libraryStore = useLibraryStore()
 
-      const newlyCompletedGameIds = new Set<number>()
+      const needRefreshGameIds = new Set<number>()
       for (const item of incoming) {
         const key = taskKey(item.game_id, item.asset_type)
         const prev = prevStatusMap.get(key)
         if (item.status === 'done' && prev && prev !== 'done') {
-          newlyCompletedGameIds.add(item.game_id)
+          needRefreshGameIds.add(item.game_id)
           const label = item.asset_type === 'pv' ? '宣传片已缓存至本地' : '主题曲已下载绑定'
           libraryStore.notify(label, 'success')
+        } else if (item.status === 'error' && prev && prev !== 'error') {
+          // 后台下载失败时自动同步最新游戏媒体字段，确保远程链接播放器零刷新立即呈现
+          needRefreshGameIds.add(item.game_id)
         }
         prevStatusMap.set(key, item.status)
       }
 
       tasks.value = incoming
 
-      if (newlyCompletedGameIds.size > 0) {
+      if (needRefreshGameIds.size > 0) {
         await Promise.all(
-          Array.from(newlyCompletedGameIds).map((gid) => libraryStore.refreshGame(gid)),
+          Array.from(needRefreshGameIds).map((gid) => libraryStore.refreshGame(gid)),
         )
       }
 
@@ -128,30 +137,97 @@ export const useTaskStore = defineStore('tasks', () => {
     }
   }
 
-  async function retryPvDownload(gameId: number) {
+  async function retryPvDownload(gameId: number, fallbackRemoteUrl?: string) {
     const meta = retryPvMap.value[gameId]
-    if (!meta?.url) return
+    const targetUrl = (meta?.url || fallbackRemoteUrl || '').trim()
     const libraryStore = useLibraryStore()
     try {
-      const res = await scraperApi.applyAsset(gameId, {
-        asset_type: 'pv',
-        url: meta.url,
-        source: meta.source || '',
-        mime_hint: meta.mime_hint || '',
-        async_mode: true,
-      })
+      if (meta?.url) {
+        const res = await scraperApi.applyAsset(gameId, {
+          asset_type: 'pv',
+          url: meta.url,
+          source: meta.source || '',
+          mime_hint: meta.mime_hint || '',
+          fallback_urls: meta.fallback_urls || [],
+          mode: 'download',
+          async_mode: true,
+        })
+        libraryStore.syncGameFromServer(res)
+        trackTask(
+          res.download_task || {
+            game_id: gameId,
+            asset_type: 'pv',
+            status: 'queued',
+            progress: 0,
+            message: '正在重试下载…',
+          },
+          meta,
+        )
+      } else if (targetUrl) {
+        const res = await mediaApi.cacheRemote(gameId, 'pv')
+        libraryStore.syncGameFromServer(res)
+        trackTask(
+          res.download_task || {
+            game_id: gameId,
+            asset_type: 'pv',
+            status: 'queued',
+            progress: 0,
+            message: '正在重试下载…',
+          },
+          { url: targetUrl },
+        )
+      }
+    } catch (err) {
+      libraryStore.notify(err instanceof Error ? err.message : '重试下载失败', 'error')
+    }
+  }
+
+  async function retryBgmDownload(gameId: number) {
+    const libraryStore = useLibraryStore()
+    try {
+      const res = await mediaApi.cacheRemote(gameId, 'bgm')
+      libraryStore.syncGameFromServer(res)
       trackTask(
         res.download_task || {
           game_id: gameId,
-          asset_type: 'pv',
+          asset_type: 'bgm',
           status: 'queued',
           progress: 0,
-          message: '正在重试下载…',
+          message: '正在重试下载主题曲…',
         },
-        meta,
       )
     } catch (err) {
-      libraryStore.notify(err instanceof Error ? err.message : '重试下载失败', 'error')
+      libraryStore.notify(err instanceof Error ? err.message : '重试下载主题曲失败', 'error')
+    }
+  }
+
+  async function keepLinkOnlyAndDismiss(gameId: number, assetType: 'pv' | 'bgm', remoteUrl?: string) {
+    const libraryStore = useLibraryStore()
+    const cleanUrl = (remoteUrl || (assetType === 'pv' ? getPvRetryUrl(gameId) : '')).trim()
+    dismissTask(gameId, assetType)
+    if (!cleanUrl) return
+    try {
+      if (assetType === 'pv') {
+        await libraryStore.updateGamePatch(gameId, {
+          media: {
+            pv_mode: 'link_only',
+            pv_remote_url: cleanUrl,
+            pv_url_or_path: cleanUrl,
+          },
+        })
+        libraryStore.notify('已保留宣传片在线链接', 'info')
+      } else {
+        await libraryStore.updateGamePatch(gameId, {
+          media: {
+            bgm_mode: 'link_only',
+            bgm_remote_url: cleanUrl,
+            bgm_path: cleanUrl,
+          },
+        })
+        libraryStore.notify('已保留主题曲在线链接', 'info')
+      }
+    } catch {
+      // ignore patch error on dismiss
     }
   }
 
@@ -166,11 +242,14 @@ export const useTaskStore = defineStore('tasks', () => {
     tasks,
     hasActiveTasks,
     getTask,
+    getPvRetryUrl,
     canRetryPv,
     trackTask,
     pollNow,
     stopPolling,
     retryPvDownload,
+    retryBgmDownload,
+    keepLinkOnlyAndDismiss,
     dismissTask,
   }
 })

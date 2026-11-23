@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Hls from 'hls.js'
-import { videoUrl } from '@/api/client'
-import { useAudioStore } from '@/stores/audio'
+import { videoStreamUrl, videoUrl } from '@/api/client'
+import { PAUSE_MEDIA_EVENT, useAudioStore } from '@/stores/audio'
 
 const props = defineProps<{
   src: string
+  fallbackSrc?: string
   poster?: string
   blurred?: boolean
   cacheBust?: number
@@ -21,6 +22,7 @@ const isPlaying = ref(false)
 const isLoading = ref(false)
 const hasStarted = ref(false)
 const errorMsg = ref('')
+const usingFallback = ref(false)
 const currentTime = ref(0)
 const duration = ref(0)
 const bufferedRatio = ref(0)
@@ -33,13 +35,33 @@ const isScrubbing = ref(false)
 let hlsInstance: Hls | null = null
 let hideTimer: number | null = null
 
-const isExternal = computed(() => /^https?:\/\//i.test((props.src || '').trim()))
-const resolvedSrc = computed(() => {
-  const raw = (props.src || '').trim()
-  if (!raw) return ''
-  return isExternal.value ? raw : videoUrl(raw, props.cacheBust)
+const DIRECT_VIDEO_URL_RE = /\.(?:mp4|webm|m4v|mov)(?:[?#].*)?$/i
+const HLS_URL_RE = /\.m3u8(?:[?#].*)?$/i
+
+const activeRawSrc = computed(() => {
+  if (usingFallback.value && (props.fallbackSrc || '').trim()) {
+    return (props.fallbackSrc || '').trim()
+  }
+  return (props.src || '').trim()
 })
-const isHlsStream = computed(() => resolvedSrc.value.toLowerCase().includes('.m3u8'))
+const isExternal = computed(() => /^https?:\/\//i.test(activeRawSrc.value))
+const isHlsStream = computed(() => HLS_URL_RE.test(activeRawSrc.value))
+const isDirectExternalVideo = computed(
+  () => isExternal.value && DIRECT_VIDEO_URL_RE.test(activeRawSrc.value),
+)
+const externalLinkUrl = computed(() => {
+  if (isExternal.value) return activeRawSrc.value
+  const fb = (props.fallbackSrc || '').trim()
+  return /^https?:\/\//i.test(fb) ? fb : ''
+})
+const resolvedSrc = computed(() => {
+  const raw = activeRawSrc.value
+  if (!raw) return ''
+  if (!isExternal.value) return videoUrl(raw, props.cacheBust)
+  if (isHlsStream.value || isDirectExternalVideo.value) return raw
+  // Bilibili / YouTube 等视频网页链接通过后端流代理在线播放
+  return videoStreamUrl(raw)
+})
 
 const progressRatio = computed(() => {
   if (!duration.value || duration.value <= 0) return 0
@@ -210,8 +232,16 @@ function onCanPlay() {
 
 function onError() {
   isLoading.value = false
+  // 若本地视频文件失效但存在远程链接，自动无缝回退在线播放（无需手动刷新）
+  if (!usingFallback.value && !isExternal.value && /^https?:\/\//i.test((props.fallbackSrc || '').trim())) {
+    usingFallback.value = true
+    setupVideo()
+    return
+  }
   if (!errorMsg.value) {
-    errorMsg.value = '视频资源暂时无法加载'
+    errorMsg.value = isExternal.value
+      ? '在线视频暂时无法加载，请检查网络/代理或打开原链接播放'
+      : '本地视频文件暂时无法加载'
   }
 }
 
@@ -288,12 +318,31 @@ function syncFullscreenState() {
   isFullscreen.value = document.fullscreenElement === stageRef.value
 }
 
+function handleGlobalPauseMedia() {
+  const video = videoRef.value
+  if (video && !video.paused) {
+    video.pause()
+  }
+  isPlaying.value = false
+  clearHideTimer()
+  controlsVisible.value = true
+  if (stageRef.value && document.fullscreenElement === stageRef.value) {
+    void document.exitFullscreen().catch(() => {
+      // ignore fullscreen exit error
+    })
+  }
+}
+
 onMounted(() => {
   setupVideo()
   document.addEventListener('fullscreenchange', syncFullscreenState)
+  window.addEventListener(PAUSE_MEDIA_EVENT, handleGlobalPauseMedia)
 })
 
-watch([() => props.src, () => props.cacheBust], setupVideo)
+watch([() => props.src, () => props.fallbackSrc, () => props.cacheBust], () => {
+  usingFallback.value = false
+  setupVideo()
+})
 
 onBeforeUnmount(() => {
   cleanupHls()
@@ -301,6 +350,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onScrubPointerMove)
   window.removeEventListener('pointerup', onScrubPointerUp)
   document.removeEventListener('fullscreenchange', syncFullscreenState)
+  window.removeEventListener(PAUSE_MEDIA_EVENT, handleGlobalPauseMedia)
 })
 </script>
 
@@ -356,6 +406,15 @@ onBeforeUnmount(() => {
       <!-- 错误态 -->
       <div v-if="errorMsg" class="video-overlay error">
         <span>{{ errorMsg }}</span>
+        <a
+          v-if="externalLinkUrl"
+          :href="externalLinkUrl"
+          target="_blank"
+          rel="noopener"
+          class="error-ext-link"
+        >
+          打开原链接播放 ↗
+        </a>
       </div>
 
       <!-- 底部极简亚克力控制条 -->
@@ -526,6 +585,22 @@ onBeforeUnmount(() => {
 .video-overlay.error {
   color: var(--danger-text);
   padding: 20px;
+  flex-direction: column;
+  gap: 10px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.error-ext-link {
+  font-size: 12px;
+  color: #f4f4f5;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.9;
+}
+
+.error-ext-link:hover {
+  opacity: 1;
 }
 
 .spinner {

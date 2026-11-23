@@ -12,11 +12,17 @@ import type {
   CollectionItem,
   ConvertWebpResponse,
   DownloadTasksResponse,
+  ExternalDetectResponse,
+  ExternalDuplicateStrategy,
+  ExternalExecuteResponse,
+  ExternalImportSource,
+  ExternalScanResponse,
   Game,
   GameCreatePayload,
   GameUpdatePayload,
   HealthInfo,
   JourneyCollageResponse,
+  MediaSaveMode,
   MetadataDetailResponse,
   MetadataSearchResponse,
   MetadataSourceKey,
@@ -29,8 +35,14 @@ import type {
   RunningStatus,
   ScrapedGameItem,
   ScraperAggregateResponse,
+  ScraperCategory,
+  ScraperEnrichResponse,
   ScraperImportPayload,
   ScraperSearchResponse,
+  ScraperSettingsResponse,
+  ScraperSettingsUpdatePayload,
+  ScraperSourceDescriptor,
+  ScraperTestResponse,
   ScreenshotItem,
   StorageCleanupResponse,
   StorageUsageResponse,
@@ -109,6 +121,10 @@ export function videoUrl(path: string, cacheBust?: string | number): string {
   return cacheBust ? `${base}&v=${cacheBust}` : base
 }
 
+export function videoStreamUrl(url: string): string {
+  return `/api/media/video-stream?url=${encodeURIComponent(url)}`
+}
+
 export function musicPreviewUrl(url: string): string {
   return `/api/scraper/music/preview?url=${encodeURIComponent(url)}`
 }
@@ -151,6 +167,12 @@ export const systemApi = {
   convertWebp: () =>
     request<ConvertWebpResponse>('/api/system/storage/convert-webp', { method: 'POST' }),
   sourceLinks: () => request<Record<string, string>>('/api/system/source-links'),
+  getScraperSettings: () => request<ScraperSettingsResponse>('/api/system/scraper-settings'),
+  updateScraperSettings: (payload: ScraperSettingsUpdatePayload) =>
+    request<ScraperSettingsResponse>('/api/system/scraper-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 }
 
 export const tasksApi = {
@@ -220,6 +242,14 @@ export const mediaApi = {
       { method: 'POST', body: form },
     )
   },
+  dropLocalCache: (gameId: number, assetType: 'pv' | 'bgm') =>
+    request<Game>(`/api/media/drop-local-cache/${gameId}?asset_type=${assetType}`, {
+      method: 'POST',
+    }),
+  cacheRemote: (gameId: number, assetType: 'pv' | 'bgm') =>
+    request<AssetApplyResponse>(`/api/media/cache-remote/${gameId}?asset_type=${assetType}`, {
+      method: 'POST',
+    }),
   screenshots: (gameId: number) =>
     request<{ game_id: number; items: ScreenshotItem[] }>(`/api/media/screenshots/${gameId}`),
   randomBackdrop: (excludeNsfw = true) =>
@@ -245,18 +275,85 @@ export const mediaApi = {
 }
 
 export const scraperApi = {
-  search: (q: string, source = 'aggregated', limit = 8) =>
-    request<ScraperSearchResponse>(
-      `/api/scraper/search?q=${encodeURIComponent(q)}&source=${encodeURIComponent(source)}&limit=${limit}`,
-    ),
+  sources: () =>
+    request<{
+      sources: ScraperSourceDescriptor[]
+      sgdb_configured: boolean
+      igdb_configured: boolean
+      touchgal_configured?: boolean
+    }>('/api/scraper/sources'),
+  testSource: (
+    source: string,
+    overrides?: Partial<{
+      ymgal_client_id: string
+      ymgal_client_secret: string
+      kungal_base_url: string
+      kungal_token: string
+      bangumi_token: string
+      touchgal_api_key: string
+      steamgriddb_api_key: string
+      igdb_client_id: string
+      igdb_client_secret: string
+    }>,
+  ) =>
+    request<ScraperTestResponse>(`/api/scraper/test/${encodeURIComponent(source)}`, {
+      method: 'POST',
+      body: JSON.stringify(overrides || {}),
+    }),
+  search: (
+    q: string,
+    sourceOrOpts:
+      | string
+      | {
+          category?: ScraperCategory
+          sources?: string[]
+          limit?: number
+        } = 'aggregated',
+    limit = 15,
+  ) => {
+    const qs = new URLSearchParams()
+    qs.set('q', q)
+    if (typeof sourceOrOpts === 'string') {
+      qs.set('source', sourceOrOpts)
+      qs.set('limit', String(limit))
+    } else {
+      if (sourceOrOpts.category) qs.set('category', sourceOrOpts.category)
+      if (sourceOrOpts.sources && sourceOrOpts.sources.length > 0) {
+        for (const s of sourceOrOpts.sources) {
+          qs.append('sources', s)
+        }
+      }
+      qs.set('limit', String(sourceOrOpts.limit ?? limit))
+    }
+    return request<ScraperSearchResponse>(`/api/scraper/search?${qs.toString()}`)
+  },
   detail: (source: string, externalId: string) =>
     request<ScrapedGameItem>(
       `/api/scraper/detail/${encodeURIComponent(source)}/${encodeURIComponent(externalId)}`,
     ),
-  aggregate: (keyword: string, externalIds: Record<string, string> = {}) =>
+  enrich: (payload: {
+    title: string
+    original_title?: string
+    aliases?: string[]
+    release_date?: string
+    source?: string
+    source_id?: string
+    external_ids?: Record<string, string>
+    target_sources?: string[]
+    mode?: 'all' | 'description' | 'covers'
+  }) =>
+    request<ScraperEnrichResponse>('/api/scraper/enrich', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  aggregate: (keyword: string, externalIds: Record<string, string> = {}, preferredSource = '') =>
     request<ScraperAggregateResponse>('/api/scraper/aggregate', {
       method: 'POST',
-      body: JSON.stringify({ keyword, external_ids: externalIds }),
+      body: JSON.stringify({
+        keyword,
+        external_ids: externalIds,
+        preferred_source: preferredSource,
+      }),
     }),
   importGame: (payload: ScraperImportPayload) =>
     request<Game>('/api/scraper/import', {
@@ -272,12 +369,28 @@ export const scraperApi = {
     if (opts?.alt_title) qs.set('alt_title', opts.alt_title)
     return request<MusicSearchResponse>(`/api/scraper/music/search?${qs.toString()}`)
   },
-  downloadMusic: (gameId: number, payload: { source_url?: string; preview_url?: string }) =>
-    request<{ game_id: number; bgm_path: string }>(`/api/scraper/music/download/${gameId}`, {
+  downloadMusic: (
+    gameId: number,
+    payload: {
+      source_url?: string
+      preview_url?: string
+      mode?: MediaSaveMode
+      async_mode?: boolean
+    },
+  ) =>
+    request<{
+      game_id: number
+      bgm_path: string
+      bgm_remote_url?: string
+      bgm_mode?: string
+      download_task?: DownloadTasksResponse['items'][number]
+    }>(`/api/scraper/music/download/${gameId}`, {
       method: 'POST',
       body: JSON.stringify({
         source_url: payload.source_url || '',
         preview_url: payload.preview_url || '',
+        mode: payload.mode || 'download',
+        async_mode: Boolean(payload.async_mode),
       }),
     }),
   searchAssets: (
@@ -364,6 +477,28 @@ export const libraryApi = {
     request<PathValidateResponse>('/api/library/validate-path', {
       method: 'POST',
       body: JSON.stringify({ path }),
+    }),
+}
+
+export const externalImportApi = {
+  detect: (source: ExternalImportSource) =>
+    request<ExternalDetectResponse>(`/api/import/external/${encodeURIComponent(source)}/detect`),
+  scan: (source: ExternalImportSource, path: string) =>
+    request<ExternalScanResponse>(`/api/import/external/${encodeURIComponent(source)}/scan`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+  execute: (
+    source: ExternalImportSource,
+    payload: {
+      path: string
+      selected_ids: string[]
+      duplicate_strategy: ExternalDuplicateStrategy
+    },
+  ) =>
+    request<ExternalExecuteResponse>(`/api/import/external/${encodeURIComponent(source)}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
 }
 

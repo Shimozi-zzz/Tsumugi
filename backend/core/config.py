@@ -29,6 +29,7 @@ APP_VERSION: str = os.getenv("TSUMUGI_VERSION", "0.9.0")
 GITHUB_REPO: str = os.getenv("TSUMUGI_GITHUB_REPO", "Shimozi-zzz/Tsumugi")
 
 DB_PATH: Path = DATA_DIR / "tsumugi.db"
+SETTINGS_JSON_PATH: Path = DATA_DIR / "settings.json"
 ASSETS_DIR: Path = DATA_DIR / "assets"
 THUMBS_CACHE_DIR: Path = DATA_DIR / "cache" / "thumbs"
 BACKUPS_DIR: Path = DATA_DIR / "backups"

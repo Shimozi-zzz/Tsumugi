@@ -1,9 +1,13 @@
+import asyncio
+import logging
 import random
 from pathlib import Path
-from urllib.parse import quote
+from typing import Literal
+from urllib.parse import quote, urlparse
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,9 +16,19 @@ from backend.core.config import DATA_DIR, WALLPAPERS_DIR
 from backend.core.os_adapter import os_adapter
 from backend.db.database import get_db
 from backend.db.models import AppStateSetting, Game
+from backend.schemas import GameOut
 from backend.scrapers.asset_search import search_asset_candidates
-from backend.services.media_service import get_or_create_thumbnail, save_game_asset_bytes
+from backend.services.media_service import (
+    delete_local_media_cache,
+    format_download_error_zh,
+    get_or_create_thumbnail,
+    is_remote_http_url,
+    resolve_remote_video_stream,
+    save_game_asset_bytes,
+)
+from backend.services.task_manager import task_manager
 
+logger = logging.getLogger("tsumugi.api.media")
 router = APIRouter(prefix="/api/media", tags=["Media"])
 
 ASSET_FIELD_MAP = {
@@ -147,9 +161,120 @@ async def upload_game_asset(
     setattr(game.media, target_field, saved["path"])
     if asset_type == "cover":
         game.media.cover_thumb_path = saved.get("thumb_path", "")
+    elif asset_type == "pv":
+        game.media.pv_mode = "download"
+    elif asset_type == "bgm":
+        game.media.bgm_mode = "download"
 
     await db.commit()
     return {"game_id": game_id, "asset_type": asset_type, **saved}
+
+
+@router.post("/drop-local-cache/{game_id}", response_model=GameOut)
+async def drop_local_media_cache(
+    game_id: int,
+    asset_type: Literal["pv", "bgm"] = Query(..., description="目标影音类型: pv / bgm"),
+    db: AsyncSession = Depends(get_db),
+):
+    """仅删除本地缓存视频/音频文件以释放磁盘空间，若有远程链接则保留并自动切为仅链接模式"""
+    stmt = (
+        select(Game)
+        .where(Game.id == game_id)
+        .options(selectinload(Game.media), selectinload(Game.play_record))
+    )
+    game = (await db.execute(stmt)).scalar_one_or_none()
+    if not game or not game.media:
+        raise HTTPException(status_code=404, detail="未找到游戏或其媒体信息")
+
+    delete_local_media_cache(game_id, asset_type)
+
+    if asset_type == "pv":
+        remote = (game.media.pv_remote_url or "").strip()
+        if is_remote_http_url(remote):
+            game.media.pv_url_or_path = remote
+            game.media.pv_mode = "link_only"
+        else:
+            game.media.pv_url_or_path = ""
+            game.media.pv_remote_url = ""
+            game.media.pv_mode = "none"
+    else:
+        remote = (game.media.bgm_remote_url or "").strip()
+        if is_remote_http_url(remote):
+            game.media.bgm_path = remote
+            game.media.bgm_mode = "link_only"
+        else:
+            game.media.bgm_path = ""
+            game.media.bgm_remote_url = ""
+            game.media.bgm_mode = "none"
+
+    await db.commit()
+    refreshed = (await db.execute(stmt)).scalar_one()
+    return GameOut.model_validate(refreshed)
+
+
+@router.post("/cache-remote/{game_id}")
+async def cache_remote_media_to_local(
+    game_id: int,
+    asset_type: Literal["pv", "bgm"] = Query(..., description="目标影音类型: pv / bgm"),
+    db: AsyncSession = Depends(get_db),
+):
+    """将当前「仅保留在线链接」的 PV 或 OP 触发后台下载到本地缓存"""
+    from backend.api.scraper import _background_download_pv, _background_download_selected_bgm
+
+    stmt = (
+        select(Game)
+        .where(Game.id == game_id)
+        .options(selectinload(Game.media), selectinload(Game.play_record))
+    )
+    game = (await db.execute(stmt)).scalar_one_or_none()
+    if not game or not game.media:
+        raise HTTPException(status_code=404, detail="未找到游戏或其媒体信息")
+
+    proxy_row = await db.get(AppStateSetting, "proxy_url")
+    proxy_url = str(proxy_row.value or "").strip() if proxy_row else ""
+
+    if asset_type == "pv":
+        remote = (game.media.pv_remote_url or "").strip()
+        if not is_remote_http_url(remote) and is_remote_http_url(game.media.pv_url_or_path):
+            remote = game.media.pv_url_or_path.strip()
+        if not is_remote_http_url(remote):
+            raise HTTPException(status_code=400, detail="当前没有可下载的在线宣传片链接")
+
+        game.media.pv_remote_url = remote
+        if not game.media.pv_url_or_path:
+            game.media.pv_url_or_path = remote
+        game.media.pv_mode = "download"
+        await db.commit()
+
+        task_info = task_manager.set_task(game_id, "pv", "queued", 0, "等待下载宣传片…")
+        steam_appid = str((game.external_ids or {}).get("steam") or "")
+        asyncio.create_task(
+            _background_download_pv(
+                game_id=game_id,
+                url=remote,
+                proxy_url=proxy_url,
+                steam_appid=steam_appid,
+            )
+        )
+    else:
+        remote = (game.media.bgm_remote_url or "").strip()
+        if not is_remote_http_url(remote) and is_remote_http_url(game.media.bgm_path):
+            remote = game.media.bgm_path.strip()
+        if not is_remote_http_url(remote):
+            raise HTTPException(status_code=400, detail="当前没有可下载的在线主题曲链接")
+
+        game.media.bgm_remote_url = remote
+        if not game.media.bgm_path:
+            game.media.bgm_path = remote
+        game.media.bgm_mode = "download"
+        await db.commit()
+
+        task_info = task_manager.set_task(game_id, "bgm", "queued", 0, "等待下载主题曲…")
+        asyncio.create_task(_background_download_selected_bgm(game_id, remote, proxy_url))
+
+    refreshed = (await db.execute(stmt)).scalar_one()
+    game_data = GameOut.model_validate(refreshed).model_dump(mode="json")
+    return {**game_data, "download_task": task_info}
 
 
 @router.get("/thumb")
@@ -210,6 +335,81 @@ async def stream_video(path: str = Query(..., description="data/ 下的相对路
     if not media_type or not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=404, detail="找不到有效的本地视频文件")
     return FileResponse(resolved, media_type=media_type)
+
+
+@router.get("/video-stream")
+async def proxy_remote_video_stream(
+    url: str = Query(..., min_length=8, description="待在线播放的远程视频页面或直链地址"),
+    range_header: str | None = Header(None, alias="Range"),
+    db: AsyncSession = Depends(get_db),
+):
+    """在线视频流播放代理（兼容 Bilibili / YouTube 网页链接与防盗链视频直链，支持 Range 拖拽）"""
+    cleaned = url.strip()
+    parsed = urlparse(cleaned)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or not host:
+        raise HTTPException(status_code=400, detail="仅支持 http/https 视频链接")
+    if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        raise HTTPException(status_code=400, detail="不允许代理本地回环地址")
+
+    proxy_row = await db.get(AppStateSetting, "proxy_url")
+    proxy_url = str(proxy_row.value or "").strip() if proxy_row else ""
+
+    try:
+        stream_url, upstream_headers = await resolve_remote_video_stream(cleaned, proxy_url=proxy_url)
+    except Exception as exc:
+        logger.warning("Remote video stream resolve failed for %s: %s", cleaned, exc)
+        raise HTTPException(status_code=400, detail=format_download_error_zh(exc, media_kind="video"))
+
+    req_headers: dict[str, str] = {}
+    for key in ("User-Agent", "Referer", "Origin"):
+        if key in upstream_headers:
+            req_headers[key] = upstream_headers[key]
+    if range_header:
+        req_headers["Range"] = range_header
+
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(15.0, read=60.0),
+        proxy=proxy_url or None,
+        follow_redirects=True,
+    )
+    try:
+        req = client.build_request("GET", stream_url, headers=req_headers)
+        upstream_resp = await client.send(req, stream=True)
+        if upstream_resp.status_code >= 400:
+            code = upstream_resp.status_code
+            await upstream_resp.aclose()
+            await client.aclose()
+            raise HTTPException(
+                status_code=502,
+                detail=format_download_error_zh(f"HTTP Error {code}", media_kind="video"),
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=format_download_error_zh(exc, media_kind="video"))
+
+    media_type = upstream_resp.headers.get("content-type") or "video/mp4"
+    resp_headers: dict[str, str] = {}
+    for hk in ("content-length", "content-range", "accept-ranges"):
+        if hk in upstream_resp.headers:
+            resp_headers[hk] = upstream_resp.headers[hk]
+
+    async def _iter_chunks():
+        try:
+            async for chunk in upstream_resp.aiter_bytes(chunk_size=65536):
+                yield chunk
+        finally:
+            await upstream_resp.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        _iter_chunks(),
+        status_code=upstream_resp.status_code,
+        media_type=media_type,
+        headers=resp_headers,
+    )
 
 
 @router.get("/random-backdrop")

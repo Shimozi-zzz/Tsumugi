@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import {
   collectionsApi,
@@ -8,11 +8,13 @@ import {
   settingsApi,
   systemApi,
 } from '@/api/client'
+import { useAudioStore } from '@/stores/audio'
 import type {
   ActiveStatusFilter,
   AppSettings,
   CollectionItem,
   DroppedFileInfo,
+  ExternalImportSource,
   Game,
   GameUpdatePayload,
   HealthInfo,
@@ -111,7 +113,17 @@ export const useLibraryStore = defineStore('library', () => {
   const filterStatus = computed<ActiveStatusFilter>(() => activeStatus.value)
   const filterTag = ref<string>('')
   const running = ref<RunningStatus>({ ...DEFAULT_RUNNING })
+  const launching = ref<boolean>(false)
+  const audioStore = useAudioStore()
   const health = ref<HealthInfo | null>(null)
+
+  watch(
+    () => running.value.running || launching.value,
+    (suppressed) => {
+      audioStore.setAutoplaySuppressed(suppressed)
+    },
+    { immediate: true },
+  )
   const loading = ref<boolean>(false)
   const isInitialized = ref<boolean>(false)
   const assetVersion = ref<number>(Date.now())
@@ -121,11 +133,14 @@ export const useLibraryStore = defineStore('library', () => {
   const importInitialTab = ref<ImportTab>('aggregated')
   const importInitialLocalMode = ref<'single' | 'batch'>('single')
   const droppedFileInfo = ref<DroppedFileInfo | null>(null)
+  const showExternalImportModal = ref(false)
+  const externalImportSource = ref<ExternalImportSource>('playnite')
   const showQuickSearch = ref(false)
   const showSettingsModal = ref(false)
   const settingsInitialSection = ref<SettingsSectionId>('general')
   const settingsInitialExpandSource = ref<string | null>(null)
   const showEditModal = ref(false)
+  const editInitialTab = ref<'meta' | 'media' | 'launch'>('meta')
   const showTimeLedger = ref(false)
   const showCollectionModal = ref(false)
   const collectionModalMode = ref<'create' | 'edit'>('create')
@@ -169,6 +184,11 @@ export const useLibraryStore = defineStore('library', () => {
     settingsInitialSection.value = section
     settingsInitialExpandSource.value = expandSource
     showSettingsModal.value = true
+  }
+
+  function openEditModal(initialTab: 'meta' | 'media' | 'launch' = 'meta') {
+    editInitialTab.value = initialTab
+    showEditModal.value = true
   }
 
   const activeCollection = computed<CollectionItem | null>(() => {
@@ -620,6 +640,10 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   async function launchGame(gameId: number) {
+    // 零延迟抑制自动播放并淡出暂停全部 BGM / OP / PV（不等后端接口返回）
+    launching.value = true
+    audioStore.setAutoplaySuppressed(true)
+    void audioStore.pauseAllMedia({ fadeOutMs: 250 })
     try {
       const res = await gamesApi.launch(gameId)
       running.value = res.tracker
@@ -629,6 +653,9 @@ export const useLibraryStore = defineStore('library', () => {
       notify(res.message || `已启动《${res.title}》`, 'success')
     } catch (err) {
       notify(err instanceof Error ? err.message : '启动游戏失败', 'error')
+    } finally {
+      launching.value = false
+      audioStore.setAutoplaySuppressed(Boolean(running.value.running))
     }
   }
 
@@ -710,6 +737,13 @@ export const useLibraryStore = defineStore('library', () => {
     showImportModal.value = true
   }
 
+  function openExternalImport(source: ExternalImportSource = 'playnite') {
+    externalImportSource.value = source
+    showImportModal.value = false
+    showSettingsModal.value = false
+    showExternalImportModal.value = true
+  }
+
   function syncGameFromServer(updated: Game) {
     const idx = games.value.findIndex((g) => g.id === updated.id)
     if (idx >= 0) {
@@ -746,11 +780,14 @@ export const useLibraryStore = defineStore('library', () => {
     importInitialTab,
     importInitialLocalMode,
     droppedFileInfo,
+    showExternalImportModal,
+    externalImportSource,
     showQuickSearch,
     showSettingsModal,
     settingsInitialSection,
     settingsInitialExpandSource,
     showEditModal,
+    editInitialTab,
     showTimeLedger,
     showCollectionModal,
     collectionModalMode,
@@ -769,6 +806,7 @@ export const useLibraryStore = defineStore('library', () => {
     notify,
     dismissToast,
     openSettings,
+    openEditModal,
     shouldBlurGame,
     initialize,
     refreshGames,
@@ -800,6 +838,7 @@ export const useLibraryStore = defineStore('library', () => {
     refreshMetadata,
     addOrFocusGame,
     openImport,
+    openExternalImport,
     syncGameFromServer,
     bumpAssetVersion,
   }

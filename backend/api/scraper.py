@@ -11,6 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.api.settings import DEFAULT_SETTINGS, resolve_bangumi_token
+from backend.core.scraper_settings import (
+    ALL_CREDENTIAL_FIELDS,
+    SECRET_CREDENTIAL_FIELDS,
+    is_masked_placeholder,
+    load_scraper_settings,
+)
 from backend.db.database import AsyncSessionLocal, get_db
 from backend.db.models import AppStateSetting, Game, GameMediaPath, PlayRecord
 from backend.schemas import (
@@ -18,7 +24,9 @@ from backend.schemas import (
     AssetApplyRequest,
     GameOut,
     MusicDownloadRequest,
+    ScraperEnrichRequest,
     ScraperImportRequest,
+    ScraperTestRequest,
 )
 from backend.scrapers.aggregator import MetadataAggregator
 from backend.scrapers.asset_search import (
@@ -26,18 +34,33 @@ from backend.scrapers.asset_search import (
     search_asset_candidates,
 )
 from backend.scrapers.bangumi import BANGUMI_USER_AGENT, BGM_BASE_URL
-from backend.scrapers.base import clean_scraped_tags, normalize_platform_badge
+from backend.scrapers.base import (
+    ScraperSearchResult,
+    canonicalize_source_name,
+    clean_scraped_tags,
+    normalize_external_ids,
+    normalize_platform_badge,
+    normalize_search_text,
+)
+from backend.scrapers.manager import ScraperManager
 from backend.scrapers.music import (
     download_op_music,
     resolve_preview_stream,
     search_op_music,
 )
+from backend.scrapers.steam import fetch_steam_trailers
 from backend.services.asset_downloader import (
     _build_asset_headers,
     download_game_assets,
     download_single_image_asset,
 )
-from backend.services.media_service import generate_pinyin_initials
+from backend.services.media_service import (
+    delete_local_media_cache,
+    direct_video_extension,
+    format_download_error_zh,
+    generate_pinyin_initials,
+    is_remote_http_url,
+)
 from backend.services.task_manager import task_manager
 
 logger = logging.getLogger("tsumugi.api.scraper")
@@ -64,23 +87,44 @@ async def _background_download_pv(
     url: str,
     proxy_url: str,
     mime_hint: str = "",
+    fallback_urls: list[str] | None = None,
+    steam_appid: str = "",
 ) -> None:
-    """后台异步强制下载宣传片至 data/assets/{game_id}/pv.mp4，并更新数据库路径"""
+    """后台异步下载宣传片至 data/assets/{game_id}/pv.{ext}，保留远程链接以支持失败即时回退在线播放"""
+    resolved_fallbacks: list[str] = list(fallback_urls or [])
+    if (
+        steam_appid
+        and not direct_video_extension(url, mime_hint)
+        and not any(direct_video_extension(u) for u in resolved_fallbacks)
+    ):
+        try:
+            trailers = await fetch_steam_trailers(steam_appid, proxy_url=proxy_url)
+            for tr in trailers:
+                for cand_u in [tr.get("url"), *(tr.get("fallback_urls") or [])]:
+                    if cand_u and direct_video_extension(str(cand_u)) and str(cand_u) not in resolved_fallbacks:
+                        resolved_fallbacks.append(str(cand_u))
+        except Exception:
+            pass
+
     try:
         rel_path = await download_pv_to_local(
             game_id=game_id,
             url=url,
             proxy_url=proxy_url,
             mime_hint=mime_hint,
+            fallback_urls=resolved_fallbacks,
         )
         async with AsyncSessionLocal() as db:
             stmt = select(Game).where(Game.id == game_id).options(selectinload(Game.media))
             game = (await db.execute(stmt)).scalar_one_or_none()
             if game and game.media:
                 game.media.pv_url_or_path = rel_path
+                if not game.media.pv_remote_url and is_remote_http_url(url):
+                    game.media.pv_remote_url = url
+                game.media.pv_mode = "download"
                 await db.commit()
     except Exception as exc:
-        logger.debug("Background PV download failed for game_id=%s: %s", game_id, exc)
+        logger.warning("Background PV download failed for game_id=%s url=%s: %s", game_id, url, exc)
 
 
 async def _background_download_selected_bgm(
@@ -88,7 +132,7 @@ async def _background_download_selected_bgm(
     bgm_url: str,
     proxy_url: str,
 ) -> None:
-    """后台异步下载用户选中的主题曲原声至 data/assets/{game_id}/bgm.{ext}"""
+    """后台异步下载用户选中的主题曲原声至 data/assets/{game_id}/bgm.{ext}，失败保留在线链接"""
     task_manager.set_task(game_id, "bgm", "downloading", 10, "正在下载主题曲…")
     try:
         rel_path = await download_op_music(
@@ -102,59 +146,192 @@ async def _background_download_selected_bgm(
             game = (await db.execute(stmt)).scalar_one_or_none()
             if game and game.media:
                 game.media.bgm_path = rel_path
+                if not game.media.bgm_remote_url and is_remote_http_url(bgm_url):
+                    game.media.bgm_remote_url = bgm_url
+                game.media.bgm_mode = "download"
                 await db.commit()
         task_manager.mark_done(game_id, "bgm", "主题曲已缓存到本地")
     except Exception as exc:
-        task_manager.mark_error(game_id, "bgm", f"主题曲下载失败: {exc}")
-        logger.debug("Background selected BGM download failed for game_id=%s: %s", game_id, exc)
+        logger.error("Background selected BGM download failed for game_id=%s: %s", game_id, exc, exc_info=True)
+        zh_msg = format_download_error_zh(exc, media_kind="audio")
+        task_manager.mark_error(game_id, "bgm", zh_msg)
 
 
-async def _background_auto_fetch_bgm(game_id: int, query: str, proxy_url: str) -> None:
-    """后台静默尝试匹配并下载一首最相关 OP 原声，任何异常均静默跳过不阻塞入库"""
-    task_manager.set_task(game_id, "bgm", "downloading", 10, "正在匹配主题曲…")
+async def _background_auto_fetch_bgm(
+    game_id: int,
+    query: str,
+    proxy_url: str,
+    mode: Literal["link_only", "download"] = "download",
+) -> None:
+    """后台静默匹配一首最相关 OP 原声；link_only 仅保存链接不下载，download 缓存至本地"""
+    if mode == "download":
+        task_manager.set_task(game_id, "bgm", "downloading", 10, "正在匹配主题曲…")
     try:
         candidates = await search_op_music(query, proxy_url=proxy_url)
         if not candidates:
-            task_manager.mark_error(game_id, "bgm", "未匹配到可用主题曲")
+            if mode == "download":
+                task_manager.mark_error(game_id, "bgm", "未匹配到可用主题曲")
             return
         best = candidates[0]
+        src_url = str(best.get("source_url") or "").strip()
+        prev_url = str(best.get("preview_url") or "").strip()
+        remote_url = prev_url or src_url
+
+        if mode == "link_only":
+            if remote_url:
+                async with AsyncSessionLocal() as db:
+                    stmt = select(Game).where(Game.id == game_id).options(selectinload(Game.media))
+                    game = (await db.execute(stmt)).scalar_one_or_none()
+                    if game and game.media and not game.media.bgm_path:
+                        game.media.bgm_remote_url = remote_url
+                        game.media.bgm_path = remote_url
+                        game.media.bgm_mode = "link_only"
+                        await db.commit()
+            return
+
+        # download 模式：先保留在线链接，再下载缓存至本地
+        if remote_url:
+            async with AsyncSessionLocal() as db:
+                stmt = select(Game).where(Game.id == game_id).options(selectinload(Game.media))
+                game = (await db.execute(stmt)).scalar_one_or_none()
+                if game and game.media:
+                    game.media.bgm_remote_url = remote_url
+                    if not game.media.bgm_path:
+                        game.media.bgm_path = remote_url
+                    game.media.bgm_mode = "download"
+                    await db.commit()
+
         task_manager.update_progress(game_id, "bgm", 45, "正在下载主题曲…")
         rel_path = await download_op_music(
             game_id=game_id,
-            source_url=str(best.get("source_url") or ""),
-            preview_url=str(best.get("preview_url") or ""),
+            source_url=src_url,
+            preview_url=prev_url,
             proxy_url=proxy_url,
         )
         async with AsyncSessionLocal() as db:
             stmt = select(Game).where(Game.id == game_id).options(selectinload(Game.media))
             game = (await db.execute(stmt)).scalar_one_or_none()
-            if game and game.media and not game.media.bgm_path:
+            if game and game.media:
                 game.media.bgm_path = rel_path
+                game.media.bgm_mode = "download"
                 await db.commit()
         task_manager.mark_done(game_id, "bgm", "主题曲已缓存到本地")
     except Exception as exc:
-        task_manager.mark_error(game_id, "bgm", f"主题曲下载失败: {exc}")
-        logger.debug("Background auto_fetch_bgm skipped for game_id=%s: %s", game_id, exc)
+        logger.error("Background auto_fetch_bgm failed for game_id=%s: %s", game_id, exc, exc_info=True)
+        if mode == "download":
+            zh_msg = format_download_error_zh(exc, media_kind="audio")
+            task_manager.mark_error(game_id, "bgm", zh_msg)
 
 
-async def _load_aggregator(db: AsyncSession) -> tuple[MetadataAggregator, dict[str, Any]]:
+async def _load_scraper_context(
+    db: AsyncSession,
+) -> tuple[ScraperManager, MetadataAggregator, dict[str, Any], dict[str, Any]]:
     result = await db.execute(select(AppStateSetting))
     stored = {row.key: row.value for row in result.scalars().all()}
     cfg = {**DEFAULT_SETTINGS, **stored}
 
     proxy_url = str(cfg.get("proxy_url") or "")
-    api_keys = dict(cfg.get("api_keys")) if isinstance(cfg.get("api_keys"), dict) else {}
-    bgm_tok = resolve_bangumi_token(cfg)
-    if bgm_tok and not api_keys.get("bangumi"):
-        api_keys["bangumi"] = bgm_tok
     allow_nsfw = bool(cfg.get("allow_nsfw_scrape", True))
+    scraper_cfg = load_scraper_settings(db_cfg=cfg)
+
+    api_keys = dict(cfg.get("api_keys")) if isinstance(cfg.get("api_keys"), dict) else {}
+    api_keys["bangumi"] = str(scraper_cfg.get("bangumi_token") or resolve_bangumi_token(cfg) or "")
+    api_keys["touchgal"] = str(scraper_cfg.get("touchgal_api_key") or api_keys.get("touchgal") or "")
+    api_keys["steamgriddb"] = str(scraper_cfg.get("steamgriddb_api_key") or api_keys.get("steamgriddb") or "")
+    api_keys["ymgal_client_id"] = str(scraper_cfg.get("ymgal_client_id") or "")
+    api_keys["ymgal_client_secret"] = str(scraper_cfg.get("ymgal_client_secret") or "")
+    api_keys["kungal_base_url"] = str(scraper_cfg.get("kungal_base_url") or "")
+    api_keys["kungal_token"] = str(scraper_cfg.get("kungal_token") or "")
+    api_keys["igdb_client_id"] = str(scraper_cfg.get("igdb_client_id") or "")
+    api_keys["igdb_client_secret"] = str(scraper_cfg.get("igdb_client_secret") or "")
+    cfg["api_keys"] = api_keys
 
     aggregator = MetadataAggregator(
         proxy_url=proxy_url,
         api_keys=api_keys,
         allow_nsfw=allow_nsfw,
+        scraper_settings=scraper_cfg,
     )
+    return aggregator.manager, aggregator, cfg, scraper_cfg
+
+
+async def _load_aggregator(db: AsyncSession) -> tuple[MetadataAggregator, dict[str, Any]]:
+    _, aggregator, cfg, _ = await _load_scraper_context(db)
     return aggregator, cfg
+
+
+async def _annotate_library_status(
+    db: AsyncSession,
+    items: list[ScraperSearchResult],
+) -> None:
+    """对照本地游戏库（外站 ID + 归一化标题），标注候选条目的已入库状态防止重复导入"""
+    if not items:
+        return
+
+    rows = (
+        await db.execute(
+            select(Game.id, Game.title, Game.sub_title, Game.bangumi_id, Game.external_ids)
+        )
+    ).all()
+
+    by_ext: dict[tuple[str, str], int] = {}
+    by_title: dict[str, int] = {}
+
+    for gid, g_title, g_sub, g_bgm, g_ext in rows:
+        ext_map = normalize_external_ids(g_ext if isinstance(g_ext, dict) else {})
+        if g_bgm and "bangumi" not in ext_map:
+            ext_map["bangumi"] = str(g_bgm).strip()
+        for k, v in ext_map.items():
+            if v:
+                by_ext[(k, v.lower())] = gid
+        for t in (g_title, g_sub):
+            nt = normalize_search_text(t)
+            if nt and len(nt) >= 2 and nt not in by_title:
+                by_title[nt] = gid
+
+    for item in items:
+        matched_gid: int | None = None
+        cand_ext = normalize_external_ids(item.external_ids)
+        norm_src = canonicalize_source_name(item.source)
+        if item.source_id and norm_src and norm_src not in cand_ext:
+            cand_ext[norm_src] = item.source_id
+
+        for k, v in cand_ext.items():
+            if (k, v.lower()) in by_ext:
+                matched_gid = by_ext[(k, v.lower())]
+                break
+
+        if matched_gid is None:
+            for t in (item.title, item.original_title, *(item.aliases or [])):
+                nt = normalize_search_text(t)
+                if nt and nt in by_title:
+                    matched_gid = by_title[nt]
+                    break
+
+        if matched_gid is not None:
+            item.already_in_library = True
+            item.existing_game_id = matched_gid
+
+
+def _parse_sources_query(
+    sources: list[str] | None,
+    legacy_source: str | None,
+) -> list[str] | None:
+    parsed: list[str] = []
+    if sources:
+        for raw in sources:
+            for part in str(raw or "").split(","):
+                s = part.strip().lower()
+                if s and s not in ("all", "aggregated"):
+                    parsed.append(s)
+    elif legacy_source:
+        ls = legacy_source.strip().lower()
+        if ls and ls not in ("all", "aggregated"):
+            for part in ls.split(","):
+                s = part.strip().lower()
+                if s and s not in ("all", "aggregated"):
+                    parsed.append(s)
+    return list(dict.fromkeys(parsed)) if parsed else None
 
 
 async def _set_last_active(db: AsyncSession, game_id: int) -> None:
@@ -165,33 +342,99 @@ async def _set_last_active(db: AsyncSession, game_id: int) -> None:
         db.add(AppStateSetting(key="last_active_game_id", value=game_id))
 
 
+@router.get("/sources")
+async def list_scraper_sources(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """返回全部注册元数据刮削器的启用状态、Key 配置状态与元信息"""
+    manager, _, _, _ = await _load_scraper_context(db)
+    descriptors = manager.list_source_descriptors()
+    return {
+        "sources": descriptors,
+        "sgdb_configured": manager.is_source_available("steamgriddb"),
+        "igdb_configured": manager.is_source_available("igdb"),
+        "touchgal_configured": manager.is_source_available("touchgal"),
+    }
+
+
+@router.post("/test/{source}")
+async def test_scraper_source(
+    source: str,
+    payload: ScraperTestRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """测试单个数据源连通性（超时 6s，支持传入未保存的临时凭证提前验证）"""
+    _, _, cfg, scraper_cfg = await _load_scraper_context(db)
+    effective_cfg = dict(scraper_cfg)
+
+    if payload is not None:
+        overrides = payload.model_dump(exclude_unset=True)
+        for field in ALL_CREDENTIAL_FIELDS:
+            if field not in overrides or overrides[field] is None:
+                continue
+            val = str(overrides[field]).strip()
+            if field in SECRET_CREDENTIAL_FIELDS and is_masked_placeholder(val):
+                continue
+            if val:
+                effective_cfg[field] = val
+
+    manager = ScraperManager(
+        proxy_url=str(cfg.get("proxy_url") or ""),
+        allow_nsfw=bool(cfg.get("allow_nsfw_scrape", True)),
+        scraper_settings=effective_cfg,
+    )
+    if not manager.get_scraper(source):
+        raise HTTPException(status_code=400, detail=f"不支持的数据源: {source}")
+    return await manager.test_source(source, timeout=6.0)
+
+
 @router.get("/search")
 async def search_metadata(
-    q: str = Query(..., min_length=1, description="游戏搜索关键词"),
-    source: str = Query(
-        "aggregated",
-        description="刮削源: aggregated / bgm / vndb / steam / sgdb / tgal",
+    q: str = Query(..., min_length=1, description="游戏搜索关键词、作品链接或编号"),
+    category: Literal["all", "galgame", "general"] | None = Query(
+        None,
+        description="可选兼容参数（省略时默认综合推荐并发全部已启用数据源）",
     ),
-    limit: int = Query(8, ge=1, le=20),
+    sources: list[str] | None = Query(
+        None,
+        description="指定单源或多源数组（省略时并发全部已启用数据源）",
+    ),
+    source: str | None = Query(
+        None,
+        description="向后兼容单源参数: aggregated / ymgal / kungal / dlsite / vndb / bangumi / bgm / steam / igdb / sgdb / tgal",
+    ),
+    limit: int = Query(15, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ):
-    """多源或单源检索候选游戏列表"""
-    aggregator, cfg = await _load_aggregator(db)
-    src = source.strip().lower()
+    """多源并发容错检索（默认综合推荐全源并发、支持链接/编号直查、去重相关性重排与已入库标注）"""
+    manager, _, _, _ = await _load_scraper_context(db)
+    resolved_sources = _parse_sources_query(sources, source)
 
-    if src == "aggregated":
-        items = await aggregator.search_aggregated(q, limit=limit)
-    else:
-        if not aggregator.get_scraper(src):
-            raise HTTPException(status_code=400, detail=f"不支持的刮削源: {source}")
-        items = await aggregator.search_source(src, q, limit=limit)
+    if resolved_sources:
+        for sid in resolved_sources:
+            if not manager.get_scraper(sid):
+                raise HTTPException(status_code=400, detail=f"不支持的刮削源: {sid}")
+
+    search_res = await manager.search(
+        q,
+        category=category or "all",
+        sources=resolved_sources,
+        limit=limit,
+    )
+    items: list[ScraperSearchResult] = search_res["items"]
+    await _annotate_library_status(db, items)
 
     return {
-        "source": src,
+        "source": (resolved_sources[0] if resolved_sources and len(resolved_sources) == 1 else "aggregated"),
+        "category": search_res["category"],
+        "sources": search_res["sources"],
         "query": q,
+        "direct_match": search_res["direct_match"],
         "count": len(items),
-        "sgdb_configured": bool((cfg.get("api_keys") or {}).get("steamgriddb")),
-        "items": [it.model_dump() for it in items],
+        "sgdb_configured": manager.is_source_available("steamgriddb"),
+        "igdb_configured": manager.is_source_available("igdb"),
+        "touchgal_configured": manager.is_source_available("touchgal"),
+        "available_sources": manager.list_source_descriptors(),
+        "source_errors": search_res["source_errors"],
+        "items": [it.to_api_dict() for it in items],
     }
 
 
@@ -202,14 +445,35 @@ async def get_source_detail(
     db: AsyncSession = Depends(get_db),
 ):
     """拉取单个平台的完整详情与视觉资产链接"""
-    aggregator, _ = await _load_aggregator(db)
-    if not aggregator.get_scraper(source):
+    manager, _, _, _ = await _load_scraper_context(db)
+    if not manager.get_scraper(source):
         raise HTTPException(status_code=400, detail=f"不支持的刮削源: {source}")
 
-    item = await aggregator.get_detail(source, external_id)
-    if not item:
+    detail = await manager.get_detail(source, external_id)
+    if not detail:
         raise HTTPException(status_code=404, detail="未从该平台获取到有效详情")
-    return item.model_dump()
+    await _annotate_library_status(db, [detail])
+    return detail.to_api_dict()
+
+
+@router.post("/enrich")
+async def enrich_metadata_cross_source(
+    payload: ScraperEnrichRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """跨源字段补全：从其他源拉取中文简介、开发商/标签以及高清封面/背景（含 SteamGridDB）"""
+    manager, _, _, _ = await _load_scraper_context(db)
+    return await manager.enrich(
+        title=payload.title,
+        original_title=payload.original_title,
+        aliases=payload.aliases,
+        release_date=payload.release_date,
+        source=payload.source,
+        source_id=payload.source_id,
+        external_ids=payload.external_ids,
+        target_sources=payload.target_sources,
+        mode=payload.mode,
+    )
 
 
 @router.post("/aggregate")
@@ -218,10 +482,11 @@ async def aggregate_preview(
     db: AsyncSession = Depends(get_db),
 ):
     """并发调用所有可用源并按最优权重拼装元数据与高清视觉资产，供入库前预览微调"""
-    aggregator, _ = await _load_aggregator(db)
+    _, aggregator, _, _ = await _load_scraper_context(db)
     res = await aggregator.aggregate_detail(
         keyword=payload.keyword,
         external_ids=payload.external_ids,
+        preferred_source=payload.preferred_source,
     )
     return {
         "item": res["item"].model_dump(),
@@ -239,7 +504,10 @@ async def import_scraped_game(
     _, cfg = await _load_aggregator(db)
     proxy_url = str(cfg.get("proxy_url") or "")
 
-    resolved_bgm_id = _extract_bangumi_id(payload.bangumi_id, payload.external_ids)
+    norm_external_ids = normalize_external_ids(payload.external_ids)
+    resolved_bgm_id = _extract_bangumi_id(payload.bangumi_id, norm_external_ids)
+    if resolved_bgm_id and "bangumi" not in norm_external_ids:
+        norm_external_ids["bangumi"] = resolved_bgm_id
 
     game = Game(
         title=payload.title.strip(),
@@ -253,16 +521,81 @@ async def import_scraped_game(
         status=payload.status,
         edition=payload.edition or "collector",
         is_nsfw=payload.is_nsfw,
-        source_platform=normalize_platform_badge(payload.source_platform, payload.external_ids),
+        source_platform=normalize_platform_badge(payload.source_platform, norm_external_ids),
         bangumi_id=resolved_bgm_id,
-        external_ids=payload.external_ids,
+        external_ids=norm_external_ids,
         locked_fields=[],
     )
 
+    # ── 1. 解析 PV 三模式策略：none / link_only / download ──
     selected_pv = (payload.selected_pv_url or "").strip()
     raw_pv = (payload.pv_url or "").strip()
-    pv_download_url = selected_pv or (raw_pv if raw_pv.startswith(("http://", "https://")) else "")
-    initial_pv_path = "" if pv_download_url else raw_pv
+    candidate_pv = selected_pv or raw_pv
+
+    if payload.pv_mode is not None:
+        resolved_pv_mode = payload.pv_mode
+    else:
+        resolved_pv_mode = "download" if candidate_pv else "none"
+
+    pv_download_url = ""
+    initial_pv_path = ""
+    initial_pv_remote = ""
+    if resolved_pv_mode == "none":
+        initial_pv_path = ""
+        initial_pv_remote = ""
+    elif resolved_pv_mode == "link_only":
+        if candidate_pv:
+            initial_pv_path = candidate_pv
+            initial_pv_remote = candidate_pv if is_remote_http_url(candidate_pv) else ""
+        else:
+            resolved_pv_mode = "none"
+    else:  # download
+        if is_remote_http_url(candidate_pv):
+            # 先将远程链接写入数据库，下载成功后再替换为本地路径；即使下载失败也能零刷新直接在线播放
+            pv_download_url = candidate_pv
+            initial_pv_path = candidate_pv
+            initial_pv_remote = candidate_pv
+        elif candidate_pv:
+            initial_pv_path = candidate_pv
+            initial_pv_remote = ""
+        else:
+            resolved_pv_mode = "none"
+
+    # ── 2. 解析 OP / BGM 三模式策略：none / link_only / download ──
+    selected_bgm = (payload.selected_bgm_url or "").strip()
+    if payload.op_mode is not None:
+        resolved_op_mode = payload.op_mode
+    else:
+        resolved_op_mode = "download" if (selected_bgm or payload.auto_fetch_bgm) else "none"
+
+    bgm_download_url = ""
+    initial_bgm_path = ""
+    initial_bgm_remote = ""
+    should_auto_fetch_bgm = False
+
+    if resolved_op_mode == "none":
+        initial_bgm_path = ""
+        initial_bgm_remote = ""
+    elif resolved_op_mode == "link_only":
+        if selected_bgm:
+            initial_bgm_path = selected_bgm
+            initial_bgm_remote = selected_bgm if is_remote_http_url(selected_bgm) else ""
+        elif payload.auto_fetch_bgm:
+            should_auto_fetch_bgm = True
+        else:
+            resolved_op_mode = "none"
+    else:  # download
+        if is_remote_http_url(selected_bgm):
+            bgm_download_url = selected_bgm
+            initial_bgm_path = selected_bgm
+            initial_bgm_remote = selected_bgm
+        elif selected_bgm:
+            initial_bgm_path = selected_bgm
+            initial_bgm_remote = ""
+        elif payload.auto_fetch_bgm:
+            should_auto_fetch_bgm = True
+        else:
+            resolved_op_mode = "none"
 
     game.media = GameMediaPath(
         exe_path=payload.exe_path.strip(),
@@ -271,13 +604,18 @@ async def import_scraped_game(
         save_dir=payload.save_dir.strip(),
         screenshot_dir=payload.screenshot_dir.strip(),
         pv_url_or_path=initial_pv_path,
+        pv_remote_url=initial_pv_remote,
+        pv_mode=resolved_pv_mode,
+        bgm_path=initial_bgm_path,
+        bgm_remote_url=initial_bgm_remote,
+        bgm_mode=resolved_op_mode,
     )
     game.play_record = PlayRecord(total_seconds=0)
 
     db.add(game)
     await db.flush()
 
-    # 并发下载视觉图片资产并自动转为 WebP 及生成 420px 封面缩略图（PV 交由后台异步本地化下载）
+    # 并发下载视觉图片资产并自动转为 WebP 及生成 420px 封面缩略图（PV/OP 按三模式策略单独处理）
     downloaded = await download_game_assets(
         game_id=game.id,
         cover_url=payload.cover_url,
@@ -303,8 +641,8 @@ async def import_scraped_game(
     await _set_last_active(db, game.id)
     await db.commit()
 
-    # 后台异步下载宣传片 PV（绝不阻塞导入接口响应）
-    if pv_download_url:
+    # 仅在 pv_mode == "download" 且存在远程链接时派发后台下载队列（link_only / none 绝不派发）
+    if resolved_pv_mode == "download" and pv_download_url:
         task_manager.set_task(game.id, "pv", "queued", 0, "等待下载宣传片…")
         asyncio.create_task(
             _background_download_pv(
@@ -312,21 +650,30 @@ async def import_scraped_game(
                 url=pv_download_url,
                 proxy_url=proxy_url,
                 mime_hint=(payload.selected_pv_mime_hint or "").strip(),
+                fallback_urls=list(payload.selected_pv_fallback_urls or []),
+                steam_appid=str(norm_external_ids.get("steam") or ""),
             )
         )
 
-    # 后台异步下载用户选定主题曲，或按原逻辑自动匹配 OP
-    selected_bgm = (payload.selected_bgm_url or "").strip()
-    if selected_bgm:
+    # 仅在 op_mode == "download"（或显式 auto_fetch_bgm）时派发 OP 后台任务
+    if resolved_op_mode == "download" and bgm_download_url:
         task_manager.set_task(game.id, "bgm", "queued", 0, "等待下载主题曲…")
         asyncio.create_task(
-            _background_download_selected_bgm(game.id, selected_bgm, proxy_url)
+            _background_download_selected_bgm(game.id, bgm_download_url, proxy_url)
         )
-    elif payload.auto_fetch_bgm:
+    elif should_auto_fetch_bgm:
         bgm_query = (payload.sub_title or payload.title).strip()
         if bgm_query:
-            task_manager.set_task(game.id, "bgm", "queued", 0, "等待匹配主题曲…")
-            asyncio.create_task(_background_auto_fetch_bgm(game.id, bgm_query, proxy_url))
+            if resolved_op_mode == "download":
+                task_manager.set_task(game.id, "bgm", "queued", 0, "等待匹配主题曲…")
+            asyncio.create_task(
+                _background_auto_fetch_bgm(
+                    game.id,
+                    bgm_query,
+                    proxy_url,
+                    mode="link_only" if resolved_op_mode == "link_only" else "download",
+                )
+            )
 
     stmt = (
         select(Game)
@@ -425,7 +772,17 @@ async def refresh_game_metadata(
     if "hero" not in skip_assets and downloaded.get("hero_bg_path"):
         game.media.hero_bg_path = downloaded["hero_bg_path"]
     if "pv" not in skip_assets and downloaded.get("pv_url_or_path"):
-        game.media.pv_url_or_path = downloaded["pv_url_or_path"]
+        new_pv_url = downloaded["pv_url_or_path"]
+        if is_remote_http_url(new_pv_url):
+            game.media.pv_remote_url = new_pv_url
+            # 已有本地缓存视频时绝不被远程链接覆盖（始终优先保留本地视频）
+            has_local_pv = bool(game.media.pv_url_or_path and not is_remote_http_url(game.media.pv_url_or_path))
+            if not has_local_pv:
+                game.media.pv_url_or_path = new_pv_url
+                game.media.pv_mode = "link_only"
+        else:
+            game.media.pv_url_or_path = new_pv_url
+            game.media.pv_mode = "download"
     if not game.media.screenshot_dir and downloaded.get("downloaded_screenshot_dir"):
         game.media.screenshot_dir = downloaded["downloaded_screenshot_dir"]
 
@@ -457,17 +814,61 @@ async def download_music_for_game(
     payload: MusicDownloadRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """下载选中的 OP 原声至 data/assets/{game_id}/bgm.{ext} 并绑定到该游戏"""
+    """按三模式（link_only / download / none）绑定或下载 OP 原声至本地"""
     stmt = select(Game).where(Game.id == game_id).options(selectinload(Game.media))
     game = (await db.execute(stmt)).scalar_one_or_none()
     if not game:
         raise HTTPException(status_code=404, detail="未找到指定游戏")
 
-    if not payload.source_url.strip() and not payload.preview_url.strip():
+    if not game.media:
+        game.media = GameMediaPath(game_id=game.id)
+
+    if payload.mode == "none":
+        delete_local_media_cache(game_id, "bgm")
+        game.media.bgm_path = ""
+        game.media.bgm_remote_url = ""
+        game.media.bgm_mode = "none"
+        await db.commit()
+        return {"game_id": game_id, "bgm_path": "", "bgm_remote_url": "", "bgm_mode": "none"}
+
+    target_remote = (payload.preview_url or payload.source_url or "").strip()
+    if not target_remote:
         raise HTTPException(status_code=400, detail="请提供有效的音频来源链接")
+
+    if payload.mode == "link_only":
+        delete_local_media_cache(game_id, "bgm")
+        game.media.bgm_remote_url = target_remote if is_remote_http_url(target_remote) else ""
+        game.media.bgm_path = target_remote
+        game.media.bgm_mode = "link_only"
+        await db.commit()
+        return {
+            "game_id": game_id,
+            "bgm_path": game.media.bgm_path,
+            "bgm_remote_url": game.media.bgm_remote_url,
+            "bgm_mode": "link_only",
+        }
 
     _, cfg = await _load_aggregator(db)
     proxy_url = str(cfg.get("proxy_url") or "")
+
+    # download 模式：先持久化远程链接确保失败也可在线回退播放
+    if is_remote_http_url(target_remote):
+        game.media.bgm_remote_url = target_remote
+        if not game.media.bgm_path:
+            game.media.bgm_path = target_remote
+    game.media.bgm_mode = "download"
+    await db.commit()
+
+    if payload.async_mode:
+        task_info = task_manager.set_task(game_id, "bgm", "queued", 0, "等待下载主题曲…")
+        asyncio.create_task(_background_download_selected_bgm(game_id, target_remote, proxy_url))
+        return {
+            "game_id": game_id,
+            "bgm_path": game.media.bgm_path,
+            "bgm_remote_url": game.media.bgm_remote_url,
+            "bgm_mode": "download",
+            "download_task": task_info,
+        }
 
     try:
         rel_path = await download_op_music(
@@ -477,13 +878,18 @@ async def download_music_for_game(
             proxy_url=proxy_url,
         )
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.error("Sync OP music download failed for game_id=%s: %s", game_id, exc, exc_info=True)
+        raise HTTPException(status_code=400, detail=format_download_error_zh(exc, media_kind="audio"))
 
-    if not game.media:
-        game.media = GameMediaPath(game_id=game.id)
     game.media.bgm_path = rel_path
+    game.media.bgm_mode = "download"
     await db.commit()
-    return {"game_id": game_id, "bgm_path": rel_path}
+    return {
+        "game_id": game_id,
+        "bgm_path": rel_path,
+        "bgm_remote_url": game.media.bgm_remote_url,
+        "bgm_mode": "download",
+    }
 
 
 @router.get("/music/preview")
@@ -497,7 +903,8 @@ async def proxy_music_preview(
     try:
         stream_url, upstream_headers = await resolve_preview_stream(url, proxy_url=proxy_url)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"无法解析试听流: {exc}")
+        logger.warning("Music preview resolve failed for %s: %s", url, exc)
+        raise HTTPException(status_code=400, detail=format_download_error_zh(exc, media_kind="audio"))
 
     req_headers: dict[str, str] = {}
     for key in ("User-Agent", "Referer", "Origin"):
@@ -656,6 +1063,32 @@ async def apply_single_asset_for_game(
     target_url = payload.url.strip()
 
     if payload.asset_type == "pv":
+        if payload.mode == "none":
+            delete_local_media_cache(game_id, "pv")
+            game.media.pv_url_or_path = ""
+            game.media.pv_remote_url = ""
+            game.media.pv_mode = "none"
+            await db.commit()
+            refreshed = (await db.execute(stmt)).scalar_one()
+            return GameOut.model_validate(refreshed)
+
+        if payload.mode == "link_only":
+            delete_local_media_cache(game_id, "pv")
+            game.media.pv_url_or_path = target_url
+            game.media.pv_remote_url = target_url if is_remote_http_url(target_url) else ""
+            game.media.pv_mode = "link_only"
+            await db.commit()
+            refreshed = (await db.execute(stmt)).scalar_one()
+            return GameOut.model_validate(refreshed)
+
+        # download 模式：先持久化远程链接，即使后台下载失败也可直接无刷新在线回退播放
+        if is_remote_http_url(target_url):
+            game.media.pv_remote_url = target_url
+            game.media.pv_url_or_path = target_url
+        game.media.pv_mode = "download"
+        await db.commit()
+
+        steam_appid = str((game.external_ids or {}).get("steam") or "")
         if payload.async_mode:
             task_info = task_manager.set_task(game_id, "pv", "queued", 0, "等待下载宣传片…")
             asyncio.create_task(
@@ -664,9 +1097,12 @@ async def apply_single_asset_for_game(
                     url=target_url,
                     proxy_url=proxy_url,
                     mime_hint=payload.mime_hint,
+                    fallback_urls=list(payload.fallback_urls or []),
+                    steam_appid=steam_appid,
                 )
             )
-            game_data = GameOut.model_validate(game).model_dump(mode="json")
+            refreshed = (await db.execute(stmt)).scalar_one()
+            game_data = GameOut.model_validate(refreshed).model_dump(mode="json")
             return {**game_data, "download_task": task_info}
 
         try:
@@ -675,9 +1111,10 @@ async def apply_single_asset_for_game(
                 url=target_url,
                 proxy_url=proxy_url,
                 mime_hint=payload.mime_hint,
+                fallback_urls=list(payload.fallback_urls or []),
             )
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"宣传片下载失败: {exc}")
+            raise HTTPException(status_code=400, detail=format_download_error_zh(exc, media_kind="video"))
         game.media.pv_url_or_path = rel_path
     else:
         try:
@@ -718,11 +1155,10 @@ async def verify_bangumi_token(
     _, cfg = await _load_aggregator(db)
     proxy_url = str(cfg.get("proxy_url") or "")
 
-    resolved_token = (
-        (token or "").strip()
-        or (x_bangumi_token or "").strip()
-        or resolve_bangumi_token(cfg)
-    )
+    raw_tok = (token or "").strip() or (x_bangumi_token or "").strip()
+    if is_masked_placeholder(raw_tok):
+        raw_tok = ""
+    resolved_token = raw_tok or resolve_bangumi_token(cfg)
     if not resolved_token:
         return {"valid": False, "detail": "尚未配置 Bangumi Access Token"}
 
@@ -773,8 +1209,11 @@ async def verify_bangumi_token(
 @router.get("/metadata/search")
 async def search_single_source_metadata(
     q: str = Query(..., min_length=1, description="检索关键词"),
-    source: Literal["bangumi", "vndb", "touchgal", "steam"] = Query(
-        ..., description="单一数据源: bangumi / vndb / touchgal / steam"
+    source: Literal[
+        "ymgal", "kungal", "dlsite", "bangumi", "vndb", "steam", "igdb", "touchgal"
+    ] = Query(
+        ...,
+        description="单一数据源: ymgal / kungal / dlsite / bangumi / vndb / steam / igdb / touchgal",
     ),
     limit: int = Query(10, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
@@ -811,8 +1250,11 @@ async def search_single_source_metadata(
 
 @router.get("/metadata/detail")
 async def get_single_source_metadata_detail(
-    source: Literal["bangumi", "vndb", "touchgal", "steam"] = Query(
-        ..., description="单一数据源: bangumi / vndb / touchgal / steam"
+    source: Literal[
+        "ymgal", "kungal", "dlsite", "bangumi", "vndb", "steam", "igdb", "touchgal"
+    ] = Query(
+        ...,
+        description="单一数据源: ymgal / kungal / dlsite / bangumi / vndb / steam / igdb / touchgal",
     ),
     external_id: str = Query(..., min_length=1, description="该数据源的条目唯一 ID"),
     db: AsyncSession = Depends(get_db),

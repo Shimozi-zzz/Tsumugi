@@ -54,6 +54,7 @@ async function handleToggleMaximize() {
     } else {
       isMaximized.value = !isMaximized.value
     }
+    await syncDesktopState()
   } catch {
     // ignore
   }
@@ -65,6 +66,7 @@ async function handleToggleFullscreen() {
     try {
       const next = await api.toggle_fullscreen()
       isFullscreen.value = typeof next === 'boolean' ? next : !isFullscreen.value
+      await syncDesktopState()
     } catch {
       // ignore
     }
@@ -94,6 +96,7 @@ async function handleExitFullscreen() {
     try {
       await api.exit_fullscreen()
       isFullscreen.value = false
+      await syncDesktopState()
     } catch {
       // ignore
     }
@@ -109,6 +112,32 @@ async function handleExitFullscreen() {
     // ignore
   }
   syncSafeTopOffset()
+}
+
+function onDragStripMouseDown(e: MouseEvent) {
+  if (e.button !== 0 || !isDesktop.value || !isMaximized.value || isFullscreen.value) return
+  const startX = e.screenX
+  const startY = e.screenY
+  const ratioX = Math.max(0.15, Math.min(0.85, e.clientX / Math.max(window.innerWidth, 1)))
+  let restored = false
+
+  const cleanup = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', cleanup)
+  }
+
+  const onMove = (ev: MouseEvent) => {
+    if (restored) return
+    if (Math.hypot(ev.screenX - startX, ev.screenY - startY) > 4) {
+      restored = true
+      cleanup()
+      isMaximized.value = false
+      void getDesktopApi()?.restore_for_drag?.(ratioX)
+    }
+  }
+
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', cleanup)
 }
 
 async function handleClose() {
@@ -162,6 +191,15 @@ function onPywebviewReady() {
   void syncDesktopState()
 }
 
+function onNativeWindowState(e: Event) {
+  const detail = (e as CustomEvent<{ is_desktop?: boolean; is_maximized?: boolean; is_fullscreen?: boolean }>).detail
+  if (!detail) return
+  if (typeof detail.is_desktop === 'boolean') isDesktop.value = detail.is_desktop
+  if (typeof detail.is_maximized === 'boolean') isMaximized.value = detail.is_maximized
+  if (typeof detail.is_fullscreen === 'boolean') isFullscreen.value = detail.is_fullscreen
+  syncSafeTopOffset()
+}
+
 watch([isDesktop, isFullscreen], () => {
   syncSafeTopOffset()
 })
@@ -173,12 +211,14 @@ onMounted(() => {
   }
   syncSafeTopOffset()
   window.addEventListener('pywebviewready', onPywebviewReady)
+  window.addEventListener('tsumugi-window-state', onNativeWindowState)
   window.addEventListener('keydown', onKeydown)
   document.addEventListener('fullscreenchange', onBrowserFullscreenChange)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('pywebviewready', onPywebviewReady)
+  window.removeEventListener('tsumugi-window-state', onNativeWindowState)
   window.removeEventListener('keydown', onKeydown)
   document.removeEventListener('fullscreenchange', onBrowserFullscreenChange)
   document.documentElement.style.setProperty('--titlebar-safe-top', '0px')
@@ -190,6 +230,7 @@ onBeforeUnmount(() => {
   <div v-if="isDesktop && !isFullscreen" class="window-titlebar">
     <div
       class="drag-strip pywebview-drag-region"
+      @mousedown="onDragStripMouseDown"
       @dblclick="handleToggleMaximize"
     />
 

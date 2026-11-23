@@ -311,7 +311,7 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault()
     enterDetail(currentGame.value.id)
   } else if (e.code === 'Space' || e.key === ' ') {
-    if (currentGame.value?.media?.bgm_path) {
+    if (currentGame.value?.media?.bgm_path || currentGame.value?.media?.bgm_remote_url) {
       e.preventDefault()
       void audio.togglePlayForGame(currentGame.value, store.assetVersion)
     }
@@ -589,12 +589,16 @@ watch(
 )
 
 watch(
-  () => [ejectedGameId.value, currentGame.value?.media?.bgm_path],
+  () => [
+    ejectedGameId.value,
+    currentGame.value?.media?.bgm_path,
+    currentGame.value?.media?.bgm_remote_url,
+  ],
   () => {
     const g = currentGame.value
     if (!g || ejectedGameId.value !== g.id) return
     void audio.syncGameBgm(g, {
-      autoPlay: store.bgmAutoplay,
+      autoPlay: store.bgmAutoplay && !store.running.running && !audio.autoplaySuppressed,
       cacheBust: store.assetVersion,
     })
   },
@@ -1099,7 +1103,10 @@ onBeforeUnmount(() => {
 
       <!-- 右下留声机微控胶囊（与铭牌视觉平衡） -->
       <Transition name="fade">
-        <div v-if="currentGame.media?.bgm_path" class="gallery-phono-dock">
+        <div
+          v-if="currentGame.media?.bgm_path || currentGame.media?.bgm_remote_url"
+          class="gallery-phono-dock"
+        >
           <PhonographPill :game="currentGame" />
         </div>
       </Transition>

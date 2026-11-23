@@ -38,6 +38,13 @@ HIDDEN_IMPORTS = [
     "pypinyin",
     "multipart",
     "python_multipart",
+    "backend.api.import_external",
+    "backend.services.importers",
+    "backend.services.importers.base",
+    "backend.services.importers.executor",
+    "backend.services.importers.litedb_v4",
+    "backend.services.importers.playnite",
+    "backend.services.importers.vnite",
 ]
 
 

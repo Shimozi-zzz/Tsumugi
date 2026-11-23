@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.api.settings import SOURCE_TOKEN_LINKS
+from backend.api.settings import DEFAULT_SETTINGS, SOURCE_TOKEN_LINKS
 from backend.core.config import (
     APP_VERSION,
     ASSETS_DIR,
@@ -22,8 +22,15 @@ from backend.core.config import (
     THUMBS_CACHE_DIR,
     WALLPAPERS_DIR,
 )
+from backend.core.scraper_settings import (
+    load_scraper_settings,
+    mask_scraper_settings_for_client,
+    save_scraper_settings,
+)
 from backend.db.database import get_db
 from backend.db.models import AppStateSetting, Game
+from backend.schemas import ScraperSettingsUpdateRequest
+from backend.scrapers.manager import ScraperManager
 from backend.services.media_service import convert_image_to_webp, generate_cover_thumbnail
 from backend.services.task_manager import task_manager
 
@@ -74,6 +81,69 @@ async def _load_valid_game_ids(db: AsyncSession) -> set[str]:
 async def get_source_token_links() -> dict[str, str]:
     """返回各第三方数据源官方 API Token / Key 申请直达链接"""
     return dict(SOURCE_TOKEN_LINKS)
+
+
+@router.get("/scraper-settings")
+async def get_scraper_settings_endpoint(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """读取 DATA_DIR/settings.json 中的多源刮削开关与脱敏凭证配置"""
+    rows = (await db.execute(select(AppStateSetting))).scalars().all()
+    db_cfg = {**DEFAULT_SETTINGS, **{row.key: row.value for row in rows}}
+    raw_cfg = load_scraper_settings(db_cfg=db_cfg)
+    manager = ScraperManager(
+        proxy_url=str(db_cfg.get("proxy_url") or ""),
+        allow_nsfw=bool(db_cfg.get("allow_nsfw_scrape", True)),
+        scraper_settings=raw_cfg,
+    )
+    masked = mask_scraper_settings_for_client(raw_cfg)
+    masked["sources"] = manager.list_source_descriptors()
+    masked["source_links"] = dict(SOURCE_TOKEN_LINKS)
+    return masked
+
+
+@router.put("/scraper-settings")
+async def update_scraper_settings_endpoint(
+    payload: ScraperSettingsUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """持久化数据源开关与凭证至 DATA_DIR/settings.json（脱敏返回，不泄露明文密钥）"""
+    rows = (await db.execute(select(AppStateSetting))).scalars().all()
+    db_cfg = {**DEFAULT_SETTINGS, **{row.key: row.value for row in rows}}
+
+    updates = payload.model_dump(exclude_unset=True)
+    saved = save_scraper_settings(updates, db_cfg=db_cfg)
+
+    # 同步 Bangumi Token、TouchGal API Key 与 SteamGridDB Key 至数据库 AppStateSetting 保持旧功能互通
+    api_keys_row = await db.get(AppStateSetting, "api_keys")
+    current_keys = (
+        dict(api_keys_row.value)
+        if api_keys_row and isinstance(api_keys_row.value, dict)
+        else dict(DEFAULT_SETTINGS["api_keys"])
+    )
+    current_keys["bangumi"] = str(saved.get("bangumi_token") or "")
+    current_keys["touchgal"] = str(saved.get("touchgal_api_key") or "")
+    current_keys["steamgriddb"] = str(saved.get("steamgriddb_api_key") or "")
+    if api_keys_row:
+        api_keys_row.value = current_keys
+    else:
+        db.add(AppStateSetting(key="api_keys", value=current_keys))
+
+    bgm_row = await db.get(AppStateSetting, "bangumi_token")
+    if bgm_row:
+        bgm_row.value = str(saved.get("bangumi_token") or "")
+    else:
+        db.add(AppStateSetting(key="bangumi_token", value=str(saved.get("bangumi_token") or "")))
+
+    await db.commit()
+
+    manager = ScraperManager(
+        proxy_url=str(db_cfg.get("proxy_url") or ""),
+        allow_nsfw=bool(db_cfg.get("allow_nsfw_scrape", True)),
+        scraper_settings=saved,
+    )
+    masked = mask_scraper_settings_for_client(saved)
+    masked["sources"] = manager.list_source_descriptors()
+    masked["source_links"] = dict(SOURCE_TOKEN_LINKS)
+    return masked
 
 
 # ──────────────────── 2. 存储占用分析与孤儿文件清理 ────────────────────

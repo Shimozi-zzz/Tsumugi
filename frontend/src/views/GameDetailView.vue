@@ -38,6 +38,82 @@ const pvTask = computed(() => taskStore.getTask(game.value?.id, 'pv'))
 const showPvTaskBar = computed(
   () => Boolean(pvTask.value && pvTask.value.status !== 'done'),
 )
+const pvActionBusy = ref(false)
+
+function isHttpUrl(raw?: string | null): boolean {
+  return /^https?:\/\//i.test((raw || '').trim())
+}
+
+// 统一 PV 播放优先级：有本地有效文件 → 优先本地；无本地文件但有远程链接 → 直接在线播放
+const localPvPath = computed(() => {
+  const raw = (game.value?.media?.pv_url_or_path || '').trim()
+  return raw && !isHttpUrl(raw) ? raw : ''
+})
+
+const remotePvUrl = computed(() => {
+  const m = game.value?.media
+  const storedRemote = (m?.pv_remote_url || '').trim()
+  if (isHttpUrl(storedRemote)) return storedRemote
+  const rawMain = (m?.pv_url_or_path || '').trim()
+  if (isHttpUrl(rawMain)) return rawMain
+  return taskStore.getPvRetryUrl(game.value?.id)
+})
+
+const effectivePvSrc = computed(() => localPvPath.value || remotePvUrl.value)
+
+const pvStorageState = computed<'local' | 'link_only' | 'none'>(() => {
+  if (localPvPath.value) return 'local'
+  if (remotePvUrl.value) return 'link_only'
+  return 'none'
+})
+
+const hasBgmMedia = computed(() => {
+  const m = game.value?.media
+  return Boolean((m?.bgm_path || '').trim() || (m?.bgm_remote_url || '').trim())
+})
+
+async function handleCacheRemotePv() {
+  if (!game.value || pvActionBusy.value || !remotePvUrl.value) return
+  pvActionBusy.value = true
+  try {
+    const res = await mediaApi.cacheRemote(game.value.id, 'pv')
+    store.syncGameFromServer(res)
+    taskStore.trackTask(
+      res.download_task || {
+        game_id: game.value.id,
+        asset_type: 'pv',
+        status: 'queued',
+        progress: 0,
+        message: '等待下载宣传片…',
+      },
+      { url: remotePvUrl.value },
+    )
+    store.notify('宣传片已加入后台下载，完成后自动切换本地播放', 'info')
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '触发本地下载失败', 'error')
+  } finally {
+    pvActionBusy.value = false
+  }
+}
+
+async function handleDropLocalPvCache() {
+  if (!game.value || pvActionBusy.value) return
+  pvActionBusy.value = true
+  try {
+    const updated = await mediaApi.dropLocalCache(game.value.id, 'pv')
+    store.syncGameFromServer(updated)
+    store.notify(
+      updated.media?.pv_remote_url
+        ? '已删除本地视频缓存，保留在线链接可直接播放'
+        : '已删除本地视频文件',
+      'success',
+    )
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '释放本地缓存失败', 'error')
+  } finally {
+    pvActionBusy.value = false
+  }
+}
 
 const bangumiTargetLabel = computed(() => {
   const s = (game.value?.status || 'todo').toLowerCase()
@@ -524,12 +600,12 @@ async function handleSyncBangumi() {
     <!-- 下滚双栏内容区（左 72% / 右 28%），无缝承接 #0a0a0c 画布 -->
     <section ref="belowFoldRef" class="below-fold">
       <div class="col-left">
-        <!-- ① 优先媒体区：本地 PV 播放器 + 下载进度条 + 截图/CG 画廊 -->
+        <!-- ① 优先媒体区：PV 播放器（本地优先 / 链接直播 / 无则不渲染空壳） + 截图/CG 画廊 -->
         <div
-          v-if="game.media?.pv_url_or_path || showPvTaskBar || screenshots.length > 0"
+          v-if="effectivePvSrc || showPvTaskBar || screenshots.length > 0"
           class="section-stack"
         >
-          <!-- PV 后台下载进度条 -->
+          <!-- PV 后台下载进度 / 失败中文提示条（失败后下方立即无刷新渲染在线链接播放器） -->
           <div
             v-if="showPvTaskBar && pvTask"
             class="pv-task-card"
@@ -538,29 +614,29 @@ async function handleSyncBangumi() {
             <div class="pv-task-top">
               <span class="pv-task-label">
                 <template v-if="pvTask.status === 'error'">
-                  {{ pvTask.message || '宣传片下载失败' }}
+                  {{ pvTask.message || '本地视频下载失败，已保留在线链接可直接播放' }}
                 </template>
                 <template v-else>
-                  正在下载宣传片
+                  正在缓存宣传片到本地
                   <span v-if="pvTask.progress != null" class="tabular-nums">{{ pvTask.progress }}%</span>
                 </template>
               </span>
               <div class="pv-task-actions">
                 <button
-                  v-if="pvTask.status === 'error' && taskStore.canRetryPv(game.id)"
+                  v-if="pvTask.status === 'error' && taskStore.canRetryPv(game.id, remotePvUrl)"
                   type="button"
                   class="btn btn-sm"
-                  @click="taskStore.retryPvDownload(game.id)"
+                  @click="taskStore.retryPvDownload(game.id, remotePvUrl)"
                 >
-                  重试
+                  重试下载
                 </button>
                 <button
                   v-if="pvTask.status === 'error'"
                   type="button"
                   class="btn btn-sm btn-ghost"
-                  @click="taskStore.dismissTask(game.id, 'pv')"
+                  @click="taskStore.keepLinkOnlyAndDismiss(game.id, 'pv', remotePvUrl)"
                 >
-                  忽略
+                  仅保留链接（忽略）
                 </button>
               </div>
             </div>
@@ -573,13 +649,54 @@ async function handleSyncBangumi() {
             </div>
           </div>
 
-          <LocalVideoPlayer
-            v-if="game.media?.pv_url_or_path"
-            :src="game.media.pv_url_or_path"
-            :poster="heroImageUrl"
-            :blurred="blurred"
-            :cache-bust="store.assetVersion"
-          />
+          <div v-if="effectivePvSrc" class="pv-player-wrap">
+            <div class="pv-status-strip">
+              <div class="pv-status-left">
+                <span class="pv-mode-pill" :class="pvStorageState === 'local' ? 'is-local' : 'is-remote'">
+                  {{ pvStorageState === 'local' ? '本地缓存' : '在线链接' }}
+                </span>
+                <span class="pv-status-hint">
+                  {{ pvStorageState === 'local' ? '优先播放本地视频' : '直接在线加载，不占硬盘空间' }}
+                </span>
+              </div>
+              <div class="pv-status-actions">
+                <button
+                  v-if="pvStorageState === 'link_only' && (!pvTask || pvTask.status !== 'downloading' && pvTask.status !== 'queued')"
+                  type="button"
+                  class="pv-inline-btn"
+                  :disabled="pvActionBusy"
+                  @click="handleCacheRemotePv"
+                >
+                  下载到本地
+                </button>
+                <button
+                  v-if="pvStorageState === 'local' && remotePvUrl"
+                  type="button"
+                  class="pv-inline-btn"
+                  :disabled="pvActionBusy"
+                  title="仅删除本地视频文件以释放空间，保留在线链接播放"
+                  @click="handleDropLocalPvCache"
+                >
+                  仅删本地、保留链接
+                </button>
+                <button
+                  type="button"
+                  class="pv-inline-btn"
+                  @click="store.openEditModal('media')"
+                >
+                  管理影音
+                </button>
+              </div>
+            </div>
+
+            <LocalVideoPlayer
+              :src="effectivePvSrc"
+              :fallback-src="localPvPath ? remotePvUrl : ''"
+              :poster="heroImageUrl"
+              :blurred="blurred"
+              :cache-bust="store.assetVersion"
+            />
+          </div>
 
           <div v-if="screenshots.length > 0" class="content-block">
             <div class="block-header">
@@ -754,6 +871,26 @@ async function handleSyncBangumi() {
 
           <div class="divider" />
 
+          <!-- 轻量影音入口（未配置 PV 时不渲染空播放器，仅保留简洁添加入口） -->
+          <div v-if="pvStorageState === 'none' || !hasBgmMedia" class="quick-media-entry">
+            <button
+              v-if="pvStorageState === 'none'"
+              type="button"
+              class="quick-media-link"
+              @click="store.openEditModal('media')"
+            >
+              + 添加宣传片 PV
+            </button>
+            <button
+              v-if="!hasBgmMedia"
+              type="button"
+              class="quick-media-link"
+              @click="store.openEditModal('media')"
+            >
+              + 添加主题曲 OP
+            </button>
+          </div>
+
           <!-- 标签云 -->
           <div class="tags-block">
             <div class="sub-label">标签</div>
@@ -800,9 +937,9 @@ async function handleSyncBangumi() {
       />
     </Transition>
 
-    <!-- 详情页留声机原声浮条（仅当绑定了 bgm_path 时轻盈浮现） -->
+    <!-- 详情页留声机原声浮条（本地缓存或在线链接均支持浮现播放） -->
     <Transition name="fade">
-      <div v-if="game.media?.bgm_path" class="detail-phono-dock">
+      <div v-if="hasBgmMedia" class="detail-phono-dock">
         <PhonographPill :game="game" />
       </div>
     </Transition>
@@ -1720,6 +1857,97 @@ async function handleSyncBangumi() {
   display: inline-flex;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.pv-player-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pv-status-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 2px 2px 0;
+}
+
+.pv-status-left,
+.pv-status-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pv-mode-pill {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.pv-mode-pill.is-local {
+  background: rgba(52, 211, 153, 0.14);
+  color: #6ee7b7;
+}
+
+.pv-mode-pill.is-remote {
+  background: rgba(96, 165, 250, 0.14);
+  color: #93c5fd;
+}
+
+.pv-status-hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.pv-inline-btn {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.pv-inline-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--text-primary);
+}
+
+.pv-inline-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.quick-media-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.quick-media-link {
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.quick-media-link:hover {
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .pv-progress-track {
