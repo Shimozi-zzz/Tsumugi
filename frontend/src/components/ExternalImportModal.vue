@@ -20,7 +20,7 @@ const hasBridge = isDesktopBridgeAvailable()
 
 const sources: { id: ExternalImportSource; label: string; desc: string }[] = [
   { id: 'playnite', label: 'Playnite', desc: 'LiteDB v4 / Playnite 9' },
-  { id: 'vnite', label: 'Vnite', desc: '数据目录 / JSON · ZIP 备份' },
+  { id: 'vnite', label: 'Vnite', desc: '本地数据库直读 / JSON · ZIP' },
 ]
 
 const activeSource = ref<ExternalImportSource>(store.externalImportSource || 'playnite')
@@ -75,13 +75,13 @@ const selectedExistingCount = computed(() => {
 const pathPlaceholder = computed(() =>
   activeSource.value === 'playnite'
     ? '例如 C:\\Users\\你的用户名\\AppData\\Roaming\\Playnite\\library 或便携版目录'
-    : '填写 Vnite 数据目录，或导出的 .json / .zip 备份文件路径',
+    : '例如 C:\\Users\\你的用户名\\AppData\\Roaming\\vnite\\app\\database，或 .json / .zip 备份路径',
 )
 
 const pathHint = computed(() =>
   activeSource.value === 'playnite'
     ? '自动以只读快照方式读取 Playnite 的 games.db（含 Playnite 9 JSON 目录），不会影响运行中的 Playnite，封面与背景图会独立拷贝到 Tsumugi 本地目录。'
-    : '支持自动扫描 Vnite 本地数据目录，或直接填写 Vnite 导出的 .json / .zip 备份文件路径；若本地为加密/二进制 LevelDB，请先在 Vnite 中导出备份文件。',
+    : '支持以只读快照方式直接解析 Vnite 本地 LevelDB / PouchDB 数据库目录（运行中亦可安全读取，含元数据、游玩时长、启动路径与内嵌封面），也兼容导入 .json / .zip 备份文件。',
 )
 
 function closeModal() {

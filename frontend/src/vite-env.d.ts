@@ -9,6 +9,7 @@ declare module '*.vue' {
 interface PyWebviewAPI {
   minimize?: () => Promise<boolean>
   toggle_maximize?: () => Promise<boolean>
+  start_drag?: (cursorRatioX?: number) => Promise<boolean>
   restore_for_drag?: (ratioX?: number) => Promise<boolean>
   toggle_fullscreen?: () => Promise<boolean>
   exit_fullscreen?: () => Promise<boolean>

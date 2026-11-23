@@ -431,7 +431,7 @@ class ExternalImportersTestCase(unittest.IsolatedAsyncioTestCase):
             zip_path.unlink()
             self.assertTrue((self.data_dir / imported_cyan.media.cover_path).is_file())
 
-    def test_vnite_leveldb_only_returns_friendly_error(self) -> None:
+    def test_vnite_leveldb_empty_returns_friendly_diagnostic_error(self) -> None:
         ldb_dir = self.tmp_dir / "vnite_leveldb_only"
         (ldb_dir / "app" / "database").mkdir(parents=True, exist_ok=True)
         (ldb_dir / "app" / "database" / "CURRENT").write_text("MANIFEST-000001\n", encoding="utf-8")
@@ -440,8 +440,10 @@ class ExternalImportersTestCase(unittest.IsolatedAsyncioTestCase):
         importer = VniteImporter()
         with self.assertRaises(ImporterError) as ctx:
             importer.scan(str(ldb_dir))
-        self.assertIn("LevelDB", str(ctx.exception))
-        self.assertIn(".json", str(ctx.exception))
+        msg = str(ctx.exception)
+        self.assertIn("LevelDB", msg)
+        self.assertNotIn("加密", msg)
+        self.assertIn("未识别到有效游戏记录", msg)
 
     # ──────────────────── 3. 统一 API 路由端到端验证 ────────────────────
 

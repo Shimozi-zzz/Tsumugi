@@ -767,6 +767,7 @@ export interface ExternalGameCandidate {
   steam_appid: string
   vndb_id: string
   bangumi_id: string
+  ymgal_id?: string
   install_dir: string
   executable_path: string
   cover_path: string

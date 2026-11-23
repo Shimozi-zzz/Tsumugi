@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timezone
+import hashlib
 import json
 import logging
 import os
 from pathlib import Path
 import re
+import shutil
+import tempfile
 from typing import Any
 import zipfile
 
@@ -16,6 +20,12 @@ from backend.services.importers.base import (
     ImporterError,
 )
 from backend.services.importers.executor import ZIP_URI_PREFIX
+from backend.services.importers.leveldb_reader import (
+    PouchDBParseResult,
+    discover_leveldb_directories,
+    parse_pouchdb_directory,
+    sniff_image_extension,
+)
 from backend.services.importers.playnite import clean_html_description
 
 logger = logging.getLogger("tsumugi.services.importers.vnite")
@@ -26,16 +36,36 @@ IMAGE_DIR_NAMES = {"images", "attachments", "covers", "backgrounds", "media", "a
 LOCAL_META_FILENAMES = {"game-local.json", "games-local.json", "games_local.json", "local.json"}
 PRIMARY_GAME_FILENAMES = ("games.json", "game.json", "database.json", "data.json", "backup.json")
 
+_LOCAL_SUBDB_NAMES = {"game-local", "games-local", "game_local", "games_local", "local"}
+_ATTACHMENT_SUBDB_NAMES = {"attachments", "attachment", "game-attachments", "game_attachments", "images", "image"}
+_IGNORED_GAME_SUBDB_NAMES = {
+    "config",
+    "config-local",
+    "config_local",
+    "plugin",
+    "plugins",
+    "account",
+    "accounts",
+    "sync",
+    "collection",
+    "collections",
+    "game-collection",
+    "game-collections",
+    "memory",
+    "memories",
+    "tag",
+    "tags",
+    "scraper",
+    "timer",
+    "timers",
+}
+
 _STEAM_URL_RE = re.compile(r"store\.steampowered\.com/app/(\d+)", re.IGNORECASE)
 _VNDB_URL_RE = re.compile(r"vndb\.org/(v\d+)", re.IGNORECASE)
 _BGM_URL_RE = re.compile(r"(?:bgm\.tv|bangumi\.tv|chii\.in)/subject/(\d+)", re.IGNORECASE)
+_YMGAL_URL_RE = re.compile(r"ymgal\.games/(ga\d+)", re.IGNORECASE)
 _SPLIT_STR_RE = re.compile(r"[,，/、;；]+")
-
-LEVELDB_GUIDANCE_MSG = (
-    "检测到该目录仅包含 Vnite 的二进制/加密 LevelDB 数据库文件，无法直接明文解析。"
-    "请在 Vnite 中使用「设置 → 数据/备份 → 导出备份」生成 .json 或 .zip 备份文件，"
-    "或选择包含 games.json 的导出目录后再进行扫描。"
-)
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def _to_str_list(val: Any) -> list[str]:
@@ -119,10 +149,22 @@ def _normalize_digits(raw: Any) -> str:
     return m.group(1) if m else ""
 
 
-def _extract_ids_from_sites(sites: Any) -> tuple[str, str, str]:
-    steam_id, vndb_id, bgm_id = "", "", ""
+def _normalize_ymgal(raw: Any) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    m = re.search(r"ga(\d+)", s, re.IGNORECASE)
+    if m:
+        return f"GA{m.group(1)}"
+    if s.isdigit():
+        return f"GA{s}"
+    return ""
+
+
+def _extract_ids_from_sites(sites: Any) -> tuple[str, str, str, str]:
+    steam_id, vndb_id, bgm_id, ymgal_id = "", "", "", ""
     if not isinstance(sites, list):
-        return steam_id, vndb_id, bgm_id
+        return steam_id, vndb_id, bgm_id, ymgal_id
     for entry in sites:
         url = ""
         if isinstance(entry, dict):
@@ -143,7 +185,11 @@ def _extract_ids_from_sites(sites: Any) -> tuple[str, str, str]:
             m = _BGM_URL_RE.search(url)
             if m:
                 bgm_id = m.group(1)
-    return steam_id, vndb_id, bgm_id
+        if not ymgal_id:
+            m = _YMGAL_URL_RE.search(url)
+            if m:
+                ymgal_id = m.group(1).upper()
+    return steam_id, vndb_id, bgm_id, ymgal_id
 
 
 def _sum_timers_seconds(timers: Any) -> int:
@@ -255,9 +301,11 @@ def _map_vnite_status(raw_status: Any, playtime_seconds: int) -> str:
 def _looks_like_game_doc(obj: Any) -> bool:
     if not isinstance(obj, dict):
         return False
+    if obj.get("_deleted") is True:
+        return False
     meta = obj.get("metadata")
     if isinstance(meta, dict) and any(
-        k in meta for k in ("name", "originalName", "developers", "vndbId", "steamId")
+        k in meta for k in ("name", "originalName", "developers", "vndbId", "steamId", "bangumiId", "ymgalId")
     ):
         return True
     return any(
@@ -270,8 +318,143 @@ def _looks_like_game_doc(obj: Any) -> bool:
             "playTime",
             "vndbId",
             "bangumiId",
+            "ymgalId",
         )
     )
+
+
+def _looks_like_local_doc(obj: Any) -> bool:
+    if not isinstance(obj, dict):
+        return False
+    if isinstance(obj.get("path"), dict) or isinstance(obj.get("launcher"), dict):
+        return True
+    return any(k in obj for k in ("gamePath", "game_path", "exePath", "exe_path", "executablePath"))
+
+
+def _is_non_empty_value(val: Any) -> bool:
+    if val is None:
+        return False
+    if isinstance(val, (str, list, dict)):
+        return len(val) > 0
+    return True
+
+
+def _deep_merge_docs(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """合并同一 _id 跨子库文档：递归合并嵌套 dict，避免空值覆盖已有有效字段"""
+    merged = dict(base)
+    for k, v in overlay.items():
+        if k not in merged or not _is_non_empty_value(merged[k]):
+            merged[k] = v
+        elif isinstance(merged[k], dict) and isinstance(v, dict):
+            merged[k] = _deep_merge_docs(merged[k], v)
+        elif _is_non_empty_value(v) and k in ("path", "launcher", "_attachments"):
+            merged[k] = v
+    return merged
+
+
+def _prepare_attachment_staging_dir(source_key: str) -> Path:
+    """为单次 LevelDB 扫描创建隔离且可复用的临时附件目录（绝不写入 Vnite 源目录）"""
+    digest = hashlib.sha1(source_key.encode("utf-8", errors="ignore")).hexdigest()[:16]
+    stage_dir = Path(tempfile.gettempdir()) / "tsumugi_vnite_attachments" / digest
+    if stage_dir.exists():
+        shutil.rmtree(stage_dir, ignore_errors=True)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    return stage_dir
+
+
+def _write_staged_attachment(
+    stage_dir: Path,
+    game_id: str,
+    role: str,
+    raw_bytes: bytes,
+    *,
+    content_type: str = "",
+    filename: str = "",
+) -> str:
+    safe_gid = _SAFE_FILENAME_RE.sub("_", game_id).strip("._")[:48] or "game"
+    ext = sniff_image_extension(raw_bytes, content_type=content_type, filename=filename)
+    key_hash = hashlib.sha1(f"{game_id}:{role}".encode("utf-8")).hexdigest()[:8]
+    out_file = stage_dir / f"{safe_gid}_{key_hash}_{role}{ext}"
+    out_file.write_bytes(raw_bytes)
+    return str(out_file.resolve())
+
+
+def _resolve_attachment_role(att_name: str, doc_id: str = "") -> str:
+    """识别附件角色（cover / background / icon / other）"""
+    low_name = att_name.replace("\\", "/").lower()
+    low_id = doc_id.replace("\\", "/").lower()
+    stem = Path(low_name).stem
+    if any(k in stem for k in ("background", "backdrop", "hero", "wallpaper", "banner", "bg")):
+        return "background"
+    if any(k in stem for k in ("cover", "poster", "boxart", "front")):
+        return "cover"
+    if any(k in stem for k in ("icon", "favicon", "logo")):
+        return "icon"
+    role_from_id = _classify_image_role(low_id)
+    if role_from_id in ("cover", "background"):
+        return role_from_id
+    return "other"
+
+
+def _extract_attachment_bytes_from_meta(
+    att_meta: dict[str, Any],
+    attachments_by_digest: dict[str, bytes],
+) -> bytes | None:
+    # 1. 优先通过 digest 在 attach-binary-store 中查找
+    digest = str(att_meta.get("digest") or "").strip()
+    if digest:
+        if digest in attachments_by_digest:
+            return attachments_by_digest[digest]
+        if digest.startswith("md5-") and digest[4:] in attachments_by_digest:
+            return attachments_by_digest[digest[4:]]
+        if not digest.startswith("md5-") and f"md5-{digest}" in attachments_by_digest:
+            return attachments_by_digest[f"md5-{digest}"]
+
+    # 2. 兜底支持内联 base64 data 字段
+    inline_data = att_meta.get("data")
+    if isinstance(inline_data, str) and inline_data.strip():
+        cleaned = inline_data.strip()
+        if cleaned.startswith("data:") and "," in cleaned:
+            cleaned = cleaned.split(",", 1)[1].strip()
+        try:
+            decoded = base64.b64decode(cleaned, validate=False)
+            if decoded:
+                return decoded
+        except Exception:
+            pass
+    return None
+
+
+def _extract_game_id_from_attachment_doc_id(doc_id: str, known_game_ids: set[str]) -> str | None:
+    """从独立附件子库的 doc_id 中反推游戏 ID（如 <gameId>、games/<gameId>/cover.webp 等）"""
+    low = doc_id.strip().lower()
+    if low in known_game_ids:
+        return low
+    parts = [p.strip().lower() for p in re.split(r"[/\\:]+", doc_id) if p.strip()]
+    for part in parts:
+        if part in known_game_ids:
+            return part
+        stem = Path(part).stem.lower()
+        if stem in known_game_ids:
+            return stem
+    return None
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, dest_dir: Path) -> None:
+    """安全解压 ZIP 至临时目录（防止 Zip Slip 路径穿越）"""
+    dest_root = dest_dir.resolve()
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        rel_parts = [p for p in Path(info.filename.replace("\\", "/")).parts if p not in ("", ".", "..", "/")]
+        if not rel_parts:
+            continue
+        target = (dest_root / Path(*rel_parts)).resolve()
+        if not target.is_relative_to(dest_root):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info, "r") as src, target.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
 
 
 def _extract_games_and_locals_from_json(
@@ -567,7 +750,7 @@ class VniteImporter(BaseLibraryImporter):
                     candidates=unique_strs,
                 )
 
-        # 2. 若仅探测到存在的 Vnite 目录（通常是 LevelDB），返回路径并附带清晰引导
+        # 2. 探测到 Vnite 本地 LevelDB / PouchDB 目录，支持直接只读解析
         for c in candidates:
             if c.is_dir():
                 if _has_leveldb_files(c):
@@ -575,14 +758,14 @@ class VniteImporter(BaseLibraryImporter):
                         source="vnite",
                         detected_path=str(c.resolve()),
                         valid=True,
-                        message="已探测到 Vnite 数据目录（如为 LevelDB 格式，推荐填入 Vnite 导出的 .json / .zip 备份路径）",
+                        message="已探测到 Vnite 本地数据库目录，可直接点击「扫描游戏库」只读解析（也兼容导入 .json / .zip 备份）",
                         candidates=unique_strs,
                     )
                 return DetectResult(
                     source="vnite",
                     detected_path=str(c.resolve()),
                     valid=True,
-                    message="已自动探测到 Vnite 目录，也可直接填写导出的 .json / .zip 备份路径",
+                    message="已自动探测到 Vnite 本地目录，可直接扫描或填写导出的 .json / .zip 备份路径",
                     candidates=unique_strs,
                 )
 
@@ -658,7 +841,7 @@ class VniteImporter(BaseLibraryImporter):
                 if member.endswith("/"):
                     continue
                 lname = Path(member).name.lower()
-                if lname in LEVELDB_MARKERS or lname.startswith("manifest-") or lname.endswith((".ldb", ".sst")):
+                if lname in LEVELDB_MARKERS or lname.startswith("manifest-") or lname.endswith((".ldb", ".sst", ".log")):
                     has_leveldb_in_zip = True
                 if lname.endswith(".json"):
                     json_members.append(member)
@@ -701,12 +884,207 @@ class VniteImporter(BaseLibraryImporter):
                     if lname in PRIMARY_GAME_FILENAMES:
                         break
 
+            # 若 ZIP 内未找到 JSON 游戏数据但包含 LevelDB / PouchDB 文件，则解压到临时目录走同一套 LevelDB 解析逻辑
+            if not game_pairs and has_leveldb_in_zip:
+                with tempfile.TemporaryDirectory(prefix="tsumugi_vnite_zip_") as tmp_zip_dir:
+                    extracted_root = Path(tmp_zip_dir)
+                    _safe_extract_zip(zf, extracted_root)
+                    return self._scan_leveldb_root(
+                        extracted_root,
+                        staging_key=f"zip:{zip_file.resolve()}",
+                        extra_img_index=img_index,
+                    )
+
         if not game_pairs:
-            if has_leveldb_in_zip:
-                raise ImporterError(LEVELDB_GUIDANCE_MSG)
-            raise ImporterError(f"在 ZIP 备份 {zip_file.name} 中未找到可解析的 Vnite 游戏 JSON 数据")
+            raise ImporterError(
+                f"在 ZIP 备份 {zip_file.name} 中未找到可解析的 Vnite 游戏数据（JSON 或 LevelDB）"
+            )
 
         return self._build_candidates(game_pairs, locals_map, img_index, base_dir=zip_file.parent)
+
+    def _scan_leveldb_root(
+        self,
+        root_dir: Path,
+        *,
+        staging_key: str,
+        extra_img_index: dict[str, dict[str, str]] | None = None,
+    ) -> list[ExternalGameCandidate]:
+        """递归扫描目录下全部 LevelDB/PouchDB 子库，按 _id 跨库合并元数据、本地路径与二进制图片附件"""
+        ldb_dirs = discover_leveldb_directories(root_dir)
+        if not ldb_dirs:
+            raise ImporterError(
+                f"在所选目录中未发现 Vnite LevelDB 子库或 JSON 数据文件，请确认路径正确或选择 .json / .zip 备份文件。"
+            )
+
+        parsed_results: list[PouchDBParseResult] = []
+        games_by_id: dict[str, dict[str, Any]] = {}
+        locals_map: dict[str, dict[str, Any]] = {}
+
+        for sub_dir in ldb_dirs:
+            try:
+                rel_name = sub_dir.relative_to(root_dir).as_posix()
+            except ValueError:
+                rel_name = sub_dir.name
+            subdb_label = sub_dir.name if rel_name == "." else rel_name
+            parsed = parse_pouchdb_directory(sub_dir, subdb_name=subdb_label)
+            parsed_results.append(parsed)
+
+            leaf = sub_dir.name.lower()
+            if leaf in _LOCAL_SUBDB_NAMES:
+                for doc_id, doc in parsed.documents.items():
+                    locals_map[doc_id] = _deep_merge_docs(locals_map.get(doc_id, {}), doc)
+                continue
+
+            if leaf in _ATTACHMENT_SUBDB_NAMES or leaf in _IGNORED_GAME_SUBDB_NAMES:
+                continue
+
+            for doc_id, doc in parsed.documents.items():
+                if _looks_like_game_doc(doc):
+                    games_by_id[doc_id] = _deep_merge_docs(games_by_id.get(doc_id, {}), doc)
+                elif _looks_like_local_doc(doc):
+                    locals_map[doc_id] = _deep_merge_docs(locals_map.get(doc_id, {}), doc)
+
+        # 将同一游戏 _id 在 game-local 等子库中的字段合并回主文档，同时保留 locals_map
+        for doc_id, local_doc in locals_map.items():
+            if doc_id in games_by_id:
+                games_by_id[doc_id] = _deep_merge_docs(games_by_id[doc_id], local_doc)
+
+        if not games_by_id:
+            diag_parts: list[str] = []
+            subdb_names: list[str] = []
+            for p in parsed_results:
+                subdb_names.append(p.subdb_name)
+                sample_keys = [
+                    sorted(str(k) for k in doc.keys())[:10]
+                    for doc in list(p.documents.values())[:3]
+                ]
+                diag_parts.append(
+                    f"{p.subdb_name}(kv={p.raw_entry_count}, docs={len(p.documents)}, "
+                    f"sublevels={p.sublevels}, sample_keys={sample_keys})"
+                )
+            logger.warning(
+                "Vnite LevelDB scan produced 0 game records | subdbs=%s",
+                "; ".join(diag_parts),
+            )
+            sub_summary = "、".join(subdb_names[:6]) if subdb_names else "无"
+            raise ImporterError(
+                f"已只读解析 Vnite LevelDB 目录（发现子库：{sub_summary}），但未识别到有效游戏记录。"
+                "请确认所选目录为 Vnite 的 database 目录（如 ...\\vnite\\app\\database），"
+                "或改选 Vnite 导出的 .json / .zip 备份文件；详细诊断已写入 data/tsumugi.log。"
+            )
+
+        # 构建图片索引：优先提取 PouchDB 内嵌二进制附件，其次合并本地目录/ZIP 图片索引
+        known_game_ids = {gid.lower() for gid in games_by_id}
+        pouch_img_index: dict[str, dict[str, str]] = {}
+        fallback_other_index: dict[str, str] = {}
+        fallback_icon_index: dict[str, str] = {}
+        stage_dir: Path | None = None
+
+        def _ensure_stage_dir() -> Path:
+            nonlocal stage_dir
+            if stage_dir is None:
+                stage_dir = _prepare_attachment_staging_dir(staging_key)
+            return stage_dir
+
+        for parsed in parsed_results:
+            if not parsed.attachments_by_digest and not any(
+                isinstance(d.get("_attachments"), dict) and d.get("_attachments")
+                for d in parsed.documents.values()
+            ):
+                continue
+
+            for doc_id, doc in parsed.documents.items():
+                attachments = doc.get("_attachments")
+                if not isinstance(attachments, dict) or not attachments:
+                    continue
+                gid_lower = (
+                    doc_id.lower()
+                    if doc_id.lower() in known_game_ids
+                    else _extract_game_id_from_attachment_doc_id(doc_id, known_game_ids)
+                )
+                if not gid_lower:
+                    continue
+
+                bucket = pouch_img_index.setdefault(gid_lower, {})
+                for att_name, att_meta in attachments.items():
+                    if not isinstance(att_meta, dict):
+                        continue
+                    raw_bytes = _extract_attachment_bytes_from_meta(att_meta, parsed.attachments_by_digest)
+                    if not raw_bytes:
+                        continue
+                    role = _resolve_attachment_role(str(att_name), doc_id)
+                    ct = str(att_meta.get("content_type") or "")
+                    if role == "cover" and "cover" not in bucket:
+                        bucket["cover"] = _write_staged_attachment(
+                            _ensure_stage_dir(),
+                            gid_lower,
+                            "cover",
+                            raw_bytes,
+                            content_type=ct,
+                            filename=str(att_name),
+                        )
+                    elif role == "background" and "background" not in bucket:
+                        bucket["background"] = _write_staged_attachment(
+                            _ensure_stage_dir(),
+                            gid_lower,
+                            "background",
+                            raw_bytes,
+                            content_type=ct,
+                            filename=str(att_name),
+                        )
+                    elif role == "other" and gid_lower not in fallback_other_index:
+                        fallback_other_index[gid_lower] = _write_staged_attachment(
+                            _ensure_stage_dir(),
+                            gid_lower,
+                            "cover_alt",
+                            raw_bytes,
+                            content_type=ct,
+                            filename=str(att_name),
+                        )
+                    elif role == "icon" and gid_lower not in fallback_icon_index:
+                        fallback_icon_index[gid_lower] = _write_staged_attachment(
+                            _ensure_stage_dir(),
+                            gid_lower,
+                            "icon",
+                            raw_bytes,
+                            content_type=ct,
+                            filename=str(att_name),
+                        )
+
+            # 兜底：若 attach 子表中有指向某游戏的二进制图片但未在 _attachments 中显式命中
+            for digest, ref_doc_ids in parsed.attachment_refs.items():
+                raw_bytes = parsed.attachments_by_digest.get(digest)
+                if not raw_bytes:
+                    continue
+                for ref_doc_id in ref_doc_ids:
+                    gid_lower = _extract_game_id_from_attachment_doc_id(ref_doc_id, known_game_ids)
+                    if not gid_lower:
+                        continue
+                    bucket = pouch_img_index.setdefault(gid_lower, {})
+                    if "cover" not in bucket and gid_lower not in fallback_other_index:
+                        fallback_other_index[gid_lower] = _write_staged_attachment(
+                            _ensure_stage_dir(),
+                            gid_lower,
+                            "cover_ref",
+                            raw_bytes,
+                        )
+
+        for gid_lower, alt_path in fallback_other_index.items():
+            pouch_img_index.setdefault(gid_lower, {}).setdefault("cover", alt_path)
+        for gid_lower, icon_path in fallback_icon_index.items():
+            pouch_img_index.setdefault(gid_lower, {}).setdefault("cover", icon_path)
+
+        # 合并文件系统图片索引与可选 ZIP 图片索引（PouchDB 内嵌附件优先，本地目录图片补全缺失项）
+        merged_img_index: dict[str, dict[str, str]] = {}
+        for src_index in (pouch_img_index, _index_directory_images(root_dir), extra_img_index or {}):
+            for gid_lower, roles in src_index.items():
+                bucket = merged_img_index.setdefault(gid_lower, {})
+                for role_key in ("cover", "background"):
+                    if role_key not in bucket and roles.get(role_key):
+                        bucket[role_key] = roles[role_key]
+
+        game_pairs = list(games_by_id.items())
+        return self._build_candidates(game_pairs, locals_map, merged_img_index, base_dir=root_dir)
 
     def _scan_directory(self, root_dir: Path) -> list[ExternalGameCandidate]:
         game_pairs: list[tuple[str, dict[str, Any]]] = []
@@ -779,10 +1157,11 @@ class VniteImporter(BaseLibraryImporter):
                     break
 
         if not game_pairs:
-            if _has_leveldb_files(root_dir):
-                raise ImporterError(LEVELDB_GUIDANCE_MSG)
+            # 未找到 JSON 导出文件时，自动直读本地 LevelDB / PouchDB 子库
+            if _has_leveldb_files(root_dir) or discover_leveldb_directories(root_dir):
+                return self._scan_leveldb_root(root_dir, staging_key=str(root_dir.resolve()))
             raise ImporterError(
-                f"在目录 {root_dir} 中未找到 Vnite 游戏数据文件（如 games.json），"
+                f"在目录 {root_dir} 中未找到 Vnite LevelDB 数据库或 JSON 游戏数据文件，"
                 "请确认路径正确或选择 Vnite 导出的 .json / .zip 备份文件。"
             )
 
@@ -870,14 +1249,20 @@ class VniteImporter(BaseLibraryImporter):
                 playtime_seconds,
             )
 
-            # 提取外部 ID（直接字段 + relatedSites/links 兜底）
-            site_steam, site_vndb, site_bgm = _extract_ids_from_sites(
+            # 提取外部 ID（直接字段 + externalIds + relatedSites/links 兜底）
+            ext_id_bag = (
+                meta.get("externalIds")
+                if isinstance(meta.get("externalIds"), dict)
+                else (doc.get("externalIds") if isinstance(doc.get("externalIds"), dict) else {})
+            )
+            site_steam, site_vndb, site_bgm, site_ymgal = _extract_ids_from_sites(
                 meta.get("relatedSites") or doc.get("relatedSites") or doc.get("links")
             )
             vndb_id = (
                 _normalize_vndb(
                     meta.get("vndbId")
                     or meta.get("vndb_id")
+                    or ext_id_bag.get("vndb")
                     or doc.get("vndbId")
                     or doc.get("vndb_id")
                     or doc.get("vndb")
@@ -889,6 +1274,8 @@ class VniteImporter(BaseLibraryImporter):
                     meta.get("bangumiId")
                     or meta.get("bgmId")
                     or meta.get("bangumi_id")
+                    or ext_id_bag.get("bangumi")
+                    or ext_id_bag.get("bgm")
                     or doc.get("bangumiId")
                     or doc.get("bgmId")
                     or doc.get("bangumi_id")
@@ -900,6 +1287,7 @@ class VniteImporter(BaseLibraryImporter):
                 _normalize_digits(
                     meta.get("steamId")
                     or meta.get("steamAppId")
+                    or ext_id_bag.get("steam")
                     or doc.get("steamId")
                     or doc.get("steamAppId")
                     or doc.get("steam_appid")
@@ -907,12 +1295,23 @@ class VniteImporter(BaseLibraryImporter):
                 )
                 or site_steam
             )
+            ymgal_id = (
+                _normalize_ymgal(
+                    meta.get("ymgalId")
+                    or meta.get("ymgal_id")
+                    or ext_id_bag.get("ymgal")
+                    or doc.get("ymgalId")
+                    or doc.get("ymgal_id")
+                    or doc.get("ymgal")
+                )
+                or site_ymgal
+            )
 
             # 启动路径（优先 local_doc，其次 doc.path / doc.launcher / 扁平字段）
             executable_path = self._extract_game_path(doc, local_doc)
             install_dir = str(Path(executable_path).parent) if executable_path and not executable_path.startswith(("http://", "https://", "steam://")) else ""
 
-            # 本地封面与背景图定位（支持显式字段 + 按游戏 ID 匹配本地目录或 ZIP 成员）
+            # 本地封面与背景图定位（支持显式字段 + PouchDB 二进制附件 + 本地目录或 ZIP 成员）
             cover_path, background_path = self._resolve_images(ext_id, doc, img_index, base_dir)
 
             platforms = _to_str_list(meta.get("platforms") or doc.get("platforms"))
@@ -936,6 +1335,7 @@ class VniteImporter(BaseLibraryImporter):
                     steam_appid=steam_appid,
                     vndb_id=vndb_id,
                     bangumi_id=bangumi_id,
+                    ymgal_id=ymgal_id,
                     install_dir=install_dir,
                     executable_path=executable_path,
                     cover_path=cover_path,

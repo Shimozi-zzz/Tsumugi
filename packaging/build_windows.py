@@ -42,9 +42,11 @@ HIDDEN_IMPORTS = [
     "backend.services.importers",
     "backend.services.importers.base",
     "backend.services.importers.executor",
+    "backend.services.importers.leveldb_reader",
     "backend.services.importers.litedb_v4",
     "backend.services.importers.playnite",
     "backend.services.importers.vnite",
+    "cramjam",
 ]
 
 
@@ -88,6 +90,8 @@ def main() -> None:
         "clr_loader",
         "--collect-all",
         "pythonnet",
+        "--collect-all",
+        "cramjam",
     ]
 
     for mod in HIDDEN_IMPORTS:

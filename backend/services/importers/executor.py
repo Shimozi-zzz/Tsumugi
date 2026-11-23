@@ -101,6 +101,9 @@ def _build_external_ids(candidate: ExternalGameCandidate) -> dict[str, str]:
     bgm_id = _normalize_digits_id(candidate.bangumi_id)
     if bgm_id:
         ext_ids["bgm"] = bgm_id
+    ymgal_raw = (candidate.ymgal_id or "").strip().upper()
+    if ymgal_raw:
+        ext_ids["ymgal"] = ymgal_raw if ymgal_raw.startswith("GA") else f"GA{ymgal_raw}"
     return ext_ids
 
 

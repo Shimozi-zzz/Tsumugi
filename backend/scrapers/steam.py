@@ -85,6 +85,8 @@ def _norm_media_url(raw: Any) -> str:
         return ""
     if s.startswith("//"):
         return f"https:{s}"
+    if s.lower().startswith("http://"):
+        return f"https://{s[7:]}"
     return s
 
 

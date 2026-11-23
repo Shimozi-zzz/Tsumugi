@@ -528,5 +528,252 @@ class MediaThreeModeApiTestCase(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(pv_mock.await_args.kwargs["url"], pv_remote)
 
 
+class MediaProxyAndDesktopDragTestCase(unittest.IsolatedAsyncioTestCase):
+    """4. 本地媒体/HLS 代理安全校验、.m3u8 重写、Range 流转发与桌面拖拽守卫测试"""
+
+    async def asyncSetUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        db_path = Path(self._tmpdir.name) / "test_media_proxy.db"
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", future=True)
+        self.session_maker = async_sessionmaker(
+            bind=self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async def _override_get_db():
+            async with self.session_maker() as session:
+                yield session
+
+        app.dependency_overrides[get_db] = _override_get_db
+
+    async def asyncTearDown(self) -> None:
+        app.dependency_overrides.pop(get_db, None)
+        await self.engine.dispose()
+        self._tmpdir.cleanup()
+
+    def test_steam_http_urls_upgraded_to_https(self) -> None:
+        movies = [
+            {
+                "id": 2001,
+                "name": "Legacy HTTP Steam Trailer",
+                "thumbnail": "http://shared.akamai.steamstatic.com/thumb.jpg",
+                "mp4": {"max": "http://video.akamai.steamstatic.com/store_trailers/2001/movie_max.mp4"},
+                "hls_h264": "http://video.akamai.steamstatic.com/store_trailers/2001/hls_264_master.m3u8",
+            }
+        ]
+        parsed = parse_steam_movies(movies, app_name="Legacy", appid="2001")
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(
+            parsed[0]["url"],
+            "https://video.akamai.steamstatic.com/store_trailers/2001/movie_max.mp4",
+        )
+        self.assertEqual(
+            parsed[0]["thumb_url"],
+            "https://shared.akamai.steamstatic.com/thumb.jpg",
+        )
+        self.assertEqual(
+            parsed[0]["fallback_urls"],
+            ["https://video.akamai.steamstatic.com/store_trailers/2001/hls_264_master.m3u8"],
+        )
+
+    def test_rewrite_hls_manifest_subplaylists_audio_tracks_keys_and_segments(self) -> None:
+        from urllib.parse import quote
+        from backend.services.media_service import rewrite_hls_manifest
+
+        base = "https://video.akamai.steamstatic.com/store_trailers/25699/hls_264_master.m3u8?t=99"
+        manifest = "\n".join(
+            [
+                "#EXTM3U",
+                "#EXT-X-VERSION:6",
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Main",DEFAULT=YES,URI="audio/hls_audio_main.m3u8?t=99"',
+                '#EXT-X-KEY:METHOD=AES-128,URI="../keys/dec.key"',
+                '#EXT-X-MAP:URI="init/init.mp4"',
+                '#EXT-X-STREAM-INF:BANDWIDTH=3200000,AUDIO="audio"',
+                "video/hls_264_1080p.m3u8?t=99",
+                "#EXTINF:4.000,",
+                "seg_0001.m4s",
+                "#EXTINF:4.000,",
+                "/store_trailers/25699/seg_0002.ts",
+                "#EXTINF:4.000,",
+                "http://video.akamai.steamstatic.com/store_trailers/25699/seg_0003.ts",
+            ]
+        )
+
+        rewritten = rewrite_hls_manifest(manifest, base_url=base)
+        lines = rewritten.splitlines()
+
+        expected_audio = quote(
+            "https://video.akamai.steamstatic.com/store_trailers/25699/audio/hls_audio_main.m3u8?t=99",
+            safe="",
+        )
+        expected_key = quote(
+            "https://video.akamai.steamstatic.com/store_trailers/keys/dec.key",
+            safe="",
+        )
+        expected_map = quote(
+            "https://video.akamai.steamstatic.com/store_trailers/25699/init/init.mp4",
+            safe="",
+        )
+        expected_sub = quote(
+            "https://video.akamai.steamstatic.com/store_trailers/25699/video/hls_264_1080p.m3u8?t=99",
+            safe="",
+        )
+        expected_seg1 = quote(
+            "https://video.akamai.steamstatic.com/store_trailers/25699/seg_0001.m4s",
+            safe="",
+        )
+        expected_seg2 = quote(
+            "https://video.akamai.steamstatic.com/store_trailers/25699/seg_0002.ts",
+            safe="",
+        )
+        expected_seg3 = quote(
+            "https://video.akamai.steamstatic.com/store_trailers/25699/seg_0003.ts",
+            safe="",
+        )
+
+        self.assertIn(f'URI="/api/media/proxy?url={expected_audio}"', lines[2])
+        self.assertIn(f'URI="/api/media/proxy?url={expected_key}"', lines[3])
+        self.assertIn(f'URI="/api/media/proxy?url={expected_map}"', lines[4])
+        self.assertEqual(lines[6], f"/api/media/proxy?url={expected_sub}")
+        self.assertEqual(lines[8], f"/api/media/proxy?url={expected_seg1}")
+        self.assertEqual(lines[10], f"/api/media/proxy?url={expected_seg2}")
+        self.assertEqual(lines[12], f"/api/media/proxy?url={expected_seg3}")
+
+    async def test_media_proxy_blocks_invalid_schemes_and_private_or_loopback_hosts(self) -> None:
+        forbidden_urls = [
+            "file:///etc/passwd",
+            "ftp://cdn.example.com/movie.mp4",
+            "javascript:alert(1)",
+            "http://localhost/movie.mp4",
+            "http://sub.localhost/movie.mp4",
+            "http://127.0.0.1:8000/api/system/version",
+            "http://[::1]:8000/movie.mp4",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.5/internal.mp4",
+            "http://172.16.0.12/corp.mp4",
+            "http://192.168.1.100/nas/pv.mp4",
+            "http://0.0.0.0/movie.mp4",
+            "http://[::ffff:127.0.0.1]/movie.mp4",
+            "http://2130706433/movie.mp4",
+        ]
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            for bad_url in forbidden_urls:
+                r = await client.get("/api/media/proxy", params={"url": bad_url})
+                self.assertEqual(
+                    r.status_code,
+                    400,
+                    f"Expected HTTP 400 for blocked URL {bad_url!r}, got {r.status_code}: {r.text}",
+                )
+
+    async def test_media_proxy_rewrites_m3u8_and_streams_range_video(self) -> None:
+        from urllib.parse import quote
+
+        captured_requests: list[httpx.Request] = []
+
+        class _FakeStreamResp:
+            def __init__(self, url: str, status_code: int, headers: dict[str, str], body: bytes) -> None:
+                self.url = httpx.URL(url)
+                self.status_code = status_code
+                self.headers = httpx.Headers(headers)
+                self._body = body
+
+            async def aread(self) -> bytes:
+                return self._body
+
+            async def aiter_bytes(self, chunk_size: int = 65536):
+                for i in range(0, len(self._body), chunk_size):
+                    yield self._body[i : i + chunk_size]
+
+            async def aclose(self) -> None:
+                pass
+
+        orig_send = httpx.AsyncClient.send
+
+        async def _fake_send(self_client, request: httpx.Request, *args, **kwargs):
+            if request.url.host == "test":
+                return await orig_send(self_client, request, *args, **kwargs)
+            captured_requests.append(request)
+            req_url = str(request.url)
+            if req_url.endswith(".m3u8"):
+                m3u8_body = (
+                    "#EXTM3U\n"
+                    '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a1",NAME="JP",URI="audio_jp.m3u8"\n'
+                    "#EXTINF:5.0,\n"
+                    "chunk_001.ts\n"
+                ).encode("utf-8")
+                return _FakeStreamResp(
+                    req_url,
+                    200,
+                    {"content-type": "application/vnd.apple.mpegurl"},
+                    m3u8_body,
+                )
+            return _FakeStreamResp(
+                req_url,
+                206,
+                {
+                    "content-type": "video/mp4",
+                    "content-length": "16",
+                    "content-range": "bytes 0-15/1024",
+                    "accept-ranges": "bytes",
+                },
+                b"0123456789ABCDEF",
+            )
+
+        with patch.object(httpx.AsyncClient, "send", new=_fake_send):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                # 1. HLS 清单请求：Steam http:// 自动升 https://，且清单内路径重写为 /api/media/proxy?url=...
+                hls_in = "http://video.akamai.steamstatic.com/store_trailers/55/hls_264_master.m3u8"
+                r_hls = await client.get("/api/media/proxy", params={"url": hls_in})
+                self.assertEqual(r_hls.status_code, 200, r_hls.text)
+                self.assertIn("application/vnd.apple.mpegurl", r_hls.headers.get("content-type", ""))
+                self.assertEqual(r_hls.headers.get("access-control-allow-origin"), "*")
+                expected_audio = quote(
+                    "https://video.akamai.steamstatic.com/store_trailers/55/audio_jp.m3u8",
+                    safe="",
+                )
+                expected_chunk = quote(
+                    "https://video.akamai.steamstatic.com/store_trailers/55/chunk_001.ts",
+                    safe="",
+                )
+                self.assertIn(f'URI="/api/media/proxy?url={expected_audio}"', r_hls.text)
+                self.assertIn(f"/api/media/proxy?url={expected_chunk}", r_hls.text)
+                self.assertEqual(
+                    captured_requests[0].headers.get("referer"),
+                    "https://store.steampowered.com/",
+                )
+
+                # 2. 直链视频 Range 透传：返回 206 Partial Content 及关键 Range 响应头
+                mp4_url = "https://video.akamai.steamstatic.com/store_trailers/55/movie_max.mp4"
+                r_mp4 = await client.get(
+                    "/api/media/proxy",
+                    params={"url": mp4_url},
+                    headers={"Range": "bytes=0-15"},
+                )
+                self.assertEqual(r_mp4.status_code, 206, r_mp4.text)
+                self.assertEqual(r_mp4.content, b"0123456789ABCDEF")
+                self.assertEqual(r_mp4.headers.get("content-range"), "bytes 0-15/1024")
+                self.assertEqual(r_mp4.headers.get("accept-ranges"), "bytes")
+                self.assertEqual(r_mp4.headers.get("access-control-allow-origin"), "*")
+                self.assertEqual(captured_requests[1].headers.get("range"), "bytes=0-15")
+
+    def test_desktop_py_platform_guard_and_start_drag_contract(self) -> None:
+        import logging
+        import desktop
+
+        api = desktop.DesktopWindowApi(logging.getLogger("test.desktop"))
+        self.assertTrue(callable(getattr(api, "start_drag", None)))
+        # 未绑定窗口或非 Windows / 全屏保护下安全返回 False 且不抛异常
+        self.assertFalse(api.start_drag(0.5))
+        api._window = object()
+        api._is_fullscreen = True
+        self.assertFalse(api.start_drag(0.5))
+
+
 if __name__ == "__main__":
     unittest.main()

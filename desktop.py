@@ -75,6 +75,9 @@ SWP_NOACTIVATE = 0x0010
 SWP_FRAMECHANGED = 0x0020
 SWP_SHOWWINDOW = 0x0040
 
+WM_NCLBUTTONDOWN = 0x00A1
+HTCAPTION = 2
+
 MONITOR_DEFAULTTONEAREST = 0x00000002
 
 DWMWA_USE_IMMERSIVE_DARK_MODE_PRE20H1 = 19
@@ -137,6 +140,17 @@ class _Win32WindowHelper:
 
             user32.GetCursorPos.argtypes = [ctypes.POINTER(_Win32Point)]
             user32.GetCursorPos.restype = wintypes.BOOL
+
+            user32.ReleaseCapture.argtypes = []
+            user32.ReleaseCapture.restype = wintypes.BOOL
+
+            user32.SendMessageW.argtypes = [
+                hwnd_t,
+                wintypes.UINT,
+                ctypes.c_size_t,
+                ctypes.c_ssize_t,
+            ]
+            user32.SendMessageW.restype = ctypes.c_ssize_t
 
             user32.MonitorFromWindow.argtypes = [hwnd_t, wintypes.DWORD]
             user32.MonitorFromWindow.restype = hwnd_t
@@ -208,6 +222,17 @@ class _Win32WindowHelper:
         if not self._user32.GetCursorPos(ctypes.byref(pt)):
             return None
         return (int(pt.x), int(pt.y))
+
+    def begin_native_drag(self, hwnd: int) -> bool:
+        """移交 Windows 原生窗口拖拽（必须在 WinForms UI 线程中调用）"""
+        if not self.available or not hwnd:
+            return False
+        try:
+            self._user32.ReleaseCapture()
+            self._user32.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
+            return True
+        except Exception:
+            return False
 
     def get_monitor_rects(
         self, hwnd: int
@@ -430,6 +455,23 @@ def _run_on_winforms_ui_thread(form: Any, fn: Callable[[], None]) -> None:
         fn()
     except Exception:
         pass
+
+
+def _begin_invoke_on_winforms_ui_thread(form: Any, fn: Callable[[], None]) -> bool:
+    """将动作异步派发到 WinForms UI 线程（不阻塞 js_api 工作线程，防止与 WebView2 桥死锁）"""
+    if sys.platform != "win32" or form is None:
+        return False
+    try:
+        if getattr(form, "IsDisposed", False):
+            return False
+        if not getattr(form, "IsHandleCreated", True):
+            return False
+        import System  # type: ignore[import-not-found]
+
+        form.BeginInvoke(System.Action(fn))
+        return True
+    except Exception:
+        return False
 
 
 class DesktopWindowApi:
@@ -813,6 +855,100 @@ class DesktopWindowApi:
         except Exception as exc:
             self._logger.debug("toggle_maximize failed: %s", exc)
         return self._is_maximized
+
+    def start_drag(self, cursor_ratio_x: float = 0.5) -> bool:
+        """
+        Windows 无边框窗口原生拖拽入口（由前端 4px 拖动阈值触发）：
+        - 全屏状态下忽略拖拽；
+        - 通过 WinForms BeginInvoke 异步派发到 UI 线程，避免工作线程调用 ReleaseCapture 失效或 Invoke 死锁；
+        - 最大化状态下先按鼠标物理坐标与水平比例还原正常窗口尺寸，再执行 ReleaseCapture + WM_NCLBUTTONDOWN(HTCAPTION)。
+        """
+        if not self._window or self._is_fullscreen:
+            return False
+        if sys.platform != "win32" or not _WIN32.available:
+            return False
+
+        try:
+            ratio = max(0.1, min(0.9, float(cursor_ratio_x)))
+        except (TypeError, ValueError):
+            ratio = 0.5
+
+        form = self._get_native_form()
+        if form is None:
+            return False
+
+        def _perform_native_drag() -> None:
+            try:
+                if self._is_fullscreen or getattr(form, "IsDisposed", False):
+                    return
+
+                handle = getattr(form, "Handle", None)
+                hwnd = 0
+                if handle is not None:
+                    hwnd = int(handle.ToInt64()) if hasattr(handle, "ToInt64") else int(handle)
+                if not hwnd:
+                    hwnd = self._get_hwnd()
+                if not hwnd:
+                    return
+
+                # 若当前为 WorkingArea 最大化态：先还原至常规宽高并使标题栏紧贴鼠标指针
+                if self._is_maximized:
+                    try:
+                        import System.Windows.Forms as WinForms  # type: ignore[import-not-found]
+
+                        if getattr(form, "WindowState", None) != WinForms.FormWindowState.Normal:
+                            form.WindowState = WinForms.FormWindowState.Normal
+                        if hasattr(form, "FormBorderStyle"):
+                            form.FormBorderStyle = getattr(WinForms.FormBorderStyle, "None")
+                    except Exception:
+                        pass
+
+                    rw, rh = (1360, 840)
+                    if self._restore_rect:
+                        _, _, saved_w, saved_h = self._restore_rect
+                        if saved_w >= 640 and saved_h >= 420:
+                            rw, rh = saved_w, saved_h
+
+                    cursor = _WIN32.get_cursor_pos()
+                    rects = _WIN32.get_monitor_rects(hwnd)
+                    if cursor:
+                        cx, cy = cursor
+                        new_x = int(cx - rw * ratio)
+                        new_y = int(cy - 18)
+                        if rects:
+                            wx, wy, ww, wh = rects[0]
+                            new_y = max(wy, min(new_y, wy + max(0, wh - 80)))
+                            new_x = max(wx - rw + 160, min(new_x, wx + ww - 160))
+                    elif self._restore_rect:
+                        new_x, new_y = self._restore_rect[0], self._restore_rect[1]
+                    else:
+                        new_x, new_y = (120, 80)
+
+                    self._ignore_move_until = time.monotonic() + 0.45
+                    _WIN32.set_window_pos(
+                        hwnd,
+                        new_x,
+                        new_y,
+                        rw,
+                        rh,
+                        insert_after=HWND_NOTOPMOST,
+                        flags=SWP_FRAMECHANGED | SWP_SHOWWINDOW,
+                    )
+                    self._is_maximized = False
+                    self._maximized_rect = None
+                    _WIN32.apply_dwm_attributes(
+                        hwnd,
+                        borderless=False,
+                        disable_round_corners=False,
+                    )
+                    # 异步通知前端更新最大化图标，不阻塞 UI 线程进入原生拖拽消息循环
+                    threading.Thread(target=self._notify_frontend_state, daemon=True).start()
+
+                _WIN32.begin_native_drag(hwnd)
+            except Exception as exc:
+                self._logger.debug("start_drag on UI thread failed: %s", exc)
+
+        return _begin_invoke_on_winforms_ui_thread(form, _perform_native_drag)
 
     def restore_for_drag(self, ratio_x: float = 0.5) -> bool:
         """最大化状态下拖拽标题栏时，立即还原常规窗口并按鼠标水平比例贴合指针"""

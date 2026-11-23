@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Hls from 'hls.js'
-import { assetUrl } from '@/api/client'
+import { assetUrl, mediaProxyUrl } from '@/api/client'
 import { PAUSE_MEDIA_EVENT, useAudioStore } from '@/stores/audio'
 
 const props = defineProps<{
@@ -15,9 +15,17 @@ const videoRef = ref<HTMLVideoElement | null>(null)
 const errorMsg = ref('')
 const isLoading = ref(false)
 let hlsInstance: Hls | null = null
+let hlsNetworkRecoveryCount = 0
+let hlsMediaRecoveryCount = 0
 
 const resolvedSrc = computed(() => assetUrl(props.src))
-const isHlsStream = computed(() => resolvedSrc.value.toLowerCase().includes('.m3u8'))
+const isExternal = computed(() => /^https?:\/\//i.test(resolvedSrc.value))
+const isHlsStream = computed(
+  () => isExternal.value && /(?:\.m3u8(?:[?#].*)?$|hls_)/i.test(resolvedSrc.value),
+)
+const playableSrc = computed(() =>
+  isHlsStream.value ? mediaProxyUrl(resolvedSrc.value) : resolvedSrc.value,
+)
 
 function cleanupHls() {
   if (hlsInstance) {
@@ -28,9 +36,11 @@ function cleanupHls() {
 
 function setupVideo() {
   cleanupHls()
+  hlsNetworkRecoveryCount = 0
+  hlsMediaRecoveryCount = 0
   errorMsg.value = ''
   const video = videoRef.value
-  const url = resolvedSrc.value
+  const url = playableSrc.value
   if (!video || !url) return
 
   isLoading.value = true
@@ -40,6 +50,7 @@ function setupVideo() {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
+        backBufferLength: 30,
       })
       hlsInstance = hls
       hls.loadSource(url)
@@ -48,11 +59,20 @@ function setupVideo() {
         isLoading.value = false
       })
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          isLoading.value = false
-          errorMsg.value = 'HLS 宣传片流加载失败（可能需要配置代理或链接已过期）'
-          cleanupHls()
+        if (!data.fatal) return
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsNetworkRecoveryCount < 1) {
+          hlsNetworkRecoveryCount += 1
+          hls.startLoad()
+          return
         }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsMediaRecoveryCount < 1) {
+          hlsMediaRecoveryCount += 1
+          hls.recoverMediaError()
+          return
+        }
+        isLoading.value = false
+        errorMsg.value = '在线视频暂时无法加载，请检查网络/代理或打开原链接播放'
+        cleanupHls()
       })
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url

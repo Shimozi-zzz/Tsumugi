@@ -13,7 +13,7 @@ function getDesktopApi() {
 }
 
 function syncSafeTopOffset() {
-  const safeTop = isDesktop.value && !isFullscreen.value ? '32px' : '0px'
+  const safeTop = isDesktop.value && !isFullscreen.value ? '36px' : '0px'
   document.documentElement.style.setProperty('--titlebar-safe-top', safeTop)
 }
 
@@ -114,30 +114,58 @@ async function handleExitFullscreen() {
   syncSafeTopOffset()
 }
 
+let activeDragCleanup: (() => void) | null = null
+
+function clearPendingDragListeners() {
+  if (activeDragCleanup) {
+    activeDragCleanup()
+    activeDragCleanup = null
+  }
+}
+
 function onDragStripMouseDown(e: MouseEvent) {
-  if (e.button !== 0 || !isDesktop.value || !isMaximized.value || isFullscreen.value) return
+  if (e.button !== 0 || !isDesktop.value || isFullscreen.value) return
+  const target = e.target as HTMLElement | null
+  if (target?.closest('button, input, a, [data-no-drag]')) return
+
+  clearPendingDragListeners()
+
   const startX = e.screenX
   const startY = e.screenY
-  const ratioX = Math.max(0.15, Math.min(0.85, e.clientX / Math.max(window.innerWidth, 1)))
-  let restored = false
+  const ratioX = Math.max(0.1, Math.min(0.9, e.clientX / Math.max(window.innerWidth, 1)))
+  let triggered = false
 
   const cleanup = () => {
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', cleanup)
-  }
-
-  const onMove = (ev: MouseEvent) => {
-    if (restored) return
-    if (Math.hypot(ev.screenX - startX, ev.screenY - startY) > 4) {
-      restored = true
-      cleanup()
-      isMaximized.value = false
-      void getDesktopApi()?.restore_for_drag?.(ratioX)
+    window.removeEventListener('blur', cleanup)
+    if (activeDragCleanup === cleanup) {
+      activeDragCleanup = null
     }
   }
 
+  const onMove = (ev: MouseEvent) => {
+    if (triggered) return
+    if (Math.hypot(ev.screenX - startX, ev.screenY - startY) > 4) {
+      triggered = true
+      cleanup()
+      const wasMaximized = isMaximized.value
+      if (wasMaximized) {
+        isMaximized.value = false
+      }
+      const api = getDesktopApi()
+      if (api?.start_drag) {
+        void api.start_drag(ratioX)
+      } else if (wasMaximized && api?.restore_for_drag) {
+        void api.restore_for_drag(ratioX)
+      }
+    }
+  }
+
+  activeDragCleanup = cleanup
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', cleanup)
+  window.addEventListener('blur', cleanup)
 }
 
 async function handleClose() {
@@ -217,6 +245,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearPendingDragListeners()
   window.removeEventListener('pywebviewready', onPywebviewReady)
   window.removeEventListener('tsumugi-window-state', onNativeWindowState)
   window.removeEventListener('keydown', onKeydown)
@@ -229,17 +258,26 @@ onBeforeUnmount(() => {
   <!-- 桌面端无边框沉浸式顶部拖拽栏与右上角极简窗口控件 -->
   <div v-if="isDesktop && !isFullscreen" class="window-titlebar">
     <div
-      class="drag-strip pywebview-drag-region"
+      class="drag-strip"
       @mousedown="onDragStripMouseDown"
       @dblclick="handleToggleMaximize"
     />
 
-    <div class="win-controls" role="group" aria-label="窗口控制">
+    <div
+      class="win-controls"
+      role="group"
+      aria-label="窗口控制"
+      data-no-drag
+      @mousedown.stop
+      @dblclick.stop
+    >
       <button
         type="button"
         class="win-btn"
         title="全屏 (F11)"
         aria-label="全屏"
+        @mousedown.stop
+        @dblclick.stop
         @click="handleToggleFullscreen"
       >
         <svg viewBox="0 0 16 16" width="12.5" height="12.5" fill="none" stroke="currentColor" stroke-width="1.45">
@@ -252,6 +290,8 @@ onBeforeUnmount(() => {
         class="win-btn"
         title="最小化"
         aria-label="最小化"
+        @mousedown.stop
+        @dblclick.stop
         @click="handleMinimize"
       >
         <svg viewBox="0 0 16 16" width="12.5" height="12.5" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -264,6 +304,8 @@ onBeforeUnmount(() => {
         class="win-btn"
         :title="isMaximized ? '还原' : '最大化'"
         :aria-label="isMaximized ? '还原' : '最大化'"
+        @mousedown.stop
+        @dblclick.stop
         @click="handleToggleMaximize"
       >
         <svg
@@ -296,6 +338,8 @@ onBeforeUnmount(() => {
         class="win-btn win-btn-close"
         title="关闭"
         aria-label="关闭"
+        @mousedown.stop
+        @dblclick.stop
         @click="handleClose"
       >
         <svg viewBox="0 0 16 16" width="12.5" height="12.5" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -333,13 +377,15 @@ onBeforeUnmount(() => {
   align-items: center;
   pointer-events: none;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 .drag-strip {
   flex: 1;
   height: 100%;
   pointer-events: auto;
-  -webkit-app-region: drag;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .win-controls {
@@ -350,7 +396,6 @@ onBeforeUnmount(() => {
   padding: 2px;
   border-radius: 9px;
   pointer-events: auto;
-  -webkit-app-region: no-drag;
   opacity: 0.56;
   background: rgba(10, 10, 12, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.06);

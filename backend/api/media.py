@@ -6,7 +6,7 @@ from typing import Literal
 from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,12 +19,17 @@ from backend.db.models import AppStateSetting, Game
 from backend.schemas import GameOut
 from backend.scrapers.asset_search import search_asset_candidates
 from backend.services.media_service import (
+    build_media_proxy_headers,
     delete_local_media_cache,
     format_download_error_zh,
     get_or_create_thumbnail,
+    is_hls_response,
     is_remote_http_url,
+    normalize_steam_media_https,
     resolve_remote_video_stream,
+    rewrite_hls_manifest,
     save_game_asset_bytes,
+    validate_proxy_target_url,
 )
 from backend.services.task_manager import task_manager
 
@@ -337,6 +342,112 @@ async def stream_video(path: str = Query(..., description="data/ 下的相对路
     return FileResponse(resolved, media_type=media_type)
 
 
+@router.get("/proxy")
+async def proxy_media_resource(
+    url: str = Query(..., min_length=8, description="待代理播放的远程视频直链或 HLS (.m3u8) 地址"),
+    range_header: str | None = Header(None, alias="Range"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    本地流媒体与 HLS (.m3u8) 代理接口：
+    - 拦截非 http/https 协议与内网回环/私有网段地址（防 SSRF）；
+    - 自动透传项目代理配置与对应站点 Referer/UA；
+    - 对 HLS 清单 (.m3u8) 自动补全并重写子清单、音频轨 URI 与分片地址；
+    - 对直链视频与分片以 StreamingResponse 流式转发，透传 Range / 206 实现流畅拖拽。
+    """
+    try:
+        validated = validate_proxy_target_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    target_url = normalize_steam_media_https(validated)
+    proxy_row = await db.get(AppStateSetting, "proxy_url")
+    proxy_url = str(proxy_row.value or "").strip() if proxy_row else ""
+
+    req_headers = build_media_proxy_headers(target_url, range_header=range_header)
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(15.0, read=60.0),
+        proxy=proxy_url or None,
+        follow_redirects=True,
+    )
+
+    try:
+        req = client.build_request("GET", target_url, headers=req_headers)
+        upstream_resp = await client.send(req, stream=True)
+    except Exception as exc:
+        await client.aclose()
+        logger.warning("Media proxy upstream request failed for %s: %s", target_url, exc)
+        raise HTTPException(status_code=502, detail=format_download_error_zh(exc, media_kind="video"))
+
+    final_url = str(upstream_resp.url or target_url)
+    try:
+        validate_proxy_target_url(final_url)
+    except ValueError as exc:
+        await upstream_resp.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if upstream_resp.status_code >= 400:
+        code = upstream_resp.status_code
+        await upstream_resp.aclose()
+        await client.aclose()
+        out_status = code if code in (403, 404, 410, 416) else 502
+        raise HTTPException(
+            status_code=out_status,
+            detail=format_download_error_zh(f"HTTP Error {code}", media_kind="video"),
+        )
+
+    upstream_ct = upstream_resp.headers.get("content-type") or ""
+    if is_hls_response(final_url, upstream_ct) or is_hls_response(target_url, ""):
+        try:
+            raw_bytes = await upstream_resp.aread()
+        except Exception as exc:
+            logger.warning("Media proxy failed reading HLS manifest %s: %s", final_url, exc)
+            raise HTTPException(
+                status_code=502,
+                detail=format_download_error_zh(exc, media_kind="video"),
+            )
+        finally:
+            await upstream_resp.aclose()
+            await client.aclose()
+
+        manifest_text = raw_bytes.decode("utf-8", errors="replace")
+        rewritten = rewrite_hls_manifest(manifest_text, base_url=final_url, proxy_prefix="/api/media/proxy")
+        return Response(
+            content=rewritten,
+            status_code=200,
+            media_type="application/vnd.apple.mpegurl",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "no-cache",
+            },
+        )
+
+    media_type = upstream_ct.split(";")[0].strip() or "application/octet-stream"
+    resp_headers: dict[str, str] = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+    }
+    for hk in ("content-length", "content-range", "accept-ranges"):
+        if hk in upstream_resp.headers:
+            resp_headers[hk] = upstream_resp.headers[hk]
+
+    async def _iter_proxy_chunks():
+        try:
+            async for chunk in upstream_resp.aiter_bytes(chunk_size=65536):
+                yield chunk
+        finally:
+            await upstream_resp.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        _iter_proxy_chunks(),
+        status_code=upstream_resp.status_code,
+        media_type=media_type,
+        headers=resp_headers,
+    )
+
+
 @router.get("/video-stream")
 async def proxy_remote_video_stream(
     url: str = Query(..., min_length=8, description="待在线播放的远程视频页面或直链地址"),
@@ -344,13 +455,10 @@ async def proxy_remote_video_stream(
     db: AsyncSession = Depends(get_db),
 ):
     """在线视频流播放代理（兼容 Bilibili / YouTube 网页链接与防盗链视频直链，支持 Range 拖拽）"""
-    cleaned = url.strip()
-    parsed = urlparse(cleaned)
-    host = (parsed.hostname or "").lower()
-    if parsed.scheme not in ("http", "https") or not host:
-        raise HTTPException(status_code=400, detail="仅支持 http/https 视频链接")
-    if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-        raise HTTPException(status_code=400, detail="不允许代理本地回环地址")
+    try:
+        cleaned = normalize_steam_media_https(validate_proxy_target_url(url))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     proxy_row = await db.get(AppStateSetting, "proxy_url")
     proxy_url = str(proxy_row.value or "").strip() if proxy_row else ""

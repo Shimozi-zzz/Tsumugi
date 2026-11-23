@@ -33,6 +33,7 @@ class ExternalGameCandidate(BaseModel):
     steam_appid: str = ""
     vndb_id: str = ""
     bangumi_id: str = ""
+    ymgal_id: str = ""
     install_dir: str = ""
     executable_path: str = ""
     cover_path: str = ""

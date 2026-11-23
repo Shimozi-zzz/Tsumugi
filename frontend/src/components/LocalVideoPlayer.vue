@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Hls from 'hls.js'
-import { videoStreamUrl, videoUrl } from '@/api/client'
+import { mediaProxyUrl, videoUrl } from '@/api/client'
 import { PAUSE_MEDIA_EVENT, useAudioStore } from '@/stores/audio'
 
 const props = defineProps<{
@@ -23,6 +23,8 @@ const isLoading = ref(false)
 const hasStarted = ref(false)
 const errorMsg = ref('')
 const usingFallback = ref(false)
+const usingProxyRetry = ref(false)
+const embedPausedBySystem = ref(false)
 const currentTime = ref(0)
 const duration = ref(0)
 const bufferedRatio = ref(0)
@@ -34,33 +36,100 @@ const isScrubbing = ref(false)
 
 let hlsInstance: Hls | null = null
 let hideTimer: number | null = null
+let hlsNetworkRecoveryCount = 0
+let hlsMediaRecoveryCount = 0
 
 const DIRECT_VIDEO_URL_RE = /\.(?:mp4|webm|m4v|mov)(?:[?#].*)?$/i
-const HLS_URL_RE = /\.m3u8(?:[?#].*)?$/i
+const HLS_URL_RE = /(?:\.m3u8(?:[?#].*)?$|hls_)/i
+const STEAM_HTTP_RE = /^http:\/\/([^/]*(?:steamstatic\.com|steampowered\.com|steamcdn-a\.akamaihd\.net))/i
+const BILIBILI_BVID_RE = /bilibili\.com\/video\/(BV[0-9A-Za-z]+)/i
+const BILIBILI_AID_RE = /bilibili\.com\/video\/av(\d+)/i
+const YOUTUBE_ID_RE =
+  /(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i
+
+interface PlatformEmbedInfo {
+  platform: 'bilibili' | 'youtube'
+  embedUrl: string
+  label: string
+}
+
+function normalizeRemoteUrl(raw: string): string {
+  const trimmed = (raw || '').trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('//')) return `https:${trimmed}`
+  if (STEAM_HTTP_RE.test(trimmed)) return `https://${trimmed.slice(7)}`
+  return trimmed
+}
+
+function parsePlatformEmbed(url: string): PlatformEmbedInfo | null {
+  if (!/^https?:\/\//i.test(url)) return null
+
+  const bvMatch = url.match(BILIBILI_BVID_RE)
+  if (bvMatch) {
+    return {
+      platform: 'bilibili',
+      embedUrl: `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvMatch[1])}&high_quality=1&danmaku=0&autoplay=0`,
+      label: 'Bilibili',
+    }
+  }
+
+  const avMatch = url.match(BILIBILI_AID_RE)
+  if (avMatch) {
+    return {
+      platform: 'bilibili',
+      embedUrl: `https://player.bilibili.com/player.html?aid=${encodeURIComponent(avMatch[1])}&high_quality=1&danmaku=0&autoplay=0`,
+      label: 'Bilibili',
+    }
+  }
+
+  const ytMatch = url.match(YOUTUBE_ID_RE)
+  if (ytMatch) {
+    return {
+      platform: 'youtube',
+      embedUrl: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(ytMatch[1])}?rel=0&modestbranding=1`,
+      label: 'YouTube',
+    }
+  }
+
+  return null
+}
 
 const activeRawSrc = computed(() => {
   if (usingFallback.value && (props.fallbackSrc || '').trim()) {
-    return (props.fallbackSrc || '').trim()
+    return normalizeRemoteUrl(props.fallbackSrc || '')
   }
-  return (props.src || '').trim()
+  return normalizeRemoteUrl(props.src || '')
 })
 const isExternal = computed(() => /^https?:\/\//i.test(activeRawSrc.value))
-const isHlsStream = computed(() => HLS_URL_RE.test(activeRawSrc.value))
+const platformEmbed = computed(() => (isExternal.value ? parsePlatformEmbed(activeRawSrc.value) : null))
+const isHlsStream = computed(
+  () => isExternal.value && !platformEmbed.value && HLS_URL_RE.test(activeRawSrc.value),
+)
 const isDirectExternalVideo = computed(
-  () => isExternal.value && DIRECT_VIDEO_URL_RE.test(activeRawSrc.value),
+  () =>
+    isExternal.value &&
+    !platformEmbed.value &&
+    !isHlsStream.value &&
+    DIRECT_VIDEO_URL_RE.test(activeRawSrc.value),
 )
 const externalLinkUrl = computed(() => {
   if (isExternal.value) return activeRawSrc.value
-  const fb = (props.fallbackSrc || '').trim()
+  const fb = normalizeRemoteUrl(props.fallbackSrc || '')
   return /^https?:\/\//i.test(fb) ? fb : ''
 })
 const resolvedSrc = computed(() => {
   const raw = activeRawSrc.value
-  if (!raw) return ''
+  if (!raw || platformEmbed.value) return ''
+  // 1. 本地缓存文件（最高优先级）
   if (!isExternal.value) return videoUrl(raw, props.cacheBust)
-  if (isHlsStream.value || isDirectExternalVideo.value) return raw
-  // Bilibili / YouTube 等视频网页链接通过后端流代理在线播放
-  return videoStreamUrl(raw)
+  // 2. HLS 流统一走本地代理（解决 CORS、Referer 防盗链与分片重写）
+  if (isHlsStream.value) return mediaProxyUrl(raw)
+  // 3. 直链视频优先直连；直连报错后无感切换本地代理重试一次
+  if (isDirectExternalVideo.value) {
+    return usingProxyRetry.value ? mediaProxyUrl(raw) : raw
+  }
+  // 4. 其余未知外链视频默认优先直连，失败自动切换代理重试
+  return usingProxyRetry.value ? mediaProxyUrl(raw) : raw
 })
 
 const progressRatio = computed(() => {
@@ -115,20 +184,43 @@ function cleanupHls() {
   }
 }
 
+function releaseVideoElement() {
+  const video = videoRef.value
+  if (!video) return
+  try {
+    video.pause()
+    video.removeAttribute('src')
+    video.load()
+  } catch {
+    // ignore media reset errors
+  }
+}
+
 function setupVideo() {
   cleanupHls()
   clearHideTimer()
+  hlsNetworkRecoveryCount = 0
+  hlsMediaRecoveryCount = 0
   errorMsg.value = ''
   isPlaying.value = false
+  isLoading.value = false
   hasStarted.value = false
   currentTime.value = 0
   duration.value = 0
   bufferedRatio.value = 0
   controlsVisible.value = true
 
+  if (platformEmbed.value) {
+    releaseVideoElement()
+    return
+  }
+
   const video = videoRef.value
   const url = resolvedSrc.value
-  if (!video || !url) return
+  if (!video || !url) {
+    releaseVideoElement()
+    return
+  }
 
   video.volume = volume.value
   video.muted = muted.value
@@ -136,7 +228,11 @@ function setupVideo() {
   if (isHlsStream.value) {
     isLoading.value = true
     if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: false })
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        backBufferLength: 30,
+      })
       hlsInstance = hls
       hls.loadSource(url)
       hls.attachMedia(video)
@@ -144,23 +240,48 @@ function setupVideo() {
         isLoading.value = false
       })
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          isLoading.value = false
-          errorMsg.value = '宣传片流加载失败'
-          cleanupHls()
+        if (!data.fatal) return
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsNetworkRecoveryCount < 1) {
+          hlsNetworkRecoveryCount += 1
+          hls.startLoad()
+          return
         }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsMediaRecoveryCount < 1) {
+          hlsMediaRecoveryCount += 1
+          hls.recoverMediaError()
+          return
+        }
+        isLoading.value = false
+        cleanupHls()
+        errorMsg.value = '在线视频暂时无法加载，请检查网络/代理或打开原链接播放'
       })
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url
       isLoading.value = false
     } else {
       isLoading.value = false
-      errorMsg.value = '当前浏览器不支持 HLS 流播放'
+      errorMsg.value = '在线视频暂时无法加载，请检查网络/代理或打开原链接播放'
     }
   } else {
     video.src = url
     isLoading.value = false
   }
+}
+
+function retryLoad() {
+  usingProxyRetry.value = false
+  errorMsg.value = ''
+  embedPausedBySystem.value = false
+  setupVideo()
+}
+
+function resumePlatformEmbed() {
+  embedPausedBySystem.value = false
+  void audioStore.stopSmooth()
+}
+
+function handleEmbedInteract() {
+  void audioStore.stopSmooth()
 }
 
 function togglePlay() {
@@ -231,10 +352,24 @@ function onCanPlay() {
 }
 
 function onError() {
+  if (platformEmbed.value || !resolvedSrc.value) return
+  const video = videoRef.value
+  if (video && !video.getAttribute('src') && !hlsInstance) return
   isLoading.value = false
-  // 若本地视频文件失效但存在远程链接，自动无缝回退在线播放（无需手动刷新）
-  if (!usingFallback.value && !isExternal.value && /^https?:\/\//i.test((props.fallbackSrc || '').trim())) {
+  // 1. 若本地视频文件失效但存在远程链接，自动无缝回退在线播放（无需手动刷新）
+  if (
+    !usingFallback.value &&
+    !isExternal.value &&
+    /^https?:\/\//i.test(normalizeRemoteUrl(props.fallbackSrc || ''))
+  ) {
     usingFallback.value = true
+    usingProxyRetry.value = false
+    void nextTick(() => setupVideo())
+    return
+  }
+  // 2. 若外链直连失败，自动无感切换到本地代理 /api/media/proxy 重试一次
+  if (isExternal.value && !platformEmbed.value && !isHlsStream.value && !usingProxyRetry.value) {
+    usingProxyRetry.value = true
     setupVideo()
     return
   }
@@ -323,6 +458,10 @@ function handleGlobalPauseMedia() {
   if (video && !video.paused) {
     video.pause()
   }
+  if (platformEmbed.value) {
+    // 卸载跨域内嵌 iframe，立即中止 Bilibili / YouTube 声音输出
+    embedPausedBySystem.value = true
+  }
   isPlaying.value = false
   clearHideTimer()
   controlsVisible.value = true
@@ -340,12 +479,17 @@ onMounted(() => {
 })
 
 watch([() => props.src, () => props.fallbackSrc, () => props.cacheBust], () => {
+  cleanupHls()
+  releaseVideoElement()
   usingFallback.value = false
-  setupVideo()
+  usingProxyRetry.value = false
+  embedPausedBySystem.value = false
+  void nextTick(() => setupVideo())
 })
 
 onBeforeUnmount(() => {
   cleanupHls()
+  releaseVideoElement()
   clearHideTimer()
   window.removeEventListener('pointermove', onScrubPointerMove)
   window.removeEventListener('pointerup', onScrubPointerUp)
@@ -356,7 +500,60 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="local-player-shell">
+    <!-- 平台网页链接（Bilibili / YouTube）：简洁内嵌播放器 + 右上角原链接入口 -->
     <div
+      v-if="platformEmbed"
+      ref="stageRef"
+      class="video-stage embed-stage"
+      @pointerdown="handleEmbedInteract"
+    >
+      <iframe
+        v-if="!embedPausedBySystem"
+        :key="platformEmbed.embedUrl"
+        :src="platformEmbed.embedUrl"
+        class="embed-iframe"
+        :class="{ 'privacy-blur-img': blurred }"
+        frameborder="0"
+        allowfullscreen
+        referrerpolicy="no-referrer"
+        allow="autoplay; fullscreen; picture-in-picture"
+      />
+
+      <div v-else class="embed-paused-cover">
+        <img
+          v-if="poster"
+          :src="poster"
+          alt=""
+          class="embed-poster-img"
+          :class="{ 'privacy-blur-img': blurred }"
+        />
+        <button
+          type="button"
+          class="center-play-btn"
+          aria-label="继续播放宣传片"
+          @click="resumePlatformEmbed"
+        >
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M8 5.2v13.6L19 12 8 5.2z" />
+          </svg>
+        </button>
+      </div>
+
+      <a
+        v-if="externalLinkUrl"
+        :href="externalLinkUrl"
+        target="_blank"
+        rel="noopener"
+        class="embed-ext-pill"
+        :title="`在 ${platformEmbed.label} 打开原链接`"
+      >
+        打开原链接 ↗
+      </a>
+    </div>
+
+    <!-- 本地缓存 / HLS.js / 直链视频播放器 -->
+    <div
+      v-else
       ref="stageRef"
       class="video-stage"
       :class="{ 'controls-hidden': isPlaying && !controlsVisible }"
@@ -403,18 +600,23 @@ onBeforeUnmount(() => {
         <div class="spinner" />
       </div>
 
-      <!-- 错误态 -->
+      <!-- 错误兜底态 -->
       <div v-if="errorMsg" class="video-overlay error">
         <span>{{ errorMsg }}</span>
-        <a
-          v-if="externalLinkUrl"
-          :href="externalLinkUrl"
-          target="_blank"
-          rel="noopener"
-          class="error-ext-link"
-        >
-          打开原链接播放 ↗
-        </a>
+        <div class="error-actions">
+          <button type="button" class="error-retry-btn" @click="retryLoad">
+            重试
+          </button>
+          <a
+            v-if="externalLinkUrl"
+            :href="externalLinkUrl"
+            target="_blank"
+            rel="noopener"
+            class="error-ext-link"
+          >
+            打开原链接播放 ↗
+          </a>
+        </div>
       </div>
 
       <!-- 底部极简亚克力控制条 -->
@@ -591,6 +793,29 @@ onBeforeUnmount(() => {
   pointer-events: auto;
 }
 
+.error-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.error-retry-btn {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4f5;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.error-retry-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
 .error-ext-link {
   font-size: 12px;
   color: #f4f4f5;
@@ -601,6 +826,51 @@ onBeforeUnmount(() => {
 
 .error-ext-link:hover {
   opacity: 1;
+}
+
+.embed-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+  background: #060608;
+}
+
+.embed-paused-cover {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #060608;
+}
+
+.embed-poster-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.72;
+  display: block;
+}
+
+.embed-ext-pill {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(12, 12, 16, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: rgba(244, 244, 245, 0.9);
+  font-size: 11.5px;
+  text-decoration: none;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.embed-ext-pill:hover {
+  background: rgba(24, 24, 30, 0.9);
+  color: #ffffff;
 }
 
 .spinner {

@@ -125,6 +125,10 @@ export function videoStreamUrl(url: string): string {
   return `/api/media/video-stream?url=${encodeURIComponent(url)}`
 }
 
+export function mediaProxyUrl(url: string): string {
+  return `/api/media/proxy?url=${encodeURIComponent(url)}`
+}
+
 export function musicPreviewUrl(url: string): string {
   return `/api/scraper/music/preview?url=${encodeURIComponent(url)}`
 }

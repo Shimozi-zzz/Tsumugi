@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import ipaddress
 import logging
 import os
 from pathlib import Path
+import re
 import shutil
 from typing import Any, Callable, Iterable, Literal
-from urllib.parse import urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 import httpx
 from PIL import Image
@@ -598,7 +600,7 @@ async def download_pv_to_local(
     - 若 yt-dlp 仍失败且存在 Steam 备用直链 .mp4/.webm，自动回退直链流式下载；
     - 失败时完整原始错误写入日志，面向前端统一映射为中文提示。
     """
-    cleaned = (url or "").strip()
+    cleaned = normalize_steam_media_https((url or "").strip())
     if not is_remote_http_url(cleaned):
         msg = "无效的视频链接"
         task_manager.mark_error(game_id, "pv", msg)
@@ -701,10 +703,171 @@ def _extract_remote_video_stream_sync(url: str, proxy_url: str) -> tuple[str, di
 
 
 async def resolve_remote_video_stream(url: str, proxy_url: str = "") -> tuple[str, dict[str, str]]:
-    cleaned = (url or "").strip()
+    cleaned = normalize_steam_media_https((url or "").strip())
     if direct_video_extension(cleaned):
         return cleaned, {}
     return await asyncio.wait_for(
         asyncio.to_thread(_extract_remote_video_stream_sync, cleaned, proxy_url),
         timeout=15.0,
     )
+
+
+# ──────────────────── 在线流媒体与 HLS (.m3u8) 本地代理辅助（防 SSRF + 清单重写） ────────────────────
+
+DEFAULT_MEDIA_PROXY_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+)
+_HLS_URI_ATTR_RE = re.compile(r'URI="([^"]+)"')
+_STEAM_HOST_SUFFIXES = ("steamstatic.com", "steampowered.com", "steamcdn-a.akamaihd.net")
+_BILIBILI_HOST_SUFFIXES = ("bilibili.com", "bilivideo.com", "bilivideo.cn", "hdslb.com")
+_DLSITE_HOST_SUFFIXES = ("dlsite.com", "dlsite.jp")
+_YOUTUBE_HOST_SUFFIXES = ("youtube.com", "youtu.be", "googlevideo.com")
+_FORBIDDEN_HOSTNAMES = {"localhost", "localhost.localdomain", "0.0.0.0", "::1"}
+_NUMERIC_OR_HEX_HOST_RE = re.compile(r"^(?:\d+|0x[0-9a-f]+)$", re.IGNORECASE)
+
+
+def normalize_steam_media_https(url: str) -> str:
+    """将 Steam 预告片/CDN 的 http:// 链接统一规范为 https://"""
+    cleaned = (url or "").strip()
+    if cleaned.startswith("//"):
+        return f"https:{cleaned}"
+    parsed = urlparse(cleaned)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme.lower() == "http" and any(
+        host == sfx or host.endswith(f".{sfx}") for sfx in _STEAM_HOST_SUFFIXES
+    ):
+        return f"https://{cleaned[7:]}"
+    return cleaned
+
+
+def _is_forbidden_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    ):
+        return True
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return _is_forbidden_ip(ip.ipv4_mapped)
+    return False
+
+
+def validate_proxy_target_url(raw_url: str) -> str:
+    """
+    校验在线媒体代理目标链接安全性：
+    - 仅允许 http / https 协议；
+    - 禁止访问本机回环、私有网段、链路本地地址（localhost / 127.0.0.1 / 169.254.* / 10.* / 172.16-31.* / 192.168.* / ::1 等）。
+    """
+    cleaned = (raw_url or "").strip()
+    if not cleaned or any(ch in cleaned for ch in ("\r", "\n", "\x00")):
+        raise ValueError("无效的媒体链接")
+
+    parsed = urlparse(cleaned)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise ValueError("仅支持 http 或 https 媒体链接")
+
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not host:
+        raise ValueError("媒体链接缺少有效主机名")
+
+    if (
+        host in _FORBIDDEN_HOSTNAMES
+        or host.endswith(".localhost")
+        or host.endswith(".local")
+        or host.endswith(".internal")
+        or _NUMERIC_OR_HEX_HOST_RE.match(host)
+    ):
+        raise ValueError("禁止代理本机或内网地址")
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+
+    if ip is not None and _is_forbidden_ip(ip):
+        raise ValueError("禁止代理本机回环或私有网段地址")
+
+    return cleaned
+
+
+def build_media_proxy_headers(
+    target_url: str,
+    *,
+    range_header: str | None = None,
+) -> dict[str, str]:
+    """根据目标站点自动补全浏览器 User-Agent、Referer 与 Range 请求头"""
+    host = (urlparse(target_url).hostname or "").lower()
+    headers: dict[str, str] = {
+        "User-Agent": DEFAULT_MEDIA_PROXY_UA,
+        "Accept": "*/*",
+    }
+
+    if any(host == sfx or host.endswith(f".{sfx}") for sfx in _STEAM_HOST_SUFFIXES):
+        headers["Referer"] = "https://store.steampowered.com/"
+        headers["Origin"] = "https://store.steampowered.com"
+    elif any(host == sfx or host.endswith(f".{sfx}") for sfx in _BILIBILI_HOST_SUFFIXES):
+        headers["User-Agent"] = BILIBILI_USER_AGENT
+        headers["Referer"] = BILIBILI_REFERER
+        headers["Origin"] = "https://www.bilibili.com"
+    elif any(host == sfx or host.endswith(f".{sfx}") for sfx in _DLSITE_HOST_SUFFIXES):
+        headers["Referer"] = "https://www.dlsite.com/"
+    elif any(host == sfx or host.endswith(f".{sfx}") for sfx in _YOUTUBE_HOST_SUFFIXES):
+        headers["Referer"] = "https://www.youtube.com/"
+
+    if range_header and range_header.strip():
+        headers["Range"] = range_header.strip()
+
+    return headers
+
+
+def is_hls_response(url: str, content_type: str = "") -> bool:
+    """判断响应或 URL 是否为 HLS (.m3u8) 清单"""
+    ct = (content_type or "").lower()
+    if "mpegurl" in ct:
+        return True
+    parsed_path = (urlparse(url).path or "").lower()
+    return parsed_path.endswith(".m3u8") or ".m3u8" in (url or "").lower()
+
+
+def rewrite_hls_manifest(
+    manifest_text: str,
+    base_url: str,
+    *,
+    proxy_prefix: str = "/api/media/proxy",
+) -> str:
+    """
+    重写 HLS (.m3u8) 清单：
+    - 将所有子清单、分片（.ts / .m4s / .mp4 等）相对/绝对路径经 urljoin 补全并包装为 /api/media/proxy?url=...；
+    - 将 #EXT-X-MEDIA（音频轨）、#EXT-X-KEY（加密密钥）、#EXT-X-MAP（初始化分片）等标签中的 URI="..." 同步重写。
+    """
+    def _proxify(ref: str) -> str:
+        trimmed = ref.strip()
+        if not trimmed:
+            return trimmed
+        abs_url = normalize_steam_media_https(urljoin(base_url, trimmed))
+        return f"{proxy_prefix}?url={quote(abs_url, safe='')}"
+
+    out_lines: list[str] = []
+    for raw_line in (manifest_text or "").splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            out_lines.append("")
+            continue
+        if stripped.startswith("#"):
+            if 'URI="' in raw_line:
+                rewritten = _HLS_URI_ATTR_RE.sub(
+                    lambda m: f'URI="{_proxify(m.group(1))}"',
+                    raw_line,
+                )
+                out_lines.append(rewritten)
+            else:
+                out_lines.append(raw_line)
+            continue
+        out_lines.append(_proxify(stripped))
+
+    return "\n".join(out_lines) + ("\n" if out_lines else "")

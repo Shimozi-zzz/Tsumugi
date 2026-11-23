@@ -590,7 +590,7 @@ function statusDotClass(status: string) {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 20px 14px 16px;
+  padding: calc(20px + var(--titlebar-safe-top, 0px)) 14px 16px;
   background: var(--bg-acrylic);
   backdrop-filter: var(--backdrop-acrylic);
   -webkit-backdrop-filter: var(--backdrop-acrylic);
