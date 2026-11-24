@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { assetUrl, fallbackToOriginalImage, mediaThumbUrl } from '@/api/client'
 import { useLibraryStore } from '@/stores/library'
+import type { CollectionType } from '@/types'
 
 const store = useLibraryStore()
 
@@ -15,7 +16,19 @@ const targetCollection = computed(() =>
 )
 
 const name = ref(targetCollection.value?.name || '')
-const selectedIds = ref<Set<number>>(new Set(targetCollection.value?.game_ids || []))
+const description = ref(targetCollection.value?.description || '')
+const collectionType = ref<CollectionType>(
+  targetCollection.value?.collection_type === 'custom' ? 'custom' : 'series',
+)
+const selectedOrder = ref<number[]>([...(targetCollection.value?.game_ids || [])])
+const existingLabelMap = computed<Record<number, string>>(() => {
+  const map: Record<number, string> = {}
+  for (const it of targetCollection.value?.items || []) {
+    if (it.relation_label) map[it.game_id] = it.relation_label
+  }
+  return map
+})
+const selectedSet = computed(() => new Set(selectedOrder.value))
 const searchQuery = ref('')
 const saving = ref(false)
 const confirmDelete = ref(false)
@@ -26,16 +39,18 @@ const filteredCandidates = computed(() => {
   return store.games.filter(
     (g) =>
       g.title.toLowerCase().includes(q) ||
+      (g.sub_title || '').toLowerCase().includes(q) ||
       g.developer.toLowerCase().includes(q) ||
       g.pinyin_initials.toLowerCase().includes(q),
   )
 })
 
 function toggleGame(gameId: number) {
-  const next = new Set(selectedIds.value)
-  if (next.has(gameId)) next.delete(gameId)
-  else next.add(gameId)
-  selectedIds.value = next
+  if (selectedSet.value.has(gameId)) {
+    selectedOrder.value = selectedOrder.value.filter((id) => id !== gameId)
+  } else {
+    selectedOrder.value = [...selectedOrder.value, gameId]
+  }
 }
 
 function close() {
@@ -47,19 +62,33 @@ async function submit() {
   if (!trimmed || saving.value) return
   saving.value = true
   try {
-    const ids = Array.from(selectedIds.value)
+    const items = selectedOrder.value.map((gid) => ({
+      game_id: gid,
+      relation_label: existingLabelMap.value[gid] || '',
+    }))
     if (isEditMode.value && targetCollection.value) {
-      if (trimmed !== targetCollection.value.name) {
-        await store.renameCollection(targetCollection.value.id, trimmed)
-      }
-      await store.setCollectionGames(targetCollection.value.id, ids)
-      store.notify(`已更新分组「${trimmed}」（共 ${ids.length} 部作品）`, 'success')
+      await store.updateCollectionMeta(targetCollection.value.id, {
+        name: trimmed,
+        description: description.value.trim(),
+        collection_type: collectionType.value,
+      })
+      await store.setCollectionItems(targetCollection.value.id, items)
+      store.notify(`已更新合集「${trimmed}」（共 ${items.length} 部作品）`, 'success')
     } else {
-      await store.createCollection(trimmed, ids, true)
+      await store.createCollection(
+        {
+          name: trimmed,
+          description: description.value.trim(),
+          collection_type: collectionType.value,
+          items,
+        },
+        [],
+        false,
+      )
     }
     close()
   } catch (err) {
-    store.notify(err instanceof Error ? err.message : '保存分组失败', 'error')
+    store.notify(err instanceof Error ? err.message : '保存合集失败', 'error')
   } finally {
     saving.value = false
   }
@@ -88,7 +117,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <div class="modal-card col-modal">
       <div class="modal-head">
         <div>
-          <h2>{{ isEditMode ? '编辑分组' : '新建分组' }}</h2>
+          <h2>{{ isEditMode ? '编辑合集' : '新建合集' }}</h2>
         </div>
         <button type="button" class="close-icon-btn" aria-label="关闭" @click="close">
           <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -98,22 +127,56 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       </div>
 
       <div class="modal-body">
+        <div class="field-row">
+          <div class="field field-grow">
+            <label>合集名称</label>
+            <input
+              v-model="name"
+              class="input"
+              maxlength="64"
+              placeholder="例如：白色相簿系列、Key 社巡礼、命运石之门"
+              autofocus
+              @keydown.enter="submit"
+            />
+          </div>
+
+          <div class="field field-type">
+            <label>类型</label>
+            <div class="type-seg" role="radiogroup" aria-label="合集类型">
+              <button
+                type="button"
+                class="type-opt"
+                :class="{ active: collectionType === 'series' }"
+                @click="collectionType = 'series'"
+              >
+                系列
+              </button>
+              <button
+                type="button"
+                class="type-opt"
+                :class="{ active: collectionType === 'custom' }"
+                @click="collectionType = 'custom'"
+              >
+                自定义
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div class="field">
-          <label>分组名称</label>
+          <label>简短说明（可选）</label>
           <input
-            v-model="name"
+            v-model="description"
             class="input"
-            maxlength="64"
-            placeholder="例如：悬疑推理、Key 社巡礼、年度神作"
-            autofocus
-            @keydown.enter="submit"
+            maxlength="240"
+            placeholder="例如：建议按本篇 → FD → 外传顺序游玩"
           />
         </div>
 
         <div class="field">
           <div class="members-head">
-            <label>收录作品</label>
-            <span class="selected-count tabular-nums">已选 {{ selectedIds.size }} / {{ store.games.length }}</span>
+            <label>收录作品（按勾选顺序排位，可在合集详情内随时拖拽调整）</label>
+            <span class="selected-count tabular-nums">已选 {{ selectedOrder.length }} / {{ store.games.length }}</span>
           </div>
 
           <input
@@ -128,11 +191,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               :key="g.id"
               type="button"
               class="member-row"
-              :class="{ checked: selectedIds.has(g.id) }"
+              :class="{ checked: selectedSet.has(g.id) }"
               @click="toggleGame(g.id)"
             >
-              <span class="check-box" :class="{ on: selectedIds.has(g.id) }">
-                <svg v-if="selectedIds.has(g.id)" viewBox="0 0 14 14" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2">
+              <span class="check-box" :class="{ on: selectedSet.has(g.id) }">
+                <svg v-if="selectedSet.has(g.id)" viewBox="0 0 14 14" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2">
                   <path d="M2.5 7.2L5.5 10.2L11.5 3.8" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
               </span>
@@ -154,6 +217,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 <div class="member-title">{{ g.title }}</div>
                 <div class="member-dev">{{ g.developer || g.source_platform }}</div>
               </div>
+
+              <span v-if="selectedSet.has(g.id)" class="member-order-num tabular-nums">
+                {{ String(selectedOrder.indexOf(g.id) + 1).padStart(2, '0') }}
+              </span>
             </button>
 
             <div v-if="filteredCandidates.length === 0" class="member-empty">
@@ -170,7 +237,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           class="btn btn-danger btn-sm"
           @click="removeCollection"
         >
-          {{ confirmDelete ? '确认删除（保留游戏本体）' : '删除分组' }}
+          {{ confirmDelete ? '确认删除（保留游戏本体）' : '删除合集' }}
         </button>
         <div class="foot-right">
           <button type="button" class="btn btn-ghost" @click="close">取消</button>
@@ -180,7 +247,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             :disabled="!name.trim() || saving"
             @click="submit"
           >
-            {{ saving ? '保存中…' : isEditMode ? '保存更改' : '创建分组' }}
+            {{ saving ? '保存中…' : isEditMode ? '保存更改' : '创建合集' }}
           </button>
         </div>
       </div>
@@ -242,6 +309,55 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   display: flex;
   flex-direction: column;
   gap: 7px;
+}
+
+.field-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.field-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-type {
+  flex-shrink: 0;
+}
+
+.type-seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  gap: 2px;
+}
+
+.type-opt {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.type-opt.active {
+  background: #f5f5f7;
+  color: #0a0a0c;
+  font-weight: 600;
+}
+
+.member-order-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .field label {

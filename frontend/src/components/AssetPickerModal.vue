@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { assetProxyUrl, scraperApi } from '@/api/client'
+import { assetProxyUrl, assetUrl, scraperApi } from '@/api/client'
 import { useLibraryStore } from '@/stores/library'
 import { useTaskStore } from '@/stores/tasks'
 import type { AssetCandidate, Game, MediaSaveMode, PickerAssetType } from '@/types'
@@ -60,6 +60,7 @@ const PV_SOURCES: SourceOption[] = [
 
 const modalTitle = computed(() => SLOT_TITLES[props.assetType])
 const isPvMode = computed(() => props.assetType === 'pv')
+const isHeroMode = computed(() => props.assetType === 'hero')
 const sourceOptions = computed<SourceOption[]>(() =>
   isPvMode.value ? PV_SOURCES : IMAGE_SOURCES,
 )
@@ -89,13 +90,81 @@ const warnings = ref<string[]>([])
 const sgdbConfigured = ref(Boolean(store.settings.api_keys?.steamgriddb))
 const applyingId = ref('')
 const brokenIds = ref<Set<string>>(new Set())
+const loadedDims = ref<Record<string, { width: number; height: number }>>({})
 
 let searchSeq = 0
+
+const LOCAL_COVER_URL = 'local://cover'
+
+const localCoverCandidate = computed<AssetCandidate | null>(() => {
+  if (!isHeroMode.value) return null
+  const coverPath = (props.game.media?.cover_path || '').trim()
+  if (!coverPath) return null
+  const preview = assetUrl(coverPath, store.assetVersion)
+  if (!preview) return null
+  return {
+    id: `local-cover-${props.game.id}`,
+    url: LOCAL_COVER_URL,
+    thumb_url: preview,
+    source: '当前封面',
+    platform: '本地',
+    title: `${props.game.title}（当前封面）`,
+    width: null,
+    height: null,
+    duration: null,
+    mime_hint: 'image',
+    asset_role: 'cover',
+    asset_roles: ['cover'],
+  }
+})
+
+const activeLocalCover = computed<AssetCandidate | null>(() =>
+  selectedSource.value === 'all' ? localCoverCandidate.value : null,
+)
+
+const displayItems = computed<AssetCandidate[]>(() => {
+  if (!isHeroMode.value) {
+    return items.value
+  }
+  return activeLocalCover.value ? [activeLocalCover.value, ...items.value] : items.value
+})
+
+const visibleWarnings = computed(() =>
+  warnings.value.filter((msg) => !msg.includes('SteamGridDB')),
+)
+
+function resolvePreviewSrc(item: AssetCandidate): string {
+  if (item.url === LOCAL_COVER_URL) {
+    return item.thumb_url
+  }
+  return assetProxyUrl(item.thumb_url || item.url)
+}
+
+function openSgdbSettings() {
+  if (applyingId.value) return
+  emit('close')
+  store.openSettings('sources', 'steamgriddb')
+}
 
 function markBroken(id: string) {
   const next = new Set(brokenIds.value)
   next.add(id)
   brokenIds.value = next
+}
+
+function handleImageLoad(id: string, ev: Event) {
+  const img = ev.target as HTMLImageElement | null
+  if (!img) return
+  const w = img.naturalWidth
+  const h = img.naturalHeight
+  if (w > 0 && h > 0) {
+    const prev = loadedDims.value[id]
+    if (prev && prev.width === w && prev.height === h) return
+    loadedDims.value = {
+      ...loadedDims.value,
+      [id]: { width: w, height: h },
+    }
+  }
 }
 
 async function runSearch() {
@@ -111,10 +180,11 @@ async function runSearch() {
   loading.value = true
   searchedOnce.value = true
   brokenIds.value = new Set()
+  loadedDims.value = {}
   try {
     const res = await scraperApi.searchAssets(props.assetType, q, selectedSource.value, {
       steam_appid: steamAppId,
-      alt_title: isPvMode.value ? altTitle : '',
+      alt_title: altTitle,
     })
     if (seq !== searchSeq) return
     items.value = res.items || []
@@ -170,7 +240,7 @@ async function applyCandidate(item: AssetCandidate) {
       store.notify('宣传片已加入后台下载，期间可直接在线播放', 'info')
     } else if (props.assetType === 'pv' && mode === 'link_only') {
       taskStore.dismissTask(props.game.id, 'pv')
-      store.notify('已保存宣传片在线链接（不占用本地硬盘空间）', 'success')
+      store.notify('已保存宣传片链接', 'success')
     } else {
       store.notify(`已更新${SLOT_SHORT_NAMES[props.assetType]}`, 'success')
     }
@@ -189,11 +259,37 @@ function formatDuration(sec: number | null): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-function formatDims(item: AssetCandidate): string {
+function resolveDims(item: AssetCandidate): { width: number; height: number } | null {
+  const loaded = loadedDims.value[item.id]
+  const hasDistinctThumb = Boolean(item.thumb_url && item.url && item.thumb_url !== item.url)
+  if (hasDistinctThumb && item.width && item.height) {
+    return { width: item.width, height: item.height }
+  }
+  if (loaded) {
+    return loaded
+  }
   if (item.width && item.height) {
-    return `${item.width}×${item.height}`
+    return { width: item.width, height: item.height }
+  }
+  return null
+}
+
+function formatDims(item: AssetCandidate): string {
+  const dims = resolveDims(item)
+  if (dims) {
+    return `${dims.width}×${dims.height}`
   }
   return ''
+}
+
+function isPortraitImage(item: AssetCandidate): boolean {
+  const dims = resolveDims(item)
+  return Boolean(dims && dims.height > dims.width)
+}
+
+function formatSourceBadge(item: AssetCandidate): string {
+  if (item.url === LOCAL_COVER_URL) return '当前封面'
+  return item.source || item.platform || ''
 }
 
 function pvHintLabel(item: AssetCandidate): string {
@@ -324,13 +420,17 @@ onBeforeUnmount(() => {
               下载到本地
             </button>
           </div>
+          <span v-else-if="!sgdbConfigured" class="sgdb-muted-hint">
+            <span>SteamGridDB 未配置</span>
+            <button type="button" class="sgdb-muted-link" @click="openSgdbSettings">去设置</button>
+          </span>
         </div>
       </div>
 
       <!-- 候选展示区域 -->
       <div class="picker-body">
-        <div v-if="warnings.length > 0 && items.length > 0" class="inline-warning">
-          {{ warnings[0] }}
+        <div v-if="visibleWarnings.length > 0 && items.length > 0" class="inline-warning">
+          {{ visibleWarnings[0] }}
         </div>
         <div
           v-if="isPvMode && steamEmpty && !loading && (selectedSource === 'auto' || selectedSource === 'steam')"
@@ -410,9 +510,9 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- 图片候选网格 -->
-        <div v-else-if="!isPvMode && items.length > 0" class="candidate-grid" :class="gridModeClass">
+        <div v-else-if="!isPvMode && displayItems.length > 0" class="candidate-grid" :class="gridModeClass">
           <button
-            v-for="item in items"
+            v-for="item in displayItems"
             :key="item.id"
             type="button"
             class="img-card"
@@ -420,6 +520,7 @@ onBeforeUnmount(() => {
               portrait: assetType === 'cover' || assetType === 'spine',
               wide: assetType === 'hero',
               logo: assetType === 'logo',
+              'is-portrait-img': isHeroMode && isPortraitImage(item),
               applying: applyingId === item.id,
             }"
             :disabled="Boolean(applyingId)"
@@ -428,14 +529,22 @@ onBeforeUnmount(() => {
           >
             <img
               v-if="!brokenIds.has(item.id)"
-              :src="assetProxyUrl(item.thumb_url || item.url)"
+              :src="resolvePreviewSrc(item)"
               :alt="item.title"
               loading="lazy"
+              @load="handleImageLoad(item.id, $event)"
               @error="markBroken(item.id)"
             />
             <div v-else class="thumb-fallback">预览加载失败</div>
 
-            <span class="badge-source">{{ item.source }}</span>
+            <span
+              class="badge-source"
+              :class="{
+                'badge-local-cover': item.url === LOCAL_COVER_URL,
+              }"
+            >
+              {{ formatSourceBadge(item) }}
+            </span>
             <span v-if="formatDims(item)" class="badge-meta tabular-nums">
               {{ formatDims(item) }}
             </span>
@@ -451,11 +560,17 @@ onBeforeUnmount(() => {
         <!-- 空态 -->
         <div v-else class="picker-empty">
           <template v-if="showSgdbKeyEmpty">
-            <p class="empty-primary">尚未配置 SteamGridDB API Key</p>
-            <p class="empty-sub">可在全局设置 → 数据源管理中填写</p>
+            <p class="empty-primary">SteamGridDB 未配置</p>
+            <button
+              type="button"
+              class="inline-switch-btn empty-reset-btn"
+              @click="openSgdbSettings"
+            >
+              去设置
+            </button>
           </template>
-          <template v-else-if="warnings.length > 0">
-            <p class="empty-primary">{{ warnings[0] }}</p>
+          <template v-else-if="visibleWarnings.length > 0">
+            <p class="empty-primary">{{ visibleWarnings[0] }}</p>
           </template>
           <template v-else-if="searchedOnce">
             <p class="empty-primary">未找到匹配结果</p>
@@ -666,6 +781,34 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.sgdb-muted-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.sgdb-muted-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-expo);
+}
+
+.sgdb-muted-link:hover {
+  color: var(--text-primary);
+}
+
+.empty-reset-btn {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
 .picker-body {
   flex: 1;
   min-height: 0;
@@ -738,10 +881,16 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
   display: block;
   transition:
     transform 260ms var(--ease-out-expo),
     filter var(--duration-fast) var(--ease-out-expo);
+}
+
+.img-card.wide.is-portrait-img img {
+  object-fit: cover;
+  object-position: center 20%;
 }
 
 .img-card.logo img {
@@ -783,10 +932,22 @@ onBeforeUnmount(() => {
 
 .badge-source {
   left: 8px;
+  max-width: calc(100% - 92px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge-source.badge-local-cover {
+  background: rgba(245, 245, 247, 0.9);
+  color: #0a0a0c;
+  font-weight: 600;
+  box-shadow: none;
 }
 
 .badge-meta {
   right: 8px;
+  white-space: nowrap;
   font-family: var(--font-mono);
   color: rgba(245, 245, 247, 0.72);
 }

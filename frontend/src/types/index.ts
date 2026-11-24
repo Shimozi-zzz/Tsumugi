@@ -21,6 +21,59 @@ export type SettingsSectionId = 'general' | 'network' | 'sources' | 'data' | 'en
 export type LibrarySortBy = 'series_name' | 'recent_played' | 'release_date' | 'play_time' | 'created_at'
 export type LibrarySortOrder = 'asc' | 'desc'
 export type MediaSaveMode = 'none' | 'link_only' | 'download'
+export type CollectionType = 'series' | 'custom'
+export type NoteType = 'work' | 'character' | 'misc'
+export type RatingDimensionKey = 'story' | 'visual' | 'music' | 'atmosphere'
+
+export interface RatingDimensions {
+  story?: number
+  visual?: number
+  music?: number
+  atmosphere?: number
+  [key: string]: number | undefined
+}
+
+export interface CollectionWorkSummary {
+  game_id: number
+  title: string
+  sub_title: string
+  cover_thumb_url: string
+  cover_path: string
+  play_status: string
+  is_nsfw: boolean
+  rating_overall: number | null
+  relation_label: string
+  position: number
+  added_at: string | null
+}
+
+export interface GameCollectionMembership {
+  id: number
+  name: string
+  description: string
+  collection_type: CollectionType | string
+  relation_label: string
+  position: number
+  total_count: number
+  completed_count: number
+  items: CollectionWorkSummary[]
+}
+
+export interface CollectionItemInput {
+  game_id: number
+  relation_label?: string
+}
+
+export interface GameNote {
+  id: number
+  game_id: number
+  note_type: NoteType | string
+  title: string
+  content_md: string
+  is_pinned: boolean
+  created_at: string
+  updated_at: string
+}
 
 export interface GameMediaPath {
   cover_path: string
@@ -67,6 +120,9 @@ export interface Game {
   locked_fields: string[]
   bangumi_id: string
   series: string
+  rating_overall?: number | null
+  rating_dimensions?: RatingDimensions | null
+  short_review?: string
   status: GameStatus | string
   edition: GameEdition | string
   is_nsfw: boolean
@@ -74,6 +130,8 @@ export interface Game {
   created_at: string
   media: GameMediaPath | null
   play_record: PlayRecord | null
+  notes_count?: number
+  collections?: GameCollectionMembership[]
   cover_thumb_url?: string
   background_thumb_url?: string
 }
@@ -461,6 +519,7 @@ export interface MusicSearchResponse {
 }
 
 export type PickerAssetType = 'cover' | 'logo' | 'hero' | 'spine' | 'pv'
+export type AssetRole = 'hero' | 'cover'
 
 export interface AssetCandidate {
   id: string
@@ -475,6 +534,8 @@ export interface AssetCandidate {
   height: number | null
   duration: number | null
   mime_hint: 'image' | 'hls' | 'mp4' | 'webm' | 'dash' | 'video_page' | string
+  asset_role?: AssetRole | null
+  asset_roles?: AssetRole[]
 }
 
 export interface AssetSearchResponse {
@@ -711,9 +772,17 @@ export interface MetadataApplyPatch {
 export interface CollectionItem {
   id: number
   name: string
+  description: string
+  collection_type: CollectionType | string
   sort_order: number
   created_at: string | null
+  updated_at?: string | null
   game_ids: number[]
+  items: CollectionWorkSummary[]
+  total_count: number
+  completed_count: number
+  playing_count: number
+  unplayed_count: number
 }
 
 export interface LedgerDayGame {

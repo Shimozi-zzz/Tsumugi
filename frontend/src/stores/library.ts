@@ -13,6 +13,8 @@ import type {
   ActiveStatusFilter,
   AppSettings,
   CollectionItem,
+  CollectionItemInput,
+  CollectionType,
   DroppedFileInfo,
   ExternalImportSource,
   Game,
@@ -533,7 +535,34 @@ export const useLibraryStore = defineStore('library', () => {
     }
   }
 
-  // ─────────────── 分组 CRUD（双向同步单一数据源） ───────────────
+  // ─────────────── 系列合集 / 分组 CRUD（双向同步单一数据源） ───────────────
+
+  function _syncActiveGameCollectionsCache() {
+    const activeId = activeGameId.value
+    if (activeId == null) return
+    const idx = games.value.findIndex((g) => g.id === activeId)
+    if (idx < 0) return
+    const memberships = collections.value
+      .filter((col) => (col.items || []).some((it) => it.game_id === activeId) || col.game_ids.includes(activeId))
+      .map((col) => {
+        const entry = (col.items || []).find((it) => it.game_id === activeId)
+        return {
+          id: col.id,
+          name: col.name,
+          description: col.description || '',
+          collection_type: col.collection_type || 'series',
+          relation_label: entry?.relation_label || '',
+          position: entry?.position ?? 0,
+          total_count: col.total_count ?? col.game_ids.length,
+          completed_count: col.completed_count ?? 0,
+          items: col.items || [],
+        }
+      })
+    games.value[idx] = {
+      ...games.value[idx],
+      collections: memberships,
+    }
+  }
 
   async function fetchCollections() {
     collections.value = await collectionsApi.list()
@@ -543,6 +572,7 @@ export const useLibraryStore = defineStore('library', () => {
     ) {
       activeCollectionId.value = null
     }
+    _syncActiveGameCollectionsCache()
   }
 
   function _upsertCollection(col: CollectionItem) {
@@ -552,22 +582,53 @@ export const useLibraryStore = defineStore('library', () => {
     } else {
       collections.value.push(col)
     }
+    _syncActiveGameCollectionsCache()
   }
 
-  async function createCollection(name: string, gameIds: number[] = [], activate = false) {
-    const created = await collectionsApi.create(name, gameIds)
+  async function createCollection(
+    nameOrOpts:
+      | string
+      | {
+          name: string
+          description?: string
+          collection_type?: CollectionType
+          game_ids?: number[]
+          items?: CollectionItemInput[]
+        },
+    gameIds: number[] = [],
+    activate = false,
+  ) {
+    const payload =
+      typeof nameOrOpts === 'string'
+        ? { name: nameOrOpts, game_ids: gameIds }
+        : nameOrOpts
+    const created = await collectionsApi.create(payload)
     _upsertCollection(created)
     if (activate) {
       setActiveCollection(created.id)
     }
-    notify(`已创建分组「${created.name}」`, 'success')
+    notify(`已创建合集「${created.name}」`, 'success')
     return created
+  }
+
+  async function updateCollectionMeta(
+    collectionId: number,
+    patch: {
+      name?: string
+      description?: string
+      collection_type?: CollectionType
+      sort_order?: number
+    },
+  ) {
+    const updated = await collectionsApi.update(collectionId, patch)
+    _upsertCollection(updated)
+    return updated
   }
 
   async function renameCollection(collectionId: number, name: string) {
     const updated = await collectionsApi.update(collectionId, { name })
     _upsertCollection(updated)
-    notify(`分组已重命名为「${updated.name}」`, 'info')
+    notify(`合集已重命名为「${updated.name}」`, 'info')
     return updated
   }
 
@@ -578,7 +639,40 @@ export const useLibraryStore = defineStore('library', () => {
     if (activeCollectionId.value === collectionId) {
       activeCollectionId.value = null
     }
-    notify(`已删除分组「${target?.name || ''}」（游戏本体已保留）`, 'info')
+    _syncActiveGameCollectionsCache()
+    notify(`已删除合集「${target?.name || ''}」（游戏本体已保留）`, 'info')
+  }
+
+  async function setCollectionItems(collectionId: number, items: CollectionItemInput[]) {
+    const updated = await collectionsApi.replaceItems(collectionId, items)
+    _upsertCollection(updated)
+    if (
+      activeCollectionId.value === collectionId &&
+      filteredGames.value.length > 0 &&
+      !filteredGames.value.some((g) => g.id === activeGameId.value)
+    ) {
+      void selectGame(filteredGames.value[0].id, { recordActive: false })
+    }
+    return updated
+  }
+
+  async function addCollectionItem(
+    collectionId: number,
+    gameId: number,
+    relationLabel = '',
+  ) {
+    const updated = await collectionsApi.addItem(collectionId, {
+      game_id: gameId,
+      relation_label: relationLabel,
+    })
+    _upsertCollection(updated)
+    return updated
+  }
+
+  async function removeCollectionItem(collectionId: number, gameId: number) {
+    const updated = await collectionsApi.removeItem(collectionId, gameId)
+    _upsertCollection(updated)
+    return updated
   }
 
   async function setCollectionGames(collectionId: number, gameIds: number[]) {
@@ -599,8 +693,8 @@ export const useLibraryStore = defineStore('library', () => {
     if (!col) return
     const exists = col.game_ids.includes(gameId)
     const updated = exists
-      ? await collectionsApi.removeGame(collectionId, gameId)
-      : await collectionsApi.addGame(collectionId, gameId)
+      ? await collectionsApi.removeItem(collectionId, gameId)
+      : await collectionsApi.addItem(collectionId, { game_id: gameId })
     _upsertCollection(updated)
     return updated
   }
@@ -685,17 +779,19 @@ export const useLibraryStore = defineStore('library', () => {
     if (idx >= 0) {
       games.value[idx] = updated
     }
-    assetVersion.value = Date.now()
+    if (patch.media) {
+      assetVersion.value = Date.now()
+    }
+    if (patch.status !== undefined || patch.title !== undefined || patch.is_nsfw !== undefined) {
+      void fetchCollections().catch(() => {})
+    }
     return updated
   }
 
   async function deleteGameById(gameId: number) {
     await gamesApi.remove(gameId)
     games.value = games.value.filter((g) => g.id !== gameId)
-    collections.value = collections.value.map((col) => ({
-      ...col,
-      game_ids: col.game_ids.filter((id) => id !== gameId),
-    }))
+    void fetchCollections().catch(() => {})
     if (activeGameId.value === gameId) {
       activeGameId.value = games.value[0]?.id ?? null
     }
@@ -744,14 +840,26 @@ export const useLibraryStore = defineStore('library', () => {
     showExternalImportModal.value = true
   }
 
-  function syncGameFromServer(updated: Game) {
+  function syncGameFromServer(updated: Game, options: { bumpAsset?: boolean } = {}) {
     const idx = games.value.findIndex((g) => g.id === updated.id)
     if (idx >= 0) {
       games.value[idx] = updated
     } else {
       games.value.push(updated)
     }
-    assetVersion.value = Date.now()
+    if (options.bumpAsset !== false) {
+      assetVersion.value = Date.now()
+    }
+  }
+
+  function setGameNotesCount(gameId: number, count: number) {
+    const idx = games.value.findIndex((g) => g.id === gameId)
+    if (idx >= 0) {
+      games.value[idx] = {
+        ...games.value[idx],
+        notes_count: Math.max(0, count),
+      }
+    }
   }
 
   function bumpAssetVersion() {
@@ -821,8 +929,12 @@ export const useLibraryStore = defineStore('library', () => {
     setActiveCollection,
     fetchCollections,
     createCollection,
+    updateCollectionMeta,
     renameCollection,
     deleteCollection,
+    setCollectionItems,
+    addCollectionItem,
+    removeCollectionItem,
     setCollectionGames,
     toggleGameInCollection,
     openCreateCollectionModal,
@@ -840,6 +952,7 @@ export const useLibraryStore = defineStore('library', () => {
     openImport,
     openExternalImport,
     syncGameFromServer,
+    setGameNotesCount,
     bumpAssetVersion,
   }
 })

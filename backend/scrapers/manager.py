@@ -89,7 +89,7 @@ SCRAPER_METADATA_CATALOG: dict[str, dict[str, Any]] = {
         "requires_key": False,
         "categories": ["galgame"],
         "doc_url": "https://www.ymgal.games/developer",
-        "doc_hint": "免 Key 即可通过公开只读接口检索；填写专属 Client ID / Secret 可提升配额。",
+        "doc_hint": "默认使用公开只读接口，填写开发者凭证可提高配额。",
     },
     "kungal": {
         "name": "Kungal 鲲Gal",
@@ -98,34 +98,34 @@ SCRAPER_METADATA_CATALOG: dict[str, dict[str, Any]] = {
         "requires_key": False,
         "categories": ["galgame"],
         "doc_url": "https://www.kungal.com",
-        "doc_hint": "默认直连官方域名 kungal.com，可在下方自定义 API Base URL 或可选 Token。",
+        "doc_hint": "默认使用 kungal.com，可配置自定义地址或访问 Token。",
     },
     "dlsite": {
         "name": "DLsite",
         "short_name": "DLsite",
-        "description": "同人 / 独立视觉小说，精准支持 RJ / VJ / BJ 作品编号与链接直查",
+        "description": "同人 / 独立视觉小说，支持 RJ / VJ / BJ 作品编号与链接直查",
         "requires_key": False,
         "categories": ["galgame"],
         "doc_url": "https://www.dlsite.com",
-        "doc_hint": "免 Key 开箱即用，粘贴 RJ123456 / VJ123456 或商品链接即可 100% 精准命中。",
+        "doc_hint": "免 Key，支持粘贴 RJ / VJ 编号或商品链接查询。",
     },
     "vndb": {
         "name": "VNDB",
         "short_name": "VNDB",
-        "description": "全球最全视觉小说数据库（API v2），支持 v{id} 直查与 Steam/DLsite 关联",
+        "description": "视觉小说数据库（API v2），支持 v{id} 直查与 Steam / DLsite 关联",
         "requires_key": False,
         "categories": ["galgame"],
         "doc_url": "https://api.vndb.org/kana",
-        "doc_hint": "免 Key 免费调用，自动提取原名、别名、防剧透标签与 Steam/DLsite 外链。",
+        "doc_hint": "免 Key，支持提取原名、别名、标签与 Steam / DLsite 外链。",
     },
     "bangumi": {
         "name": "Bangumi 番组计划",
         "short_name": "Bangumi",
-        "description": "中文游戏条目、剧情简介、别名与社区评分（支持 bgm.tv/subject/{id} 直查）",
+        "description": "中文游戏条目、剧情简介、别名与评分（支持 bgm.tv/subject/{id} 直查）",
         "requires_key": False,
         "categories": ["galgame", "general"],
         "doc_url": "https://next.bgm.tv/demo/access-token",
-        "doc_hint": "免 Key 即可搜索游戏分类；填写 Access Token 可提升限额并启用游玩状态同步。",
+        "doc_hint": "免 Key 可搜索，填写 Access Token 可提高限额并同步游玩状态。",
     },
     "steam": {
         "name": "Steam Store",
@@ -134,34 +134,34 @@ SCRAPER_METADATA_CATALOG: dict[str, dict[str, Any]] = {
         "requires_key": False,
         "categories": ["general"],
         "doc_url": "https://store.steampowered.com",
-        "doc_hint": "免 Key 开箱即用，支持直接粘贴商店链接或纯数字 AppID。",
+        "doc_hint": "免 Key，支持粘贴商店链接或数字 AppID 查询。",
     },
     "touchgal": {
         "name": "TouchGal",
         "short_name": "TouchGal",
-        "description": "中文 Galgame 社区资料库，专精中文译名、汉化简介与宽幅横版封面（支持第三方 API Key）",
+        "description": "中文译名、简介与横版封面",
         "requires_key": True,
         "categories": ["galgame"],
         "doc_url": "https://developer.touchgal.com",
-        "doc_hint": "填写 TouchGal 官方开发者 API Key（tgal_live_<id>-<secret>）后自动加入「综合推荐」聚合搜索。",
+        "doc_hint": "填写 TouchGal 开发者 API Key（tgal_live_<id>-<secret>）后启用。",
     },
     "steamgriddb": {
         "name": "SteamGridDB",
         "short_name": "SteamGridDB",
-        "description": "高清竖版展架封面（Grid 600×900）、宽屏背景（Hero）与透明 Logo",
+        "description": "竖版封面、宽幅背景（Hero）与透明 Logo",
         "requires_key": True,
         "categories": [],
         "doc_url": "https://www.steamgriddb.com/profile/preferences/api",
-        "doc_hint": "登录 steamgriddb.com → Preferences → API 生成免费 API Key，填入后自动解锁高清换封面。",
+        "doc_hint": "在 steamgriddb.com 的 Preferences / API 页面生成 Key，填写后可用于封面与背景查找。",
     },
     "igdb": {
         "name": "IGDB",
         "short_name": "IGDB",
-        "description": "主机独占与非 Steam 综合单机游戏元数据（通过 Twitch OAuth 鉴权）",
+        "description": "主机独占与非 Steam 单机元数据（Twitch OAuth 鉴权）",
         "requires_key": True,
         "categories": ["general"],
         "doc_url": "https://dev.twitch.tv/console/apps",
-        "doc_hint": "在 Twitch Developer Console 创建应用获取 Client ID 与 Client Secret，填入后自动解锁。",
+        "doc_hint": "在 Twitch 开发者控制台获取 Client ID 与 Secret，填写后启用。",
     },
 }
 
@@ -848,7 +848,7 @@ class ScraperManager:
             logger.debug("SGDB enrich failed: %s", sgdb_outcome)
 
         if include_sgdb and not self.is_source_available("steamgriddb"):
-            warnings.append("配置 SteamGridDB API Key 后可解锁更多 600×900 高清竖版封面与宽屏 Hero 背景")
+            warnings.append("SteamGridDB 未配置")
 
         # 2. 汇集各元数据来源的简介与图片
         for sid, outcome in zip(meta_sources, meta_outcomes):

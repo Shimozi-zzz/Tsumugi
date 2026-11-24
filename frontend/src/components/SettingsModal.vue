@@ -623,13 +623,13 @@ function getSourceStatus(src: ScraperSourceConfig): {
   }
   if (src.group === 'key') {
     return isSourceKeyReady(src)
-      ? { label: '已解锁', tone: 'ok' }
+      ? { label: '已配置', tone: 'ok' }
       : { label: '未配置 Key', tone: 'missing' }
   }
   if (src.authType === 'optional' && isSourceKeyReady(src)) {
     return { label: '已配凭证', tone: 'ok' }
   }
-  return { label: '免 Key 启用', tone: 'free' }
+  return { label: '默认可用', tone: 'free' }
 }
 
 async function browseLE() {
@@ -868,10 +868,10 @@ async function saveAll() {
               </div>
             </div>
 
-            <!-- 3. 元数据刮削源：免 Key 开箱源 + 可选 API Key 扩展源 -->
+            <!-- 3. 元数据刮削源：内置数据源 + 可选扩展源 -->
             <div v-else-if="activeSection === 'sources'" class="pane-section">
               <div class="group-block">
-                <div class="group-label">免 Key 开箱即用源（默认全部启用，可单独开关与测试连通）</div>
+                <div class="group-label">内置数据源（免 Key）</div>
                 <div class="grouped-card">
                   <div
                     v-for="src in FREE_SCRAPER_SOURCES"
@@ -1057,7 +1057,7 @@ async function saveAll() {
               </div>
 
               <div class="group-block">
-                <div class="group-label">可选 API Key 扩展源（填入 Key 保存后自动解锁，明文仅存本地 data/settings.json）</div>
+                <div class="group-label">可选扩展源（填写 Key 后可用，仅存于本地 data/settings.json）</div>
                 <div class="grouped-card">
                   <div
                     v-for="src in KEY_SCRAPER_SOURCES"
@@ -1216,7 +1216,7 @@ async function saveAll() {
                   <div class="group-row action-row">
                     <div class="toggle-text">
                       <div class="row-title">导入外部游戏库（Playnite / Vnite）</div>
-                      <div class="row-desc">从 Playnite 或 Vnite 一次性迁移收藏、游玩时长与本地封面</div>
+                      <div class="row-desc">从 Playnite 或 Vnite 迁移游戏、游玩时长与封面</div>
                     </div>
                     <button
                       type="button"
@@ -1276,8 +1276,8 @@ async function saveAll() {
                       <div class="row-desc tabular-nums">
                         {{
                           storageStats
-                            ? `当前占用 ${formatBytes(thumbsCacheBytes)}，清理后将在浏览时自动按需重建`
-                            : '独立的 WebP 缩略图缓存，可随时清空重建'
+                            ? `当前占用 ${formatBytes(thumbsCacheBytes)}，清理后按需重建`
+                            : 'WebP 缩略图缓存，清理后按需重建'
                         }}
                       </div>
                     </div>
@@ -1287,7 +1287,7 @@ async function saveAll() {
                       :disabled="clearingThumbs || (Boolean(storageStats) && thumbsCacheBytes === 0)"
                       @click="handleClearThumbs"
                     >
-                      {{ clearingThumbs ? '清理中…' : '清理缩略图缓存' }}
+                      {{ clearingThumbs ? '清理中…' : '清理缓存' }}
                     </button>
                   </div>
 
@@ -1347,7 +1347,7 @@ async function saveAll() {
                       <div class="toggle-text">
                         <div class="row-title">同时包含本地 PV/OP 影音缓存</div>
                         <div class="row-desc tabular-nums">
-                          默认仅打包数据库、配置与封面/背景图片（当前本地影音缓存约 {{ formatBytes(localAvCacheBytes) }}）
+                          默认仅含数据库、配置与图片（当前影音缓存 {{ formatBytes(localAvCacheBytes) }}）
                         </div>
                       </div>
                     </div>
@@ -1360,7 +1360,7 @@ async function saveAll() {
                       :disabled="exportingBackup || restoringBackup"
                       @click="handleExportLibraryBackup"
                     >
-                      {{ exportingBackup ? '正在打包导出…' : '导出整库备份 (.zip)' }}
+                      {{ exportingBackup ? '导出中…' : '导出备份' }}
                     </button>
                     <button
                       type="button"
@@ -1368,7 +1368,7 @@ async function saveAll() {
                       :disabled="exportingBackup || restoringBackup"
                       @click="handleChooseRestoreBackup"
                     >
-                      {{ restoringBackup ? '正在恢复…' : '从备份恢复 (.zip)' }}
+                      {{ restoringBackup ? '恢复中…' : '恢复备份' }}
                     </button>
                     <input
                       ref="backupFileInputRef"
@@ -1408,7 +1408,7 @@ async function saveAll() {
 
                 <div v-if="snapshotsExpanded" class="grouped-card">
                   <div v-if="autoSnapshots.length === 0" class="group-row snap-empty-row">
-                    <span class="row-desc">暂无自动快照（应用启动与恢复/导入前会自动使用 SQLite 在线热备生成）</span>
+                    <span class="row-desc">暂无自动快照，启动及恢复前会自动生成</span>
                   </div>
                   <div
                     v-for="snap in autoSnapshots"

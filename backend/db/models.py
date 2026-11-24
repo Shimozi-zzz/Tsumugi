@@ -1,6 +1,17 @@
 from datetime import datetime
 from typing import Any
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.db.database import Base
 
@@ -24,6 +35,10 @@ class Game(Base):
     bangumi_id: Mapped[str] = mapped_column(String(64), default="")
     series: Mapped[str] = mapped_column(String(120), default="")
 
+    rating_overall: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    rating_dimensions: Mapped[dict[str, float] | None] = mapped_column(JSON, nullable=True, default=None)
+    short_review: Mapped[str] = mapped_column(Text, default="")
+
     status: Mapped[str] = mapped_column(String(20), default="todo", index=True)
     edition: Mapped[str] = mapped_column(String(20), default="collector")
     is_nsfw: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -37,6 +52,12 @@ class Game(Base):
         back_populates="game", uselist=False, cascade="all, delete-orphan"
     )
     sessions: Mapped[list["PlaySession"]] = relationship(
+        back_populates="game", cascade="all, delete-orphan"
+    )
+    notes: Mapped[list["GameNote"]] = relationship(
+        back_populates="game", cascade="all, delete-orphan"
+    )
+    collection_items: Mapped[list["CollectionItem"]] = relationship(
         back_populates="game", cascade="all, delete-orphan"
     )
 
@@ -102,22 +123,63 @@ class AppStateSetting(Base):
 
 
 class Collection(Base):
-    """表 5：用户自定义回廊分组"""
+    """表 5：系列合集与用户自定义分组"""
     __tablename__ = "collections"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    collection_type: Mapped[str] = mapped_column(String(20), default="series")
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=True
+    )
+
+    items: Mapped[list["CollectionItem"]] = relationship(
+        back_populates="collection",
+        cascade="all, delete-orphan",
+        order_by="CollectionItem.position.asc(), CollectionItem.id.asc()",
+    )
 
 
-class CollectionGame(Base):
-    """表 6：分组 ↔ 游戏 多对多关联表（删除分组绝不删除游戏本体）"""
-    __tablename__ = "collection_games"
+class CollectionItem(Base):
+    """表 6：系列合集 ↔ 游戏 有序关联表（删除合集绝不删除游戏本体）"""
+    __tablename__ = "collection_items"
+    __table_args__ = (
+        UniqueConstraint("collection_id", "game_id", name="uq_collection_items_collection_game"),
+    )
 
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     collection_id: Mapped[int] = mapped_column(
-        ForeignKey("collections.id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("collections.id", ondelete="CASCADE"), nullable=False, index=True
     )
     game_id: Mapped[int] = mapped_column(
-        ForeignKey("games.id", ondelete="CASCADE"), primary_key=True, index=True
+        ForeignKey("games.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    position: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    relation_label: Mapped[str] = mapped_column(String(32), default="")
+    added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    collection: Mapped["Collection"] = relationship(back_populates="items")
+    game: Mapped["Game"] = relationship(back_populates="collection_items")
+
+
+class GameNote(Base):
+    """表 7：作品总评 / 角色手记 / 随记（一对多 Markdown 长评）"""
+    __tablename__ = "game_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_id: Mapped[int] = mapped_column(
+        ForeignKey("games.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    note_type: Mapped[str] = mapped_column(String(20), default="work", index=True)
+    title: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    content_md: Mapped[str] = mapped_column(Text, default="")
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    game: Mapped["Game"] = relationship(back_populates="notes")

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ApiError,
   assetUrl,
@@ -7,17 +7,25 @@ import {
   gamesApi,
   libraryApi,
   mediaApi,
+  mediaThumbUrl,
   rawImageUrl,
   thumbUrl,
 } from '@/api/client'
 import BangumiBindModal from '@/components/BangumiBindModal.vue'
 import BindExeModal from '@/components/BindExeModal.vue'
+import GameNotesReviewPanel from '@/components/GameNotesReviewPanel.vue'
 import LightboxModal from '@/components/LightboxModal.vue'
 import LocalVideoPlayer from '@/components/LocalVideoPlayer.vue'
 import PhonographPill from '@/components/PhonographPill.vue'
 import { useLibraryStore } from '@/stores/library'
 import { useTaskStore } from '@/stores/tasks'
-import type { BackupItem, PlaySession, ScreenshotItem } from '@/types'
+import type {
+  BackupItem,
+  CollectionWorkSummary,
+  GameCollectionMembership,
+  PlaySession,
+  ScreenshotItem,
+} from '@/types'
 import { normalizePlatformBadge } from '@/utils/platform'
 
 const store = useLibraryStore()
@@ -28,6 +36,12 @@ const blurred = computed(() => store.shouldBlurGame(game.value))
 const displayPlatform = computed(() =>
   game.value ? normalizePlatformBadge(game.value.source_platform, game.value.external_ids) : '',
 )
+
+const detailTab = ref<'overview' | 'notes'>('overview')
+const showColPopover = ref(false)
+const quickSeriesName = ref('')
+const quickSeriesBusy = ref(false)
+const togglingColId = ref<number | null>(null)
 
 const synopsisExpanded = ref(false)
 const screenshots = ref<ScreenshotItem[]>([])
@@ -42,6 +56,139 @@ const refreshingMeta = ref(false)
 const creatingBackup = ref(false)
 const lightboxIndex = ref<number | null>(null)
 const belowFoldRef = ref<HTMLElement | null>(null)
+
+const hasRatingOrReview = computed(() => {
+  const g = game.value
+  if (!g) return false
+  return g.rating_overall != null || Boolean((g.short_review || '').trim())
+})
+
+const notesCount = computed(() => Number(game.value?.notes_count || 0))
+
+const gameSeriesCollections = computed<GameCollectionMembership[]>(() => {
+  const g = game.value
+  if (!g) return []
+  const fromStore = store.collections
+    .filter(
+      (col) =>
+        (col.items || []).some((it) => it.game_id === g.id) || col.game_ids.includes(g.id),
+    )
+    .map((col) => {
+      const sortedItems = [...(col.items || [])].sort((a, b) => a.position - b.position)
+      const me = sortedItems.find((it) => it.game_id === g.id)
+      return {
+        id: col.id,
+        name: col.name,
+        description: col.description || '',
+        collection_type: col.collection_type || 'series',
+        relation_label: me?.relation_label || '',
+        position: me?.position ?? 0,
+        total_count: col.total_count ?? sortedItems.length,
+        completed_count: col.completed_count ?? 0,
+        items: sortedItems,
+      }
+    })
+  if (fromStore.length > 0) return fromStore
+  return g.collections || []
+})
+
+function formatRatingScore(val?: number | null): string {
+  if (val == null || Number.isNaN(Number(val))) return ''
+  return Number(val).toFixed(1)
+}
+
+function jumpToReviewTab() {
+  detailTab.value = 'notes'
+  scrollToBelowFold()
+}
+
+function seriesItemThumb(item: CollectionWorkSummary): string {
+  if (item.cover_path) {
+    return mediaThumbUrl(item.cover_path, 'sm', store.assetVersion)
+  }
+  return item.cover_thumb_url || ''
+}
+
+function seriesItemFallback(item: CollectionWorkSummary): string {
+  return item.cover_path ? assetUrl(item.cover_path, store.assetVersion) : ''
+}
+
+function isSeriesItemBlurred(item: CollectionWorkSummary): boolean {
+  return store.privacyBlurMode && Boolean(item.is_nsfw)
+}
+
+function isGameInCollection(colId: number): boolean {
+  const g = game.value
+  if (!g) return false
+  const col = store.collections.find((c) => c.id === colId)
+  return Boolean(col && col.game_ids.includes(g.id))
+}
+
+async function handleToggleMembership(colId: number) {
+  const g = game.value
+  if (!g || togglingColId.value !== null) return
+  togglingColId.value = colId
+  try {
+    await store.toggleGameInCollection(colId, g.id)
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '更新合集关联失败', 'error')
+  } finally {
+    togglingColId.value = null
+  }
+}
+
+async function handleQuickCreateSeries() {
+  const g = game.value
+  const name = quickSeriesName.value.trim()
+  if (!g || !name || quickSeriesBusy.value) return
+  quickSeriesBusy.value = true
+  try {
+    await store.createCollection(
+      {
+        name,
+        collection_type: 'series',
+        items: [{ game_id: g.id, relation_label: '' }],
+      },
+      [],
+      false,
+    )
+    quickSeriesName.value = ''
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '新建系列合集失败', 'error')
+  } finally {
+    quickSeriesBusy.value = false
+  }
+}
+
+function switchToSeriesGame(targetGameId: number) {
+  if (game.value?.id === targetGameId) return
+  void store.selectGame(targetGameId, { switchToDetail: true, recordActive: true })
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function closeColPopoverOnOutside(ev: MouseEvent) {
+  const target = ev.target as HTMLElement | null
+  if (!target?.closest('.hero-col-wrap')) {
+    showColPopover.value = false
+  }
+}
+
+function handleDetailKeydown(ev: KeyboardEvent) {
+  if (ev.key === 'Escape' && showColPopover.value) {
+    showColPopover.value = false
+    ev.stopPropagation()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('click', closeColPopoverOnOutside)
+  window.addEventListener('keydown', handleDetailKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeColPopoverOnOutside)
+  window.removeEventListener('keydown', handleDetailKeydown)
+})
 
 const pvTask = computed(() => taskStore.getTask(game.value?.id, 'pv'))
 const showPvTaskBar = computed(
@@ -245,7 +392,11 @@ async function loadSupplementalData(gameId: number) {
 
 watch(
   () => game.value?.id,
-  (id) => {
+  (id, prevId) => {
+    if (prevId !== undefined && id !== prevId) {
+      detailTab.value = 'overview'
+      showColPopover.value = false
+    }
     if (id != null) {
       void loadSupplementalData(id)
     } else {
@@ -457,6 +608,16 @@ async function handleSyncBangumi() {
           </div>
 
           <div class="hero-meta-line">
+            <button
+              v-if="game.rating_overall != null"
+              type="button"
+              class="meta-rating-pill tabular-nums"
+              title="查看多维评分与手记"
+              @click="jumpToReviewTab"
+            >
+              <span class="meta-rating-star">★</span>
+              <span>{{ formatRatingScore(game.rating_overall) }}</span>
+            </button>
             <span class="meta-status">
               <span class="status-dot" :class="statusDotClass(game.status)" />
               <span>{{ statusLabelMap[game.status] || game.status }}</span>
@@ -558,6 +719,78 @@ async function handleSyncBangumi() {
               </svg>
             </button>
 
+            <!-- 轻量「管理所属合集」浮层触发器 -->
+            <div class="hero-col-wrap">
+              <button
+                type="button"
+                class="hero-circle-btn"
+                :class="{ active: showColPopover }"
+                title="管理所属合集"
+                aria-label="管理所属合集"
+                @click.stop="showColPopover = !showColPopover"
+              >
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7">
+                  <path d="M3.5 7 10 3.5 16.5 7 10 10.5 3.5 7Z" stroke-linejoin="round" />
+                  <path d="M3.5 10.8 10 14.3l6.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M3.5 14.3 10 17.8l6.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+
+              <Transition name="fade">
+                <div v-if="showColPopover" class="hero-col-popover" @click.stop>
+                  <div class="popover-head">
+                    <span>所属系列合集</span>
+                    <span class="popover-count tabular-nums">{{ gameSeriesCollections.length }}</span>
+                  </div>
+
+                  <div v-if="store.collections.length > 0" class="popover-list">
+                    <button
+                      v-for="col in store.collections"
+                      :key="col.id"
+                      type="button"
+                      class="popover-row"
+                      :class="{ checked: isGameInCollection(col.id) }"
+                      :disabled="togglingColId === col.id"
+                      @click="handleToggleMembership(col.id)"
+                    >
+                      <span class="popover-check" :class="{ on: isGameInCollection(col.id) }">
+                        <svg
+                          v-if="isGameInCollection(col.id)"
+                          viewBox="0 0 14 14"
+                          width="9.5"
+                          height="9.5"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.2"
+                        >
+                          <path d="M2.5 7.2 5.5 10.2 11.5 3.8" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                      </span>
+                      <span class="popover-name" :title="col.name">{{ col.name }}</span>
+                      <span class="popover-sub tabular-nums">{{ col.total_count ?? col.game_ids.length }}</span>
+                    </button>
+                  </div>
+                  <div v-else class="popover-empty">暂无合集，下方可直接新建</div>
+
+                  <form class="popover-create-row" @submit.prevent="handleQuickCreateSeries">
+                    <input
+                      v-model="quickSeriesName"
+                      class="input popover-create-input"
+                      maxlength="64"
+                      placeholder="新建系列并加入…"
+                    />
+                    <button
+                      type="submit"
+                      class="btn btn-primary btn-sm"
+                      :disabled="!quickSeriesName.trim() || quickSeriesBusy"
+                    >
+                      创建
+                    </button>
+                  </form>
+                </div>
+              </Transition>
+            </div>
+
             <!-- 克制次按钮：单向同步进度至 Bangumi -->
             <button
               class="hero-bgm-btn"
@@ -606,9 +839,37 @@ async function handleSyncBangumi() {
       </button>
     </section>
 
-    <!-- 下滚双栏内容区（左 72% / 右 28%），无缝承接 #0a0a0c 画布 -->
+    <!-- 下滚内容区：精简细线二级 Tab（概览 | 手记与评价），无缝承接 #0a0a0c 画布 -->
     <section ref="belowFoldRef" class="below-fold">
-      <div class="col-left">
+      <nav class="detail-tab-bar" role="tablist" aria-label="详情内容分区">
+        <button
+          type="button"
+          role="tab"
+          class="detail-tab-btn"
+          :class="{ active: detailTab === 'overview' }"
+          :aria-selected="detailTab === 'overview'"
+          @click="detailTab = 'overview'"
+        >
+          <span>概览</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="detail-tab-btn"
+          :class="{ active: detailTab === 'notes' }"
+          :aria-selected="detailTab === 'notes'"
+          @click="detailTab = 'notes'"
+        >
+          <span>手记与评价</span>
+          <span v-if="notesCount > 0" class="detail-tab-count tabular-nums">{{ notesCount }}</span>
+          <span v-else-if="hasRatingOrReview" class="detail-tab-dot" aria-hidden="true" />
+        </button>
+      </nav>
+
+      <!-- Tab 1: 概览（双栏布局 + 条件渲染同系列顺序条） -->
+      <template v-if="detailTab === 'overview'">
+        <div class="below-fold-grid">
+          <div class="col-left">
         <!-- ① 优先媒体区：PV 播放器（本地优先 / 链接直播 / 无则不渲染空壳） + 截图/CG 画廊 -->
         <div
           v-if="effectivePvSrc || showPvTaskBar || screenshots.length > 0"
@@ -918,6 +1179,64 @@ async function handleSyncBangumi() {
           </div>
         </div>
       </aside>
+        </div>
+
+        <!-- 仅当当前作品归属至少一个合集时，条件渲染紧凑横向「同系列作品」顺序条 -->
+        <div v-if="gameSeriesCollections.length > 0" class="series-strips-wrap">
+          <div
+            v-for="col in gameSeriesCollections"
+            :key="col.id"
+            class="content-block series-strip-block"
+          >
+            <div class="block-header series-strip-header">
+              <h3>
+                <span>同系列作品</span>
+                <span class="series-strip-name">· {{ col.name }}</span>
+              </h3>
+              <span class="subtle-meta tabular-nums">
+                已通关 {{ col.completed_count }}/{{ col.total_count }}
+              </span>
+            </div>
+
+            <div class="series-strip-track">
+              <button
+                v-for="(item, idx) in col.items"
+                :key="item.game_id"
+                type="button"
+                class="series-strip-card"
+                :class="{ 'is-current': item.game_id === game.id }"
+                :aria-current="item.game_id === game.id ? 'page' : undefined"
+                @click="switchToSeriesGame(item.game_id)"
+              >
+                <span class="strip-seq tabular-nums">{{ String(idx + 1).padStart(2, '0') }}</span>
+                <div class="strip-thumb">
+                  <img
+                    v-if="seriesItemThumb(item)"
+                    :src="seriesItemThumb(item)"
+                    :alt="item.title"
+                    :class="{ 'privacy-blur-img': isSeriesItemBlurred(item) }"
+                    loading="lazy"
+                    decoding="async"
+                    @error="fallbackToOriginalImage($event, seriesItemFallback(item))"
+                  />
+                  <span v-else>{{ item.title.slice(0, 1) }}</span>
+                </div>
+                <div class="strip-info">
+                  <div class="strip-title" :title="item.title">{{ item.title }}</div>
+                  <div class="strip-meta">
+                    <span class="status-dot" :class="statusDotClass(item.play_status)" />
+                    <span v-if="item.relation_label" class="strip-rel-pill">{{ item.relation_label }}</span>
+                    <span v-if="item.game_id === game.id" class="strip-current-tag">当前</span>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Tab 2: 手记与评价 -->
+      <GameNotesReviewPanel v-else :game="game" />
     </section>
 
     <!-- 原图灯箱 -->
@@ -1429,16 +1748,365 @@ async function handleSyncBangumi() {
   opacity: 0.72;
 }
 
-/* Below the fold: 72% / 28% seamlessly continuing #0a0a0c */
+/* Below the fold: hairline secondary tabs + 72% / 28% overview or review workspace */
 .below-fold {
   position: relative;
   z-index: 2;
   background: linear-gradient(to bottom, rgba(10, 10, 12, 0) 0%, #0a0a0c 56px);
-  padding: 36px 64px 96px 76px;
+  padding: 24px 64px 96px 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.detail-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  border-bottom: 1px solid var(--divider-subtle);
+}
+
+.detail-tab-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 2px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-expo);
+}
+
+.detail-tab-btn:hover {
+  color: var(--text-secondary);
+}
+
+.detail-tab-btn.active {
+  color: var(--text-primary);
+}
+
+.detail-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: #f5f5f7;
+}
+
+.detail-tab-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-secondary);
+}
+
+.detail-tab-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--amber-text);
+  opacity: 0.85;
+}
+
+.below-fold-grid {
   display: grid;
   grid-template-columns: minmax(0, 72fr) minmax(268px, 28fr);
   gap: 32px;
   align-items: start;
+}
+
+/* Hero 首屏条件评分微章（仅已评分时渲染） */
+.meta-rating-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border: 1px solid rgba(252, 211, 77, 0.24);
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--amber-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.meta-rating-pill:hover {
+  background: rgba(245, 158, 11, 0.24);
+  border-color: rgba(252, 211, 77, 0.42);
+  transform: translateY(-1px);
+}
+
+.meta-rating-star {
+  font-size: 11.5px;
+}
+
+/* 轻量「管理所属合集」浮层 */
+.hero-col-wrap {
+  position: relative;
+}
+
+.hero-circle-btn.active {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.hero-col-popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  z-index: 45;
+  width: 268px;
+  padding: 12px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 16, 20, 0.94);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 0 2px;
+}
+
+.popover-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.popover-list {
+  max-height: 190px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.popover-row:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
+}
+
+.popover-row.checked {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.popover-check {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.09);
+  color: #0a0a0c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.popover-check.on {
+  background: #f5f5f7;
+}
+
+.popover-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.popover-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.popover-empty {
+  padding: 10px 4px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.popover-create-row {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--divider-subtle);
+}
+
+.popover-create-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+/* 同系列顺序条（仅归属合集时条件渲染） */
+.series-strips-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.series-strip-block {
+  padding: 20px 24px;
+}
+
+.series-strip-header {
+  margin-bottom: 14px;
+}
+
+.series-strip-name {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.series-strip-track {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.series-strip-card {
+  flex: 0 0 auto;
+  width: 230px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 160ms var(--ease-out-expo),
+    border-color 160ms var(--ease-out-expo),
+    transform 160ms var(--ease-out-expo);
+}
+
+.series-strip-card:hover:not(.is-current) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-2px);
+}
+
+.series-strip-card.is-current {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(245, 245, 247, 0.42);
+  cursor: default;
+}
+
+.strip-seq {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.series-strip-card.is-current .strip-seq {
+  color: #ffffff;
+}
+
+.strip-thumb {
+  width: 34px;
+  height: 46px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-serif);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.strip-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.strip-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.strip-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.strip-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.strip-rel-pill {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+}
+
+.strip-current-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(245, 245, 247, 0.9);
+  color: #0a0a0c;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .col-left,
@@ -2035,8 +2703,10 @@ async function handleSyncBangumi() {
     padding: 24px 24px 20px;
   }
   .below-fold {
+    padding: 24px 24px 72px;
+  }
+  .below-fold-grid {
     grid-template-columns: 1fr;
-    padding: 28px 24px 72px;
   }
   .floating-cover-card {
     display: none;

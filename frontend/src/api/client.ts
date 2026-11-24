@@ -11,6 +11,8 @@ import type {
   BatchScanCandidate,
   ClearThumbsResponse,
   CollectionItem,
+  CollectionItemInput,
+  CollectionType,
   ConvertWebpResponse,
   DownloadTasksResponse,
   ExternalDetectResponse,
@@ -20,6 +22,7 @@ import type {
   ExternalScanResponse,
   Game,
   GameCreatePayload,
+  GameNote,
   GameUpdatePayload,
   HealthInfo,
   JourneyCollageResponse,
@@ -30,6 +33,7 @@ import type {
   MetadataSearchResponse,
   MetadataSourceKey,
   MusicSearchResponse,
+  NoteType,
   PathBrowseResponse,
   PathValidateResponse,
   PickerAssetType,
@@ -357,6 +361,78 @@ export const gamesApi = {
       method: 'POST',
       body: JSON.stringify(bangumiId ? { bangumi_id: bangumiId } : {}),
     }),
+  updateRating: (
+    id: number,
+    payload: {
+      rating_overall?: number | null
+      rating_dimensions?: Record<string, number | null> | null
+      short_review?: string | null
+      clear?: boolean
+    },
+  ) =>
+    request<Game>(`/api/games/${id}/rating`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  listNotes: (id: number, noteType?: NoteType) => {
+    const qs = noteType ? `?note_type=${encodeURIComponent(noteType)}` : ''
+    return request<GameNote[]>(`/api/games/${id}/notes${qs}`)
+  },
+  createNote: (
+    id: number,
+    payload: { note_type?: NoteType; title?: string; content_md?: string; is_pinned?: boolean },
+  ) =>
+    request<GameNote>(`/api/games/${id}/notes`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateNote: (
+    id: number,
+    noteId: number,
+    payload: { note_type?: NoteType; title?: string; content_md?: string; is_pinned?: boolean },
+  ) =>
+    request<GameNote>(`/api/games/${id}/notes/${noteId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteNote: (id: number, noteId: number) =>
+    request<{ status: string; note_id: number; game_id: number }>(
+      `/api/games/${id}/notes/${noteId}`,
+      { method: 'DELETE' },
+    ),
+  downloadNotesMarkdown: async (
+    id: number,
+    noteId?: number,
+    fallbackTitle = 'tsumugi-notes',
+  ): Promise<{ filename: string; size_bytes: number }> => {
+    const qs = noteId != null ? `?note_id=${encodeURIComponent(String(noteId))}` : ''
+    const res = await fetch(`/api/games/${id}/notes/export${qs}`)
+    if (!res.ok) {
+      let detail = `导出 Markdown 失败 (${res.status})`
+      try {
+        const body = await res.json()
+        if (body?.detail) detail = String(body.detail)
+      } catch {
+        // ignore
+      }
+      throw new ApiError(detail, res.status)
+    }
+    const blob = await res.blob()
+    const safeFallback = `${fallbackTitle.replace(/[<>:"/\\|?*]+/g, '_').trim() || `tsumugi-game-${id}`}.md`
+    const filename = _parseDownloadFilename(res.headers.get('content-disposition'), safeFallback)
+    const blobUrl = URL.createObjectURL(blob)
+    try {
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1500)
+    }
+    return { filename, size_bytes: blob.size }
+  },
 }
 
 export const settingsApi = {
@@ -654,18 +730,56 @@ export const statsApi = {
 
 export const collectionsApi = {
   list: () => request<CollectionItem[]>('/api/collections'),
-  create: (name: string, gameIds: number[] = []) =>
-    request<CollectionItem>('/api/collections', {
+  create: (
+    nameOrPayload:
+      | string
+      | {
+          name: string
+          description?: string
+          collection_type?: CollectionType
+          game_ids?: number[]
+          items?: CollectionItemInput[]
+        },
+    gameIds: number[] = [],
+  ) => {
+    const body =
+      typeof nameOrPayload === 'string'
+        ? { name: nameOrPayload, game_ids: gameIds }
+        : nameOrPayload
+    return request<CollectionItem>('/api/collections', {
       method: 'POST',
-      body: JSON.stringify({ name, game_ids: gameIds }),
-    }),
-  update: (collectionId: number, patch: { name?: string; sort_order?: number }) =>
+      body: JSON.stringify(body),
+    })
+  },
+  update: (
+    collectionId: number,
+    patch: {
+      name?: string
+      description?: string
+      collection_type?: CollectionType
+      sort_order?: number
+    },
+  ) =>
     request<CollectionItem>(`/api/collections/${collectionId}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
   remove: (collectionId: number) =>
     request<{ status: string; collection_id: number }>(`/api/collections/${collectionId}`, {
+      method: 'DELETE',
+    }),
+  replaceItems: (collectionId: number, items: CollectionItemInput[]) =>
+    request<CollectionItem>(`/api/collections/${collectionId}/items`, {
+      method: 'PUT',
+      body: JSON.stringify(items),
+    }),
+  addItem: (collectionId: number, payload: CollectionItemInput) =>
+    request<CollectionItem>(`/api/collections/${collectionId}/items`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  removeItem: (collectionId: number, gameId: number) =>
+    request<CollectionItem>(`/api/collections/${collectionId}/items/${gameId}`, {
       method: 'DELETE',
     }),
   replaceGames: (collectionId: number, gameIds: number[]) =>

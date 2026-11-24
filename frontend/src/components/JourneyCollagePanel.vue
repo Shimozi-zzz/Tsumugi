@@ -717,7 +717,7 @@ async function exportPng() {
     link.click()
     link.remove()
     window.setTimeout(() => URL.revokeObjectURL(url), 1500)
-    store.notify('已导出高清历程拼图 PNG', 'success')
+    store.notify('已导出历程拼图 PNG', 'success')
   } catch {
     store.notify('导出图片失败', 'error')
   } finally {

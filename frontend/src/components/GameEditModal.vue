@@ -1099,7 +1099,7 @@ onBeforeUnmount(() => {
                   关联在线链接：{{ pvRemoteUrl }}
                 </span>
                 <span v-else-if="!pvLocalActive && pvRemoteUrl" class="media-remote-caption">
-                  当前仅保留在线链接（节约磁盘空间）
+                  仅保留在线链接
                 </span>
                 <div class="media-convert-actions">
                   <button
@@ -1118,7 +1118,7 @@ onBeforeUnmount(() => {
                     :disabled="mediaActionBusy"
                     @click="dropLocalCacheMedia('pv')"
                   >
-                    仅删除本地文件、保留在线链接
+                    删除本地缓存
                   </button>
                   <button
                     v-if="pvLocalActive && !pvRemoteUrl"
@@ -1162,7 +1162,7 @@ onBeforeUnmount(() => {
                       class="subtle-link-btn"
                       @click="taskStore.keepLinkOnlyAndDismiss(game.id, 'pv', pvRemoteUrl)"
                     >
-                      仅保留链接（忽略）
+                      仅保留链接
                     </button>
                   </div>
                 </div>
@@ -1179,7 +1179,7 @@ onBeforeUnmount(() => {
             <div class="field">
               <div class="label-row">
                 <div class="media-label-with-badge">
-                  <label>主题原声 / OP 音频（支持本地缓存与在线链接）</label>
+                  <label>主题原声 / OP 音频</label>
                   <span v-if="bgmLocalActive" class="media-state-pill is-local">本地缓存</span>
                   <span v-else-if="bgmRemoteUrl" class="media-state-pill is-remote">仅在线链接</span>
                   <span v-else class="media-state-pill">未配置</span>
@@ -1232,7 +1232,7 @@ onBeforeUnmount(() => {
                   关联在线链接：{{ bgmRemoteUrl }}
                 </span>
                 <span v-else-if="!bgmLocalActive && bgmRemoteUrl" class="media-remote-caption">
-                  当前仅保留在线链接（节约磁盘空间）
+                  仅保留在线链接
                 </span>
                 <div class="media-convert-actions">
                   <button
@@ -1251,7 +1251,7 @@ onBeforeUnmount(() => {
                     :disabled="mediaActionBusy"
                     @click="dropLocalCacheMedia('bgm')"
                   >
-                    仅删除本地文件、保留在线链接
+                    删除本地缓存
                   </button>
                 </div>
               </div>
@@ -1286,7 +1286,7 @@ onBeforeUnmount(() => {
                       class="subtle-link-btn"
                       @click="taskStore.keepLinkOnlyAndDismiss(game.id, 'bgm', bgmRemoteUrl)"
                     >
-                      仅保留链接（忽略）
+                      仅保留链接
                     </button>
                   </div>
                 </div>

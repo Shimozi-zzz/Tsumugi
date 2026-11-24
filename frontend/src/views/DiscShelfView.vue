@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { assetUrl, fallbackToOriginalImage, mediaApi, mediaThumbUrl, thumbUrl } from '@/api/client'
 import BindExeModal from '@/components/BindExeModal.vue'
 import PhonographPill from '@/components/PhonographPill.vue'
+import SeriesCollectionsPanel from '@/components/SeriesCollectionsPanel.vue'
 import { useAudioStore } from '@/stores/audio'
 import { useLibraryStore } from '@/stores/library'
 import type { ActiveStatusFilter, Game, LibrarySortBy } from '@/types'
@@ -13,10 +14,16 @@ const store = useLibraryStore()
 const audio = useAudioStore()
 
 const gamesList = computed(() => store.filteredGames)
+const galleryTab = ref<'works' | 'collections'>('works')
 const activeIndex = ref(0)
 const showBindExeModal = ref(false)
 const colDropdownOpen = ref(false)
 const sortDropdownOpen = ref(false)
+
+function browseCollectionInShelf(collectionId: number) {
+  store.setActiveCollection(collectionId)
+  galleryTab.value = 'works'
+}
 
 const activeSortOption = computed(() => getSortOption(store.sortBy))
 
@@ -275,7 +282,15 @@ function isEditableFocused(): boolean {
 }
 
 function onWheel(e: WheelEvent) {
-  if (colDropdownOpen.value || sortDropdownOpen.value || isAnyModalOpen() || gamesList.value.length <= 1) return
+  if (
+    galleryTab.value !== 'works' ||
+    colDropdownOpen.value ||
+    sortDropdownOpen.value ||
+    isAnyModalOpen() ||
+    gamesList.value.length <= 1
+  ) {
+    return
+  }
   const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
   e.preventDefault()
   if (wheelLock || Math.abs(delta) <= 12) return
@@ -295,11 +310,15 @@ function onKeyDown(e: KeyboardEvent) {
     if (colDropdownOpen.value || sortDropdownOpen.value) {
       colDropdownOpen.value = false
       sortDropdownOpen.value = false
+    } else if (galleryTab.value === 'collections') {
+      galleryTab.value = 'works'
     } else {
       enterDetail()
     }
     return
   }
+
+  if (galleryTab.value !== 'works') return
 
   if (e.key === 'ArrowRight') {
     e.preventDefault()
@@ -666,7 +685,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 超大号日文原名衬线背景水印（Editorial Typography） -->
-    <div class="watermark-stage" aria-hidden="true">
+    <div v-if="galleryTab === 'works'" class="watermark-stage" aria-hidden="true">
       <Transition name="watermark-shift" mode="out-in">
         <div v-if="watermarkText" :key="`${currentGame?.id}-${watermarkText}`" class="editorial-watermark">
           {{ watermarkText }}
@@ -677,7 +696,7 @@ onBeforeUnmount(() => {
     <!-- 二次元空气感浮游光尘 Canvas 粒子层 -->
     <canvas v-show="store.galleryParticles" ref="particleCanvasRef" class="dust-canvas" aria-hidden="true" />
 
-    <!-- 顶部极简双语 HUD + 分组双向切换下拉菜单 -->
+    <!-- 顶部极简双语 HUD + 全部作品/系列合集分段切换 -->
     <header class="shelf-topbar">
       <div class="shelf-top-left">
         <button class="topbar-ghost-btn" @click="enterDetail()">
@@ -687,89 +706,118 @@ onBeforeUnmount(() => {
           <span>详情</span>
         </button>
 
-        <div class="gallery-col-dropdown">
+        <!-- 精致分段切换：全部作品 | 系列合集 -->
+        <div class="gallery-view-seg" role="tablist" aria-label="回廊视图切换">
           <button
             type="button"
-            class="gallery-title-trigger"
-            @click.stop="colDropdownOpen = !colDropdownOpen"
+            role="tab"
+            class="gallery-seg-btn"
+            :class="{ active: galleryTab === 'works' }"
+            :aria-selected="galleryTab === 'works'"
+            @click="galleryTab = 'works'"
           >
-            <span class="gallery-title-cn">回廊</span>
-            <span class="gallery-title-en">GALLERY</span>
-            <span class="gallery-sep">·</span>
-            <span class="gallery-col-label">{{ activeCollectionLabel }}</span>
-            <svg
-              class="dropdown-caret"
-              :class="{ open: colDropdownOpen }"
-              viewBox="0 0 16 16"
-              width="13"
-              height="13"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.7"
+            全部作品
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="gallery-seg-btn"
+            :class="{ active: galleryTab === 'collections' }"
+            :aria-selected="galleryTab === 'collections'"
+            @click="galleryTab = 'collections'"
+          >
+            <span>系列合集</span>
+            <span v-if="store.collections.length > 0" class="gallery-seg-count tabular-nums">
+              {{ store.collections.length }}
+            </span>
+          </button>
+        </div>
+
+        <template v-if="galleryTab === 'works'">
+          <div class="gallery-col-dropdown">
+            <button
+              type="button"
+              class="gallery-title-trigger"
+              @click.stop="colDropdownOpen = !colDropdownOpen"
             >
-              <path d="M4.5 6.25L8 9.75l3.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-
-          <Transition name="fade">
-            <div v-if="colDropdownOpen" class="col-menu">
-              <button
-                type="button"
-                class="col-menu-item"
-                :class="{ active: store.activeCollectionId === null }"
-                @click="selectCollectionFromDropdown(null)"
+              <span class="gallery-title-cn">回廊</span>
+              <span class="gallery-title-en">GALLERY</span>
+              <span class="gallery-sep">·</span>
+              <span class="gallery-col-label">{{ activeCollectionLabel }}</span>
+              <svg
+                class="dropdown-caret"
+                :class="{ open: colDropdownOpen }"
+                viewBox="0 0 16 16"
+                width="13"
+                height="13"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
               >
-                <span>全部藏品</span>
-                <span class="menu-count tabular-nums">{{ store.games.length }}</span>
-              </button>
+                <path d="M4.5 6.25L8 9.75l3.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
 
-              <button
-                v-for="col in store.collections"
-                :key="col.id"
-                type="button"
-                class="col-menu-item"
-                :class="{ active: store.activeCollectionId === col.id }"
-                @click="selectCollectionFromDropdown(col.id)"
-              >
-                <span class="menu-col-name">{{ col.name }}</span>
-                <span class="menu-count tabular-nums">{{ col.game_ids.length }}</span>
-              </button>
+            <Transition name="fade">
+              <div v-if="colDropdownOpen" class="col-menu">
+                <button
+                  type="button"
+                  class="col-menu-item"
+                  :class="{ active: store.activeCollectionId === null }"
+                  @click="selectCollectionFromDropdown(null)"
+                >
+                  <span>全部藏品</span>
+                  <span class="menu-count tabular-nums">{{ store.games.length }}</span>
+                </button>
 
-              <div class="col-menu-divider" />
+                <button
+                  v-for="col in store.collections"
+                  :key="col.id"
+                  type="button"
+                  class="col-menu-item"
+                  :class="{ active: store.activeCollectionId === col.id }"
+                  @click="selectCollectionFromDropdown(col.id)"
+                >
+                  <span class="menu-col-name">{{ col.name }}</span>
+                  <span class="menu-count tabular-nums">{{ col.total_count ?? col.game_ids.length }}</span>
+                </button>
 
-              <button type="button" class="col-menu-item col-menu-create" @click="openNewCollection">
-                <span>+ 新建分组</span>
-              </button>
-            </div>
-          </Transition>
-        </div>
+                <div class="col-menu-divider" />
 
-        <!-- 顶部快捷状态筛选条（与左侧边栏和当前分组双向同步） -->
-        <nav class="status-filter-bar" aria-label="按攻略进度筛选">
-          <button
-            v-for="tab in statusFilterTabs"
-            :key="tab.key"
-            type="button"
-            class="status-tab-btn"
-            :class="{ active: store.activeStatus === tab.key }"
-            @click="store.setActiveStatus(tab.key)"
-          >
-            <span v-if="tab.dotClass" class="status-dot" :class="tab.dotClass" />
-            <span>{{ tab.label }}</span>
-            <span class="status-tab-count tabular-nums">{{ store.collectionStatusCounts[tab.key] }}</span>
-          </button>
-        </nav>
+                <button type="button" class="col-menu-item col-menu-create" @click="openNewCollection">
+                  <span>+ 新建合集</span>
+                </button>
+              </div>
+            </Transition>
+          </div>
 
-        <div v-if="store.filterTag" class="filter-summary">
-          <span class="filter-pill">
-            {{ store.filterTag }}
-            <button class="pill-close" aria-label="清除标签" @click="store.setFilterTag('')">×</button>
-          </span>
-        </div>
+          <!-- 顶部快捷状态筛选条（与左侧边栏和当前分组双向同步） -->
+          <nav class="status-filter-bar" aria-label="按攻略进度筛选">
+            <button
+              v-for="tab in statusFilterTabs"
+              :key="tab.key"
+              type="button"
+              class="status-tab-btn"
+              :class="{ active: store.activeStatus === tab.key }"
+              @click="store.setActiveStatus(tab.key)"
+            >
+              <span v-if="tab.dotClass" class="status-dot" :class="tab.dotClass" />
+              <span>{{ tab.label }}</span>
+              <span class="status-tab-count tabular-nums">{{ store.collectionStatusCounts[tab.key] }}</span>
+            </button>
+          </nav>
+
+          <div v-if="store.filterTag" class="filter-summary">
+            <span class="filter-pill">
+              {{ store.filterTag }}
+              <button class="pill-close" aria-label="清除标签" @click="store.setFilterTag('')">×</button>
+            </span>
+          </div>
+        </template>
       </div>
 
-      <!-- 右上角极简无边框排序下拉控件 -->
-      <div class="gallery-sort-dropdown">
+      <!-- 右上角极简无边框排序下拉控件（仅全部作品视图显示） -->
+      <div v-if="galleryTab === 'works'" class="gallery-sort-dropdown">
         <button
           type="button"
           class="sort-trigger-btn"
@@ -820,10 +868,27 @@ onBeforeUnmount(() => {
           </div>
         </Transition>
       </div>
+
+      <button
+        v-else-if="galleryTab === 'collections' && store.collections.length > 0"
+        type="button"
+        class="topbar-create-col-btn"
+        title="新建系列合集"
+        @click="openNewCollection"
+      >
+        <span>+ 新建合集</span>
+      </button>
     </header>
 
+    <!-- 系列合集总览与关联排序面板 -->
+    <SeriesCollectionsPanel
+      v-if="galleryTab === 'collections'"
+      @open-game="enterDetail"
+      @browse-in-shelf="browseCollectionInShelf"
+    />
+
     <!-- 空状态 -->
-    <div v-if="gamesList.length === 0" class="shelf-empty">
+    <div v-else-if="gamesList.length === 0" class="shelf-empty">
       <div class="shelf-empty-box">
         <h2>
           {{
@@ -1056,7 +1121,7 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- 底部作品铭牌 + 左下等宽序号指示器 + 右下留声机浮条 -->
-    <footer v-if="currentGame" class="exhibition-footer">
+    <footer v-if="galleryTab === 'works' && currentGame" class="exhibition-footer">
       <div class="gallery-index-indicator tabular-nums">
         {{ String(activeIndex + 1).padStart(2, '0') }} / {{ String(gamesList.length).padStart(2, '0') }}
       </div>
@@ -1303,7 +1368,78 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 12px;
+}
+
+/* 回廊「全部作品 | 系列合集」精致分段切换 */
+.gallery-view-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.gallery-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
+}
+
+.gallery-seg-btn:hover:not(.active) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.gallery-seg-btn.active {
+  background: #f5f5f7;
+  color: #0a0a0c;
+  font-weight: 600;
+}
+
+.gallery-seg-count {
+  font-size: 11px;
+  opacity: 0.72;
+}
+
+.topbar-create-col-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
+}
+
+.topbar-create-col-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
 }
 
 /* 顶部快捷状态筛选条 */

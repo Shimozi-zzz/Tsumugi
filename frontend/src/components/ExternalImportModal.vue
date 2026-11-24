@@ -80,8 +80,8 @@ const pathPlaceholder = computed(() =>
 
 const pathHint = computed(() =>
   activeSource.value === 'playnite'
-    ? '自动以只读快照方式读取 Playnite 的 games.db（含 Playnite 9 JSON 目录），不会影响运行中的 Playnite，封面与背景图会独立拷贝到 Tsumugi 本地目录。'
-    : '支持以只读快照方式直接解析 Vnite 本地 LevelDB / PouchDB 数据库目录（运行中亦可安全读取，含元数据、游玩时长、启动路径与内嵌封面），也兼容导入 .json / .zip 备份文件。',
+    ? '以只读快照方式读取 games.db 或 Playnite 9 目录，不影响运行中的 Playnite，图片将独立拷贝到本地。'
+    : '以只读快照方式读取本地数据库目录，也支持 .json / .zip 备份文件。',
 )
 
 function closeModal() {

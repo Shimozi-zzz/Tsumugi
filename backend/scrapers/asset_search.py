@@ -5,10 +5,10 @@ import os
 from pathlib import Path
 import shutil
 from typing import Any, Literal
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import yt_dlp
 
 from backend.core.config import ASSETS_DIR, DATA_DIR
@@ -40,7 +40,24 @@ from backend.services.task_manager import task_manager
 
 logger = logging.getLogger("tsumugi.scrapers.asset_search")
 
-AssetType = Literal["cover", "logo", "hero", "spine", "pv"]
+AssetType = Literal["cover", "logo", "hero", "background", "spine", "pv"]
+AssetRole = Literal["hero", "cover"]
+
+IMAGE_SOURCE_TIMEOUT_SEC = 12.0
+HERO_DEFAULT_SOURCES: tuple[str, ...] = ("steamgriddb", "vndb", "steam", "kungal", "igdb")
+COVER_DEFAULT_SOURCES: tuple[str, ...] = (
+    "steamgriddb",
+    "ymgal",
+    "kungal",
+    "touchgal",
+    "vndb",
+    "bangumi",
+    "dlsite",
+    "steam",
+    "igdb",
+)
+# 保持兼容别名：Hero 的封面源与封面原图查图完全共用同一数据源清单
+HERO_COVER_SOURCES: tuple[str, ...] = COVER_DEFAULT_SOURCES
 
 PV_MIN_DURATION_SEC = 30
 PV_MAX_DURATION_SEC = 360
@@ -88,7 +105,7 @@ class AssetCandidate(BaseModel):
 
     id: str
     url: str
-    fallback_urls: list[str] = []
+    fallback_urls: list[str] = Field(default_factory=list)
     thumb_url: str
     source: str
     platform: str = ""
@@ -98,6 +115,8 @@ class AssetCandidate(BaseModel):
     height: int | None = None
     duration: int | None = None
     mime_hint: str = "image"
+    asset_role: AssetRole | None = None
+    asset_roles: list[AssetRole] = Field(default_factory=list)
 
 
 def _make_id(source: str, url: str) -> str:
@@ -112,6 +131,43 @@ def _normalize_url(raw: Any) -> str:
     if s.startswith("//"):
         return f"https:{s}"
     return s
+
+
+def _canonicalize_asset_url(raw: Any) -> str:
+    """生成用于候选图去重的归一化 URL 键（忽略协议 http/https、域名大小写、默认端口、fragment 与参数顺序差异）"""
+    url = _normalize_url(raw)
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme in ("http", "https"):
+        scheme = "https"
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return url
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if (parsed.scheme.lower() == "http" and port == 80) or (
+        parsed.scheme.lower() == "https" and port == 443
+    ):
+        port = None
+    netloc = f"{host}:{port}" if port else host
+    path = parsed.path or ""
+    if len(path) > 1:
+        path = path.rstrip("/")
+    query = ""
+    if parsed.query:
+        query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
+    return urlunparse((scheme, netloc, path, "", query, ""))
+
+
+def _cover_orientation_rank(item: AssetCandidate) -> int:
+    """宽幅 Hero 场景下封面源排序优先级：已知横图/方图(0) > 未知尺寸(1) > 已知竖图(2)"""
+    if item.width and item.height:
+        return 0 if item.width >= item.height else 2
+    return 1
 
 
 def _safe_int(val: Any) -> int | None:
@@ -156,7 +212,7 @@ async def _fetch_sgdb_candidates(
     steam_appid: str = "",
 ) -> tuple[list[AssetCandidate], list[str]]:
     if not scraper.api_key:
-        return [], ["尚未配置 SteamGridDB API Key，可在全局设置 -> 元数据刮削源中填写"]
+        return [], ["SteamGridDB 未配置"]
 
     if asset_type == "pv":
         return [], []
@@ -414,14 +470,17 @@ async def _fetch_steam_candidates(
     asset_type: AssetType,
     query: str,
     scraper: SteamScraper,
+    steam_appid: str = "",
 ) -> list[AssetCandidate]:
     try:
         async with scraper._build_client(timeout=12.0) as client:
-            apps = await _steam_search_apps(
-                client,
-                query,
-                limit=5 if asset_type in ("cover", "spine", "logo") else 3,
-            )
+            limit = 5 if asset_type in ("cover", "spine", "logo") else 3
+            apps = await _steam_search_apps(client, query, limit=limit) if query else []
+            cleaned_appid = (steam_appid or "").strip()
+            if cleaned_appid.isdigit():
+                existing_ids = {str(a.get("id") or "").strip() for a in apps}
+                if cleaned_appid not in existing_ids:
+                    apps = [{"id": cleaned_appid, "name": query or cleaned_appid}, *apps[: max(limit - 1, 0)]]
             if not apps:
                 return []
 
@@ -929,7 +988,165 @@ async def _fetch_video_pv_candidates(
     return merged[:8]
 
 
-# ──────────────────── 统一编排入口 ────────────────────
+# ──────────────────── 统一图片检索管线与编排入口 ────────────────────
+
+
+def _resolve_image_sources(
+    fetch_type: Literal["cover", "spine", "logo", "hero"],
+    norm_source: str,
+    enabled_sources: dict[str, bool] | None = None,
+) -> list[str]:
+    if fetch_type == "hero":
+        default_sources = list(HERO_DEFAULT_SOURCES)
+    elif fetch_type == "logo":
+        default_sources = ["steamgriddb", "steam"]
+    else:
+        default_sources = list(COVER_DEFAULT_SOURCES)
+
+    if norm_source in ("all", "auto"):
+        if isinstance(enabled_sources, dict):
+            return [src for src in default_sources if enabled_sources.get(src, True)]
+        return default_sources
+
+    return [norm_source] if norm_source in default_sources else []
+
+
+async def _search_image_pipeline(
+    fetch_type: Literal["cover", "spine", "logo", "hero"],
+    *,
+    query: str,
+    alt_titles: list[str],
+    norm_source: str,
+    steam_appid: str,
+    scrapers: dict[str, Any],
+    enabled_sources: dict[str, bool] | None = None,
+    per_source_timeout: float = IMAGE_SOURCE_TIMEOUT_SEC,
+    collect_warnings: bool = True,
+) -> tuple[list[AssetCandidate], list[str]]:
+    """
+    单一资产类型的图片候选并发检索管线。
+    `cover` 查图与 `hero` 查图的封面候选分支直接复用本函数，确保候选范围与参数完全一致。
+    """
+    target_sources = _resolve_image_sources(fetch_type, norm_source, enabled_sources)
+    if not target_sources:
+        return [], []
+
+    sgdb: SteamGridDBScraper = scrapers["steamgriddb"]
+    vndb: VNDBScraper = scrapers["vndb"]
+    bgm: BangumiScraper = scrapers["bangumi"]
+    steam: SteamScraper = scrapers["steam"]
+    tgal: TouchGalScraper = scrapers["touchgal"]
+    ymgal: YMGalScraper = scrapers["ymgal"]
+    kungal: KungalScraper = scrapers["kungal"]
+    dlsite: DLsiteScraper = scrapers["dlsite"]
+    igdb: IGDBScraper = scrapers["igdb"]
+
+    warnings: list[str] = []
+
+    async def _query_single_source(
+        src_name: str,
+        search_q: str,
+        *,
+        record_warnings: bool,
+    ) -> list[AssetCandidate]:
+        if src_name == "steamgriddb":
+            items, w = await _fetch_sgdb_candidates(
+                fetch_type, search_q, sgdb, steam_appid=steam_appid
+            )
+            if record_warnings:
+                warnings.extend(w)
+            return items
+        if src_name == "vndb":
+            return await _fetch_vndb_candidates(fetch_type, search_q, vndb)
+        if src_name == "bangumi":
+            return await _fetch_bangumi_candidates(fetch_type, search_q, bgm)
+        if src_name == "steam":
+            if steam_appid:
+                return await _fetch_steam_candidates(
+                    fetch_type, search_q, steam, steam_appid=steam_appid
+                )
+            return await _fetch_steam_candidates(fetch_type, search_q, steam)
+        if src_name == "ymgal":
+            return await _fetch_generic_scraper_image_candidates(fetch_type, search_q, ymgal, "YMGal")
+        if src_name == "kungal":
+            return await _fetch_generic_scraper_image_candidates(fetch_type, search_q, kungal, "Kungal")
+        if src_name == "dlsite":
+            return await _fetch_generic_scraper_image_candidates(fetch_type, search_q, dlsite, "DLsite")
+        if src_name == "igdb":
+            if not igdb.is_configured():
+                return []
+            return await _fetch_generic_scraper_image_candidates(fetch_type, search_q, igdb, "IGDB")
+        if src_name == "touchgal":
+            if not tgal.is_configured():
+                return []
+            return await _fetch_touchgal_candidates(fetch_type, search_q, tgal)
+        return []
+
+    def _can_retry_alt(src_name: str) -> bool:
+        if src_name == "steamgriddb":
+            return bool(sgdb.api_key)
+        if src_name == "touchgal":
+            return tgal.is_configured()
+        if src_name == "igdb":
+            return igdb.is_configured()
+        return True
+
+    async def _run_source_with_fallback(src_name: str) -> list[AssetCandidate]:
+        items = await _query_single_source(src_name, query, record_warnings=collect_warnings)
+        if items or not alt_titles or not _can_retry_alt(src_name):
+            return items
+        # 主关键词未命中时，自动回退别名/原名再试一次，避免中日文标题差异导致漏源
+        for alt_q in alt_titles[:1]:
+            alt_items = await _query_single_source(src_name, alt_q, record_warnings=False)
+            if alt_items:
+                return alt_items
+        return []
+
+    async def _run_source_safe(src_name: str) -> list[AssetCandidate]:
+        try:
+            return await asyncio.wait_for(
+                _run_source_with_fallback(src_name),
+                timeout=per_source_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.debug(
+                "Asset search source=%s (%s) timed out after %.1fs for %r",
+                src_name,
+                fetch_type,
+                per_source_timeout,
+                query,
+            )
+            return []
+        except Exception as exc:
+            logger.debug(
+                "Asset search source=%s (%s) failed for %r: %s",
+                src_name,
+                fetch_type,
+                query,
+                exc,
+            )
+            return []
+
+    batches = await asyncio.gather(
+        *[_run_source_safe(src) for src in target_sources],
+        return_exceptions=True,
+    )
+
+    items_out: list[AssetCandidate] = []
+    seen_url_keys: set[str] = set()
+    for batch in batches:
+        if isinstance(batch, Exception) or not isinstance(batch, list):
+            continue
+        for item in batch:
+            url_key = _canonicalize_asset_url(item.url)
+            if not url_key or url_key in seen_url_keys:
+                continue
+            seen_url_keys.add(url_key)
+            if not item.platform:
+                item.platform = item.source
+            items_out.append(item)
+
+    return items_out, warnings
 
 
 async def search_asset_candidates(
@@ -941,19 +1158,25 @@ async def search_asset_candidates(
     allow_nsfw: bool = True,
     steam_appid: str = "",
     alt_title: str = "",
+    per_source_timeout: float = IMAGE_SOURCE_TIMEOUT_SEC,
+    enabled_sources: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
-    """按资产类型与指定数据源并发聚合多候选结果，单源异常静默跳过"""
+    """按资产类型与指定数据源并发聚合多候选结果，单源超时与异常严格隔离"""
     cleaned_q = (query or "").strip()
     cleaned_alt = (alt_title or "").strip()
+    if not cleaned_q and cleaned_alt:
+        cleaned_q, cleaned_alt = cleaned_alt, ""
     alt_titles = [cleaned_alt] if cleaned_alt and cleaned_alt != cleaned_q else []
     keys = api_keys or {}
     sgdb_key = str(keys.get("steamgriddb") or "").strip()
     bgm_key = str(keys.get("bangumi") or "").strip()
     tgal_key = str(keys.get("touchgal") or "").strip()
 
+    is_hero_search = asset_type in ("hero", "background")
+    effective_type: AssetType = "hero" if is_hero_search else asset_type
     norm_source = SOURCE_ALIASES.get((source or "all").strip().lower(), "all")
 
-    if not cleaned_q and not (asset_type == "pv" and (steam_appid or "").strip()):
+    if not cleaned_q and not (steam_appid or "").strip():
         return {
             "asset_type": asset_type,
             "query": cleaned_q,
@@ -965,8 +1188,8 @@ async def search_asset_candidates(
             "items": [],
         }
 
-    # PV 专用智能编排：auto/all 模式下严格优先 Steam 官方预告片，无结果再降级其他平台
-    if asset_type == "pv":
+    # PV 专用编排：auto/all 模式下优先 Steam 官方预告片，无结果再降级其他平台
+    if effective_type == "pv":
         pv_items: list[AssetCandidate] = []
         steam_empty = False
 
@@ -1008,86 +1231,129 @@ async def search_asset_candidates(
             "items": [it.model_dump() for it in pv_items],
         }
 
-    sgdb = SteamGridDBScraper(proxy_url=proxy_url, api_key=sgdb_key, allow_nsfw=allow_nsfw)
-    vndb = VNDBScraper(proxy_url=proxy_url, allow_nsfw=allow_nsfw)
-    bgm = BangumiScraper(proxy_url=proxy_url, api_key=bgm_key, allow_nsfw=allow_nsfw)
-    steam = SteamScraper(proxy_url=proxy_url, allow_nsfw=allow_nsfw)
-    tgal = TouchGalScraper(proxy_url=proxy_url, api_key=tgal_key, allow_nsfw=allow_nsfw)
-    ymgal = YMGalScraper(
-        proxy_url=proxy_url,
-        client_id=str(keys.get("ymgal_client_id") or ""),
-        client_secret=str(keys.get("ymgal_client_secret") or ""),
-        allow_nsfw=allow_nsfw,
-    )
-    kungal = KungalScraper(
-        proxy_url=proxy_url,
-        api_key=str(keys.get("kungal_token") or ""),
-        base_url=str(keys.get("kungal_base_url") or ""),
-        allow_nsfw=allow_nsfw,
-    )
-    dlsite = DLsiteScraper(proxy_url=proxy_url, allow_nsfw=allow_nsfw)
-    igdb = IGDBScraper(
-        proxy_url=proxy_url,
-        client_id=str(keys.get("igdb_client_id") or ""),
-        client_secret=str(keys.get("igdb_client_secret") or ""),
-        allow_nsfw=allow_nsfw,
-    )
-
-    if asset_type == "logo":
-        default_sources = ["steamgriddb", "steam"]
-    elif asset_type == "hero":
-        default_sources = ["steamgriddb", "vndb", "steam", "kungal", "igdb"]
-    else:
-        default_sources = ["steamgriddb", "ymgal", "vndb", "bangumi", "kungal", "dlsite", "steam"]
-
-    target_sources = default_sources if norm_source in ("all", "auto") else [norm_source]
+    scrapers: dict[str, Any] = {
+        "steamgriddb": SteamGridDBScraper(proxy_url=proxy_url, api_key=sgdb_key, allow_nsfw=allow_nsfw),
+        "vndb": VNDBScraper(proxy_url=proxy_url, allow_nsfw=allow_nsfw),
+        "bangumi": BangumiScraper(proxy_url=proxy_url, api_key=bgm_key, allow_nsfw=allow_nsfw),
+        "steam": SteamScraper(proxy_url=proxy_url, allow_nsfw=allow_nsfw),
+        "touchgal": TouchGalScraper(proxy_url=proxy_url, api_key=tgal_key, allow_nsfw=allow_nsfw),
+        "ymgal": YMGalScraper(
+            proxy_url=proxy_url,
+            client_id=str(keys.get("ymgal_client_id") or ""),
+            client_secret=str(keys.get("ymgal_client_secret") or ""),
+            allow_nsfw=allow_nsfw,
+        ),
+        "kungal": KungalScraper(
+            proxy_url=proxy_url,
+            api_key=str(keys.get("kungal_token") or ""),
+            base_url=str(keys.get("kungal_base_url") or ""),
+            allow_nsfw=allow_nsfw,
+        ),
+        "dlsite": DLsiteScraper(proxy_url=proxy_url, allow_nsfw=allow_nsfw),
+        "igdb": IGDBScraper(
+            proxy_url=proxy_url,
+            client_id=str(keys.get("igdb_client_id") or ""),
+            client_secret=str(keys.get("igdb_client_secret") or ""),
+            allow_nsfw=allow_nsfw,
+        ),
+    }
 
     warnings: list[str] = []
-
-    async def _run_source(src_name: str) -> list[AssetCandidate]:
-        if src_name == "steamgriddb":
-            items, w = await _fetch_sgdb_candidates(
-                asset_type, cleaned_q, sgdb, steam_appid=steam_appid
-            )
-            warnings.extend(w)
-            return items
-        if src_name == "vndb":
-            return await _fetch_vndb_candidates(asset_type, cleaned_q, vndb)
-        if src_name == "bangumi":
-            return await _fetch_bangumi_candidates(asset_type, cleaned_q, bgm)
-        if src_name == "steam":
-            return await _fetch_steam_candidates(asset_type, cleaned_q, steam)
-        if src_name == "ymgal":
-            return await _fetch_generic_scraper_image_candidates(asset_type, cleaned_q, ymgal, "YMGal")
-        if src_name == "kungal":
-            return await _fetch_generic_scraper_image_candidates(asset_type, cleaned_q, kungal, "Kungal")
-        if src_name == "dlsite":
-            return await _fetch_generic_scraper_image_candidates(asset_type, cleaned_q, dlsite, "DLsite")
-        if src_name == "igdb":
-            if not igdb.is_configured():
-                return []
-            return await _fetch_generic_scraper_image_candidates(asset_type, cleaned_q, igdb, "IGDB")
-        if src_name == "touchgal":
-            return await _fetch_touchgal_candidates(asset_type, cleaned_q, tgal)
-        return []
-
-    batches = await asyncio.gather(
-        *[_run_source(src) for src in target_sources],
-        return_exceptions=True,
-    )
-
     merged: list[AssetCandidate] = []
-    seen_urls: set[str] = set()
-    for batch in batches:
-        if isinstance(batch, Exception):
-            logger.debug("Asset search sub-task error: %s", batch)
-            continue
-        for item in batch:
-            if item.url and item.url not in seen_urls:
-                seen_urls.add(item.url)
-                if not item.platform:
-                    item.platform = item.source
-                merged.append(item)
+
+    if is_hero_search:
+        # Hero 查图：并发执行 Hero 背景管线 + 与封面原图完全相同的 Cover 搜索管线
+        hero_res, cover_res = await asyncio.gather(
+            _search_image_pipeline(
+                "hero",
+                query=cleaned_q,
+                alt_titles=alt_titles,
+                norm_source=norm_source,
+                steam_appid=steam_appid,
+                scrapers=scrapers,
+                enabled_sources=enabled_sources,
+                per_source_timeout=per_source_timeout,
+                collect_warnings=True,
+            ),
+            _search_image_pipeline(
+                "cover",
+                query=cleaned_q,
+                alt_titles=alt_titles,
+                norm_source=norm_source,
+                steam_appid=steam_appid,
+                scrapers=scrapers,
+                enabled_sources=enabled_sources,
+                per_source_timeout=per_source_timeout,
+                collect_warnings=False,
+            ),
+            return_exceptions=True,
+        )
+
+        raw_hero_items: list[AssetCandidate] = []
+        if isinstance(hero_res, tuple):
+            raw_hero_items, hero_warnings = hero_res
+            warnings.extend(hero_warnings)
+
+        raw_cover_items: list[AssetCandidate] = []
+        if isinstance(cover_res, tuple):
+            raw_cover_items, _ = cover_res
+
+        hero_items: list[AssetCandidate] = []
+        items_by_url: dict[str, AssetCandidate] = {}
+
+        for item in raw_hero_items:
+            url_key = _canonicalize_asset_url(item.url)
+            if not url_key or url_key in items_by_url:
+                continue
+            item.asset_role = "hero"
+            item.asset_roles = ["hero"]
+            items_by_url[url_key] = item
+            hero_items.append(item)
+
+        cover_only_items: list[AssetCandidate] = []
+        for item in raw_cover_items:
+            url_key = _canonicalize_asset_url(item.url)
+            if not url_key:
+                continue
+            existing = items_by_url.get(url_key)
+            if existing is not None:
+                # 无损多角色合并：同一 URL 同时命中 Hero 源与封面源时，合并为 1 条并保留双角色
+                if "cover" not in existing.asset_roles:
+                    existing.asset_roles.append("cover")
+                if not existing.width and item.width:
+                    existing.width = item.width
+                if not existing.height and item.height:
+                    existing.height = item.height
+                continue
+            item.asset_role = "cover"
+            item.asset_roles = ["cover"]
+            items_by_url[url_key] = item
+            cover_only_items.append(item)
+
+        # 纯封面源结果紧随 Hero 之后，已知横图/方图(width >= height)优先于未知尺寸与竖图
+        cover_only_items.sort(key=_cover_orientation_rank)
+        merged = hero_items + cover_only_items
+    else:
+        pipe_type: Literal["cover", "spine", "logo"] = (
+            "logo" if effective_type == "logo" else ("spine" if effective_type == "spine" else "cover")
+        )
+        pipe_items, pipe_warnings = await _search_image_pipeline(
+            pipe_type,
+            query=cleaned_q,
+            alt_titles=alt_titles,
+            norm_source=norm_source,
+            steam_appid=steam_appid,
+            scrapers=scrapers,
+            enabled_sources=enabled_sources,
+            per_source_timeout=per_source_timeout,
+            collect_warnings=True,
+        )
+        warnings.extend(pipe_warnings)
+        for item in pipe_items:
+            if pipe_type in ("cover", "spine"):
+                item.asset_role = "cover"
+                item.asset_roles = ["cover"]
+            merged.append(item)
 
     dedup_warnings = list(dict.fromkeys(warnings))
     return {

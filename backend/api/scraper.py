@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.api.settings import DEFAULT_SETTINGS, resolve_bangumi_token
+from backend.core.config import DATA_DIR
 from backend.core.scraper_settings import (
     ALL_CREDENTIAL_FIELDS,
     SECRET_CREDENTIAL_FIELDS,
@@ -61,6 +62,7 @@ from backend.services.media_service import (
     format_download_error_zh,
     generate_pinyin_initials,
     is_remote_http_url,
+    save_game_asset_bytes,
 )
 from backend.services.task_manager import task_manager
 
@@ -950,23 +952,28 @@ async def proxy_music_preview(
 
 @router.get("/assets/search")
 async def search_single_asset_candidates(
-    asset_type: Literal["cover", "logo", "hero", "spine", "pv"] = Query(
-        ..., description="目标资产槽位: cover / logo / hero / spine / pv"
+    asset_type: Literal["cover", "logo", "hero", "background", "spine", "pv"] = Query(
+        ..., description="目标资产槽位: cover / logo / hero / background / spine / pv"
     ),
     q: str = Query("", description="检索关键词"),
     source: str = Query(
         "all",
-        description="数据源: auto / all / steamgriddb / vndb / bangumi / steam / touchgal / bilibili / youtube / video",
+        description="数据源: auto / all / steamgriddb / ymgal / kungal / touchgal / vndb / bangumi / dlsite / steam / igdb / bilibili / youtube / video",
     ),
     steam_appid: str = Query("", description="可选：已知 Steam AppID，用于优先拉取官方 PV"),
     alt_title: str = Query("", description="可选：游戏原名或中文名，辅助精确匹配与相关性过滤"),
     db: AsyncSession = Depends(get_db),
 ):
     """按资产类型与数据源并发检索多候选视觉资产或宣传片 PV"""
-    _, cfg = await _load_aggregator(db)
+    _, _, cfg, scraper_cfg = await _load_scraper_context(db)
     proxy_url = str(cfg.get("proxy_url") or "")
     api_keys = cfg.get("api_keys") if isinstance(cfg.get("api_keys"), dict) else {}
     allow_nsfw = bool(cfg.get("allow_nsfw_scrape", True))
+    enabled_sources = (
+        scraper_cfg.get("enabled_sources")
+        if isinstance(scraper_cfg.get("enabled_sources"), dict)
+        else None
+    )
 
     return await search_asset_candidates(
         asset_type=asset_type,
@@ -977,6 +984,7 @@ async def search_single_asset_candidates(
         allow_nsfw=allow_nsfw,
         steam_appid=steam_appid,
         alt_title=alt_title,
+        enabled_sources=enabled_sources,
     )
 
 
@@ -1120,15 +1128,47 @@ async def apply_single_asset_for_game(
             raise HTTPException(status_code=400, detail=format_download_error_zh(exc, media_kind="video"))
         game.media.pv_url_or_path = rel_path
     else:
-        try:
-            saved = await download_single_image_asset(
-                game_id=game_id,
-                asset_type=payload.asset_type,
-                url=target_url,
-                proxy_url=proxy_url,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"视觉资产下载或保存失败: {exc}")
+        if payload.asset_type == "hero" and target_url == "local://cover":
+            cover_ref = str(game.media.cover_path or game.media.cover_thumb_path or "").strip()
+            if not cover_ref:
+                raise HTTPException(status_code=400, detail="当前作品没有可用的封面原图")
+            if is_remote_http_url(cover_ref):
+                try:
+                    saved = await download_single_image_asset(
+                        game_id=game_id,
+                        asset_type="hero",
+                        url=cover_ref,
+                        proxy_url=proxy_url,
+                    )
+                except Exception as exc:
+                    raise HTTPException(status_code=400, detail=f"封面复用为 Hero 背景失败: {exc}")
+            else:
+                norm_rel = cover_ref.lstrip("/")
+                if norm_rel.startswith("static/data/"):
+                    norm_rel = norm_rel[len("static/data/"):]
+                data_root = DATA_DIR.resolve()
+                cover_file = (data_root / norm_rel).resolve()
+                if not cover_file.is_relative_to(data_root) or not cover_file.is_file():
+                    raise HTTPException(status_code=400, detail="本地封面文件不存在，无法设为 Hero 背景")
+                try:
+                    saved = save_game_asset_bytes(
+                        game_id=game_id,
+                        asset_type="hero",
+                        filename=cover_file.name,
+                        content=cover_file.read_bytes(),
+                    )
+                except Exception as exc:
+                    raise HTTPException(status_code=400, detail=f"保存 Hero 背景失败: {exc}")
+        else:
+            try:
+                saved = await download_single_image_asset(
+                    game_id=game_id,
+                    asset_type=payload.asset_type,
+                    url=target_url,
+                    proxy_url=proxy_url,
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"视觉资产下载或保存失败: {exc}")
 
         if payload.asset_type == "cover":
             game.media.cover_path = saved["path"]

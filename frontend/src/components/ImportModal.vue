@@ -980,7 +980,7 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
 
             <div v-if="detectedDirectHint" class="direct-hint-bar">
               <span class="direct-dot" />
-              <span>已识别直查目标：<strong>{{ detectedDirectHint.sourceLabel }}</strong> · <code>{{ detectedDirectHint.id }}</code>（按回车精准拉取）</span>
+              <span>已识别直查目标：<strong>{{ detectedDirectHint.sourceLabel }}</strong> · <code>{{ detectedDirectHint.id }}</code>（回车直查）</span>
             </div>
 
             <!-- 单行胶囊：综合推荐 + 各单源切换 -->
@@ -1008,7 +1008,7 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
           <!-- 加载详情状态 -->
           <div v-if="loadingDetail" class="center-loading">
             <div class="spinner" />
-            <span>正在拉取完整详情与视觉资产…</span>
+            <span>正在加载详情…</span>
           </div>
 
           <!-- 第二步：入库前详情确认与跨源补全 -->
@@ -1061,10 +1061,8 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                 >
                   {{
                     enrichLoading && enrichOpenMode === 'covers'
-                      ? '拉取高清封面中…'
-                      : sgdbConfigured
-                        ? '更换高清封面 / 背景（含 SteamGridDB）'
-                        : '更换封面 / 背景（多源）'
+                      ? '检索中…'
+                      : '更换封面 / 背景'
                   }}
                 </button>
                 <button
@@ -1091,7 +1089,7 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
             <div v-if="enrichOpenMode" class="enrich-drawer">
               <div v-if="enrichLoading" class="enrich-loading">
                 <div class="spinner small" />
-                <span>正在并发向其他数据源检索同作简介与高清封面…</span>
+                <span>正在检索其他数据源…</span>
               </div>
 
               <!-- 模式 A：跨源简介与字段补全 -->
@@ -1171,14 +1169,16 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                     </button>
                   </div>
 
-                  <button
-                    v-if="!sgdbConfigured"
-                    type="button"
-                    class="opt-inline-link"
-                    @click="openSgdbSettingsShortcut"
-                  >
-                    配置 SteamGridDB Key 解锁 600×900 高清展架封面 →
-                  </button>
+                  <span v-if="!sgdbConfigured" class="sgdb-subtle-status">
+                    <span>SteamGridDB 未配置</span>
+                    <button
+                      type="button"
+                      class="sgdb-subtle-btn"
+                      @click="openSgdbSettingsShortcut"
+                    >
+                      去设置
+                    </button>
+                  </span>
                 </div>
 
                 <div
@@ -1393,7 +1393,7 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
                 </div>
 
                 <p class="opt-mode-note">
-                  提示：选择<strong>仅保留链接</strong>可节省本地硬盘空间，浏览时直接在线播放；选择<strong>下载到本地</strong>将缓存视频文件以支持离线秒开；已有本地文件时优先播放本地视频。
+                  <strong>仅保留链接</strong>可节省空间；<strong>下载到本地</strong>支持离线播放，已有本地文件时优先播放本地。
                 </p>
               </div>
 
@@ -1643,7 +1643,7 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
               </template>
             </div>
             <div v-if="!searchedOnce" class="empty-search">
-              输入游戏中文名 / 日文原名，或直接粘贴 <strong>Steam / VNDB / Bangumi / YMGal / Kungal</strong> 链接及 <strong>RJ123456</strong> 编号精准直查。
+              输入游戏名，或粘贴 <strong>Steam / VNDB / Bangumi / YMGal / Kungal</strong> 链接及 <strong>RJ</strong> 编号直查。
             </div>
           </div>
         </template>
@@ -1771,7 +1771,7 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
               <div class="batch-toolbar">
                 <label class="nsfw-inline">
                   <input v-model="autoScrapeOnBatch" type="checkbox" class="native-switch" />
-                  <span>入库时自动并发刮削封面、简介与标签</span>
+                  <span>导入时自动刮削封面、简介与标签</span>
                 </label>
                 <button
                   class="btn btn-primary btn-sm tabular-nums"
@@ -3079,6 +3079,27 @@ async function pickForLocal(target: 'exe' | 'save' | 'ss' | 'scan' | 'draft_exe'
 
 .opt-inline-link:hover {
   opacity: 1;
+}
+
+.sgdb-subtle-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sgdb-subtle-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sgdb-subtle-btn:hover {
+  color: var(--text-primary);
 }
 
 .opt-official-badge {

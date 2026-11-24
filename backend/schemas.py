@@ -6,6 +6,8 @@ from backend.services.thumbnail_service import build_thumb_api_url
 
 
 MediaSaveMode = Literal["none", "link_only", "download"]
+CollectionType = Literal["series", "custom"]
+NoteType = Literal["work", "character", "misc"]
 
 
 class MediaPathSchema(BaseModel):
@@ -118,6 +120,36 @@ class GameUpdate(BaseModel):
     media: MediaPathUpdateSchema | None = None
 
 
+class CollectionItemSummary(BaseModel):
+    """合集内单部作品轻量摘要（严格按 position 排序）"""
+
+    game_id: int
+    title: str
+    sub_title: str = ""
+    cover_thumb_url: str = ""
+    cover_path: str = ""
+    play_status: str = "todo"
+    is_nsfw: bool = False
+    rating_overall: float | None = None
+    relation_label: str = ""
+    position: int = 0
+    added_at: datetime | None = None
+
+
+class GameCollectionMembership(BaseModel):
+    """作品详情附带的所属合集及同系列有序成员列表"""
+
+    id: int
+    name: str
+    description: str = ""
+    collection_type: CollectionType | str = "series"
+    relation_label: str = ""
+    position: int = 0
+    total_count: int = 0
+    completed_count: int = 0
+    items: list[CollectionItemSummary] = Field(default_factory=list)
+
+
 class GameOut(BaseModel):
     """游戏完整详情响应模型"""
 
@@ -136,6 +168,9 @@ class GameOut(BaseModel):
     locked_fields: list[str]
     bangumi_id: str = ""
     series: str = ""
+    rating_overall: float | None = None
+    rating_dimensions: dict[str, float] | None = None
+    short_review: str = ""
     status: str
     edition: str
     is_nsfw: bool
@@ -143,6 +178,8 @@ class GameOut(BaseModel):
     created_at: datetime
     media: MediaPathSchema | None = None
     play_record: PlayRecordSchema | None = None
+    notes_count: int = 0
+    collections: list[GameCollectionMembership] = Field(default_factory=list)
 
     @computed_field
     @property
@@ -261,13 +298,23 @@ class ValidatePathRequest(BaseModel):
     path: str = ""
 
 
+class CollectionItemInput(BaseModel):
+    game_id: int
+    relation_label: str = Field(default="", max_length=32)
+
+
 class CollectionCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
+    description: str = Field(default="", max_length=500)
+    collection_type: CollectionType = "series"
     game_ids: list[int] = Field(default_factory=list)
+    items: list[CollectionItemInput] | None = None
 
 
 class CollectionUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=64)
+    description: str | None = Field(None, max_length=500)
+    collection_type: CollectionType | None = None
     sort_order: int | None = None
 
 
@@ -275,12 +322,60 @@ class CollectionGamesUpdate(BaseModel):
     game_ids: list[int] = Field(default_factory=list)
 
 
+class CollectionItemsUpdate(BaseModel):
+    items: list[CollectionItemInput] = Field(default_factory=list)
+
+
 class CollectionOut(BaseModel):
     id: int
     name: str
+    description: str = ""
+    collection_type: CollectionType | str = "series"
     sort_order: int
     created_at: datetime | None = None
+    updated_at: datetime | None = None
     game_ids: list[int] = Field(default_factory=list)
+    items: list[CollectionItemSummary] = Field(default_factory=list)
+    total_count: int = 0
+    completed_count: int = 0
+    playing_count: int = 0
+    unplayed_count: int = 0
+
+
+class GameRatingUpdate(BaseModel):
+    """作品多维评分与一句话短评更新请求"""
+
+    rating_overall: float | None = Field(default=None, ge=1.0, le=10.0)
+    rating_dimensions: dict[str, float | None] | None = None
+    short_review: str | None = Field(default=None, max_length=500)
+    clear: bool = False
+
+
+class GameNoteCreate(BaseModel):
+    note_type: NoteType = "work"
+    title: str = Field(default="", max_length=120)
+    content_md: str = ""
+    is_pinned: bool = False
+
+
+class GameNoteUpdate(BaseModel):
+    note_type: NoteType | None = None
+    title: str | None = Field(default=None, max_length=120)
+    content_md: str | None = None
+    is_pinned: bool | None = None
+
+
+class GameNoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    game_id: int
+    note_type: NoteType | str
+    title: str
+    content_md: str
+    is_pinned: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class MusicDownloadRequest(BaseModel):

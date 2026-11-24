@@ -1,20 +1,43 @@
+import json
+import re
 import shutil
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
-from sqlalchemy import delete, or_, select
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backend.api.collections import serialize_game_collections
 from backend.api.settings import DEFAULT_SETTINGS, resolve_bangumi_token
 from backend.core.config import ASSETS_DIR
 from backend.core.os_adapter import os_adapter
 from backend.db.database import get_db
-from backend.db.models import AppStateSetting, CollectionGame, Game, GameMediaPath, PlayRecord, PlaySession
-from backend.schemas import BangumiSyncRequest, GameCreate, GameOut, GameUpdate, PlaySessionOut
+from backend.db.models import (
+    AppStateSetting,
+    CollectionItem,
+    Game,
+    GameMediaPath,
+    GameNote,
+    PlayRecord,
+    PlaySession,
+)
+from backend.schemas import (
+    BangumiSyncRequest,
+    GameCollectionMembership,
+    GameCreate,
+    GameNoteCreate,
+    GameNoteOut,
+    GameNoteUpdate,
+    GameOut,
+    GameRatingUpdate,
+    GameUpdate,
+    PlaySessionOut,
+)
 from backend.scrapers.bangumi import BANGUMI_USER_AGENT, BGM_BASE_URL
 from backend.services.media_service import generate_pinyin_initials
 from backend.services.process_tracker import process_tracker
@@ -32,6 +55,30 @@ STATUS_QUERY_EQUIVALENTS: dict[str, tuple[str, ...]] = {
     "completed": ("completed", "done"),
     "done": ("done", "completed"),
 }
+
+STATUS_LABEL_ZH: dict[str, str] = {
+    "todo": "未开始",
+    "unplayed": "未开始",
+    "playing": "攻略中",
+    "done": "已通关",
+    "completed": "已通关",
+}
+
+RATING_DIMENSION_META: tuple[tuple[str, str], ...] = (
+    ("story", "剧本"),
+    ("visual", "美术与演出"),
+    ("music", "音乐"),
+    ("atmosphere", "氛围与体验"),
+)
+VALID_RATING_DIMENSIONS: frozenset[str] = frozenset(k for k, _ in RATING_DIMENSION_META)
+
+NOTE_TYPE_LABELS: dict[str, str] = {
+    "work": "作品总评",
+    "character": "角色手记",
+    "misc": "随记",
+}
+
+_FILENAME_UNSAFE_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
 BANGUMI_COLLECTION_TYPE_MAP: dict[str, tuple[int, str]] = {
     "unplayed": (1, "想玩"),
@@ -60,25 +107,164 @@ async def _load_game_full(db: AsyncSession, game_id: int) -> Game | None:
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def _serialize_game_detail(db: AsyncSession, game: Game) -> GameOut:
+    """序列化单部游戏详情，附带手记数与所属系列合集（含同系列按 position 排好序的作品摘要）"""
+    notes_count = int(
+        (
+            await db.execute(
+                select(func.count(GameNote.id)).where(GameNote.game_id == game.id)
+            )
+        ).scalar()
+        or 0
+    )
+    collections_data = [
+        GameCollectionMembership.model_validate(m)
+        for m in await serialize_game_collections(db, game.id)
+    ]
+    base = GameOut.model_validate(game)
+    return base.model_copy(
+        update={
+            "notes_count": notes_count,
+            "collections": collections_data,
+        }
+    )
+
+
+def _yaml_scalar(value: Any) -> str:
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _sanitize_export_filename(name: str, fallback: str = "tsumugi-notes") -> str:
+    cleaned = _FILENAME_UNSAFE_RE.sub("_", (name or "").strip()).strip(". _")
+    return (cleaned[:80] if cleaned else fallback)
+
+
+def _build_notes_markdown_export(
+    game: Game,
+    notes: list[GameNote],
+    collection_names: list[str],
+) -> str:
+    """拼装含标准 YAML Frontmatter 的结构化 Markdown 文档（兼容 Obsidian / Typora 等工具）"""
+    total_seconds = int(game.play_record.total_seconds or 0) if game.play_record else 0
+    play_hours = round(total_seconds / 3600.0, 1)
+    status_zh = STATUS_LABEL_ZH.get((game.status or "todo").strip().lower(), game.status or "未开始")
+    exported_at = datetime.now().replace(microsecond=0).isoformat()
+
+    fm: list[str] = ["---"]
+    fm.append(f"title: {_yaml_scalar(game.title)}")
+    if (game.sub_title or "").strip():
+        fm.append(f"original_title: {_yaml_scalar(game.sub_title.strip())}")
+    if (game.developer or "").strip():
+        fm.append(f"developer: {_yaml_scalar(game.developer.strip())}")
+    if (game.publisher or "").strip():
+        fm.append(f"publisher: {_yaml_scalar(game.publisher.strip())}")
+    if (game.release_date or "").strip():
+        fm.append(f"release_date: {_yaml_scalar(game.release_date.strip())}")
+    fm.append(f"status: {_yaml_scalar(status_zh)}")
+    fm.append(f"play_time_hours: {play_hours}")
+
+    if game.rating_overall is not None:
+        fm.append(f"rating_overall: {round(float(game.rating_overall), 1)}")
+
+    dims = game.rating_dimensions if isinstance(game.rating_dimensions, dict) else {}
+    present_dims = [
+        (key, round(float(dims[key]), 1))
+        for key, _ in RATING_DIMENSION_META
+        if key in dims and dims[key] is not None
+    ]
+    if present_dims:
+        fm.append("ratings:")
+        for key, val in present_dims:
+            fm.append(f"  {key}: {val}")
+
+    short_review = (game.short_review or "").strip()
+    if short_review:
+        fm.append(f"short_review: {_yaml_scalar(short_review)}")
+
+    tags = [str(t).strip() for t in (game.tags or []) if str(t).strip()]
+    if tags:
+        fm.append("tags:")
+        for tag in tags:
+            fm.append(f"  - {_yaml_scalar(tag)}")
+
+    if collection_names:
+        fm.append("collections:")
+        for cname in collection_names:
+            fm.append(f"  - {_yaml_scalar(cname)}")
+
+    fm.append(f"exported_at: {_yaml_scalar(exported_at)}")
+    fm.append("---")
+
+    body: list[str] = [f"# {game.title}"]
+    if (game.sub_title or "").strip():
+        body.append(f"*{game.sub_title.strip()}*")
+
+    if short_review:
+        body.append(f"> {short_review}")
+
+    # 基础档案与游玩概况
+    meta_lines: list[str] = []
+    if (game.developer or "").strip():
+        meta_lines.append(f"- **开发商**：{game.developer.strip()}")
+    if (game.release_date or "").strip():
+        meta_lines.append(f"- **发售日期**：{game.release_date.strip()}")
+    meta_lines.append(f"- **攻略状态**：{status_zh}")
+    meta_lines.append(f"- **累计游玩**：{play_hours} 小时")
+    if meta_lines:
+        body.append("## 作品档案\n\n" + "\n".join(meta_lines))
+
+    # 多维评分
+    if game.rating_overall is not None or present_dims:
+        rating_lines: list[str] = []
+        if game.rating_overall is not None:
+            rating_lines.append(f"- **综合评分**：{round(float(game.rating_overall), 1)} / 10")
+        dim_label_map = dict(RATING_DIMENSION_META)
+        for key, val in present_dims:
+            rating_lines.append(f"- **{dim_label_map.get(key, key)}**：{val} / 10")
+        body.append("## 多维评分\n\n" + "\n".join(rating_lines))
+
+    # 手记正文
+    if notes:
+        note_sections: list[str] = []
+        for note in notes:
+            type_label = NOTE_TYPE_LABELS.get(note.note_type, "手记")
+            heading = f"### [{type_label}] {note.title or type_label}"
+            updated_str = (
+                note.updated_at.strftime("%Y-%m-%d %H:%M")
+                if note.updated_at
+                else ""
+            )
+            parts = [heading]
+            if updated_str:
+                parts.append(f"*更新于 {updated_str}*")
+            content_text = (note.content_md or "").strip()
+            if content_text:
+                parts.append(content_text)
+            note_sections.append("\n\n".join(parts))
+        body.append("## 手记\n\n" + "\n\n---\n\n".join(note_sections))
+
+    return "\n".join(fm) + "\n\n" + "\n\n".join(body).rstrip() + "\n"
+
+
 @router.get("", response_model=list[GameOut])
 async def list_games(
     status: str | None = Query(
         None, description="按状态筛选: unplayed / todo / playing / completed / done"
     ),
-    collection_id: int | None = Query(None, description="按回廊分组 ID 筛选"),
+    collection_id: int | None = Query(None, description="按系列合集/分组 ID 筛选"),
     tag: str | None = Query(None, description="按标签筛选"),
     q: str | None = Query(None, description="按标题、原名、开发者、发行商、拼音首字母模糊搜索"),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = (
-        select(Game)
-        .options(selectinload(Game.media), selectinload(Game.play_record))
-        .order_by(Game.id.asc())
-    )
+    stmt = select(Game).options(selectinload(Game.media), selectinload(Game.play_record))
     if collection_id is not None:
-        stmt = stmt.join(CollectionGame, CollectionGame.game_id == Game.id).where(
-            CollectionGame.collection_id == collection_id
+        stmt = (
+            stmt.join(CollectionItem, CollectionItem.game_id == Game.id)
+            .where(CollectionItem.collection_id == collection_id)
+            .order_by(CollectionItem.position.asc(), Game.id.asc())
         )
+    else:
+        stmt = stmt.order_by(Game.id.asc())
 
     if status and status != "all":
         norm_st = status.strip().lower()
@@ -107,7 +293,25 @@ async def list_games(
         target_tag = tag.strip()
         games = [g for g in games if target_tag in (g.tags or [])]
 
-    return games
+    if not games:
+        return []
+
+    game_ids = [g.id for g in games]
+    note_counts_rows = (
+        await db.execute(
+            select(GameNote.game_id, func.count(GameNote.id))
+            .where(GameNote.game_id.in_(game_ids))
+            .group_by(GameNote.game_id)
+        )
+    ).all()
+    notes_count_map = {int(gid): int(cnt) for gid, cnt in note_counts_rows}
+
+    return [
+        GameOut.model_validate(g).model_copy(
+            update={"notes_count": notes_count_map.get(g.id, 0)}
+        )
+        for g in games
+    ]
 
 
 @router.post("", response_model=GameOut)
@@ -161,7 +365,7 @@ async def get_game(
     if record_active:
         await _set_last_active_game(db, game.id)
         await db.commit()
-    return game
+    return await _serialize_game_detail(db, game)
 
 
 @router.patch("/{game_id}", response_model=GameOut)
@@ -231,7 +435,221 @@ async def update_game(
     await db.commit()
     refreshed = await _load_game_full(db, game_id)
     assert refreshed is not None
-    return refreshed
+    return await _serialize_game_detail(db, refreshed)
+
+
+@router.put("/{game_id}/rating", response_model=GameOut)
+async def update_game_rating(
+    game_id: int,
+    payload: GameRatingUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """保存或清空作品多维评分、综合评分与一句话短评（未手填综合分时自动计算各维度均值并保留 1 位小数）"""
+    game = await _load_game_full(db, game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="未找到指定游戏")
+
+    if payload.clear:
+        game.rating_overall = None
+        game.rating_dimensions = None
+        if payload.short_review is not None:
+            game.short_review = payload.short_review.strip()
+        else:
+            game.short_review = ""
+    else:
+        clean_dims: dict[str, float] = {}
+        if payload.rating_dimensions is not None:
+            for key, raw_val in payload.rating_dimensions.items():
+                if key not in VALID_RATING_DIMENSIONS:
+                    raise HTTPException(status_code=400, detail=f"未知评分维度: {key}")
+                if raw_val is None:
+                    continue
+                val = float(raw_val)
+                if val < 1.0 or val > 10.0:
+                    raise HTTPException(status_code=400, detail=f"维度 {key} 评分必须在 1.0~10.0 之间")
+                clean_dims[key] = round(val * 2.0) / 2.0
+            game.rating_dimensions = clean_dims or None
+        else:
+            existing_dims = game.rating_dimensions if isinstance(game.rating_dimensions, dict) else {}
+            clean_dims = {
+                k: float(v)
+                for k, v in existing_dims.items()
+                if k in VALID_RATING_DIMENSIONS and v is not None
+            }
+
+        if payload.rating_overall is not None:
+            game.rating_overall = round(float(payload.rating_overall), 1)
+        elif clean_dims:
+            game.rating_overall = round(sum(clean_dims.values()) / len(clean_dims), 1)
+        else:
+            game.rating_overall = None
+
+        if payload.short_review is not None:
+            game.short_review = payload.short_review.strip()
+
+    await db.commit()
+    refreshed = await _load_game_full(db, game_id)
+    assert refreshed is not None
+    return await _serialize_game_detail(db, refreshed)
+
+
+@router.get("/{game_id}/notes", response_model=list[GameNoteOut])
+async def list_game_notes(
+    game_id: int,
+    note_type: Literal["work", "character", "misc"] | None = Query(
+        None, description="可选：按手记类型筛选 work / character / misc"
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取作品下的全部长评手记（置顶优先，其次按更新时间倒序）"""
+    exists = await db.get(Game, game_id)
+    if not exists:
+        raise HTTPException(status_code=404, detail="未找到指定游戏")
+
+    stmt = select(GameNote).where(GameNote.game_id == game_id)
+    if note_type:
+        stmt = stmt.where(GameNote.note_type == note_type)
+    stmt = stmt.order_by(GameNote.is_pinned.desc(), GameNote.updated_at.desc(), GameNote.id.desc())
+    return list((await db.execute(stmt)).scalars().all())
+
+
+@router.get("/{game_id}/notes/export")
+async def export_game_notes_markdown(
+    game_id: int,
+    note_id: int | None = Query(None, description="可选：仅导出指定单篇手记"),
+    db: AsyncSession = Depends(get_db),
+):
+    """将作品元数据、游玩时长、多维评分、短评与手记导出为含标准 YAML Frontmatter 的 Markdown 文件"""
+    game = await _load_game_full(db, game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="未找到指定游戏")
+
+    if note_id is not None:
+        single_note = (
+            await db.execute(
+                select(GameNote).where(GameNote.id == note_id, GameNote.game_id == game_id)
+            )
+        ).scalar_one_or_none()
+        if not single_note:
+            raise HTTPException(status_code=404, detail="未找到指定手记")
+        notes = [single_note]
+    else:
+        notes = list(
+            (
+                await db.execute(
+                    select(GameNote)
+                    .where(GameNote.game_id == game_id)
+                    .order_by(GameNote.is_pinned.desc(), GameNote.created_at.asc(), GameNote.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    memberships = await serialize_game_collections(db, game_id)
+    collection_names = [m["name"] for m in memberships if m.get("name")]
+    md_text = _build_notes_markdown_export(game, notes, collection_names)
+
+    base_name = _sanitize_export_filename(
+        f"{game.title}-{notes[0].title}" if (note_id is not None and notes) else f"{game.title}-手记",
+        fallback=f"tsumugi-game-{game_id}",
+    )
+    utf8_filename = f"{base_name}.md"
+    ascii_filename = f"tsumugi-game-{game_id}-notes.md"
+
+    return Response(
+        content=md_text.encode("utf-8"),
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_filename}"; '
+                f"filename*=UTF-8''{quote(utf8_filename)}"
+            )
+        },
+    )
+
+
+@router.post("/{game_id}/notes", response_model=GameNoteOut)
+async def create_game_note(
+    game_id: int,
+    payload: GameNoteCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """为指定作品新建一篇长评手记（作品总评 / 角色手记 / 随记）"""
+    exists = await db.get(Game, game_id)
+    if not exists:
+        raise HTTPException(status_code=404, detail="未找到指定游戏")
+
+    default_title = NOTE_TYPE_LABELS.get(payload.note_type, "手记")
+    title = (payload.title or "").strip() or default_title
+    now = datetime.now()
+    note = GameNote(
+        game_id=game_id,
+        note_type=payload.note_type,
+        title=title,
+        content_md=payload.content_md or "",
+        is_pinned=bool(payload.is_pinned),
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    return note
+
+
+@router.patch("/{game_id}/notes/{note_id}", response_model=GameNoteOut)
+async def update_game_note(
+    game_id: int,
+    note_id: int,
+    payload: GameNoteUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新指定手记的标题、类型、正文或置顶状态"""
+    note = (
+        await db.execute(
+            select(GameNote).where(GameNote.id == note_id, GameNote.game_id == game_id)
+        )
+    ).scalar_one_or_none()
+    if not note:
+        raise HTTPException(status_code=404, detail="未找到指定手记")
+
+    if payload.note_type is not None:
+        note.note_type = payload.note_type
+    if payload.title is not None:
+        cleaned_title = payload.title.strip()
+        if not cleaned_title:
+            raise HTTPException(status_code=400, detail="手记标题不能为空")
+        note.title = cleaned_title
+    if payload.content_md is not None:
+        note.content_md = payload.content_md
+    if payload.is_pinned is not None:
+        note.is_pinned = bool(payload.is_pinned)
+    note.updated_at = datetime.now()
+
+    await db.commit()
+    await db.refresh(note)
+    return note
+
+
+@router.delete("/{game_id}/notes/{note_id}")
+async def delete_game_note(
+    game_id: int,
+    note_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除指定手记"""
+    note = (
+        await db.execute(
+            select(GameNote).where(GameNote.id == note_id, GameNote.game_id == game_id)
+        )
+    ).scalar_one_or_none()
+    if not note:
+        raise HTTPException(status_code=404, detail="未找到指定手记")
+
+    await db.delete(note)
+    await db.commit()
+    return {"status": "deleted", "note_id": note_id, "game_id": game_id}
 
 
 @router.delete("/{game_id}")
@@ -245,7 +663,8 @@ async def delete_game(game_id: int, db: AsyncSession = Depends(get_db)):
     if status.get("running") and status.get("game_id") == game_id:
         await process_tracker.stop_tracking(terminate_process=False)
 
-    await db.execute(delete(CollectionGame).where(CollectionGame.game_id == game_id))
+    await db.execute(delete(CollectionItem).where(CollectionItem.game_id == game_id))
+    await db.execute(delete(GameNote).where(GameNote.game_id == game_id))
     await db.delete(game)
     await db.commit()
 

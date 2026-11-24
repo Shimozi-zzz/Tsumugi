@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.db.database import get_db
-from backend.db.models import CollectionGame, Game, PlaySession
+from backend.db.models import CollectionItem, Game, PlaySession
 
 router = APIRouter(prefix="/api/stats", tags=["Stats"])
 
@@ -266,8 +266,10 @@ async def get_journey_collage(
         selectinload(Game.play_record),
     )
     if collection_id is not None:
-        cg_stmt = select(CollectionGame.game_id).where(
-            CollectionGame.collection_id == collection_id
+        cg_stmt = (
+            select(CollectionItem.game_id)
+            .where(CollectionItem.collection_id == collection_id)
+            .order_by(CollectionItem.position.asc(), CollectionItem.id.asc())
         )
         allowed_ids = list((await db.execute(cg_stmt)).scalars().all())
         if not allowed_ids:

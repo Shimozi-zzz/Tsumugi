@@ -25,9 +25,9 @@ const isOpen = ref(false)
 const isPinned = ref(false)
 const tagsSectionOpen = ref(true)
 const tagsExpanded = ref(false)
-const collectionsOpen = ref(true)
 const statusMenuOpen = ref(false)
 const sortMenuOpen = ref(false)
+const colMenuOpen = ref(false)
 let hideTimer: number | null = null
 
 const activeSortOption = computed(() => getSortOption(store.sortBy))
@@ -42,13 +42,28 @@ function statusFilterCount(key: ActiveStatusFilter): number {
 function toggleStatusMenu() {
   const next = !statusMenuOpen.value
   statusMenuOpen.value = next
-  if (next) sortMenuOpen.value = false
+  if (next) {
+    sortMenuOpen.value = false
+    colMenuOpen.value = false
+  }
 }
 
 function toggleSortMenu() {
   const next = !sortMenuOpen.value
   sortMenuOpen.value = next
-  if (next) statusMenuOpen.value = false
+  if (next) {
+    statusMenuOpen.value = false
+    colMenuOpen.value = false
+  }
+}
+
+function toggleColMenu() {
+  const next = !colMenuOpen.value
+  colMenuOpen.value = next
+  if (next) {
+    statusMenuOpen.value = false
+    sortMenuOpen.value = false
+  }
 }
 
 function pickSortMode(key: LibrarySortBy) {
@@ -69,13 +84,17 @@ function closeMenusOnOutsideClick(e: MouseEvent) {
   if (!target?.closest('.sb-progress-wrap')) {
     statusMenuOpen.value = false
   }
+  if (!target?.closest('.sb-col-filter-wrap')) {
+    colMenuOpen.value = false
+  }
 }
 
 function handleDropdownKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
-  if (statusMenuOpen.value || sortMenuOpen.value) {
+  if (statusMenuOpen.value || sortMenuOpen.value || colMenuOpen.value) {
     statusMenuOpen.value = false
     sortMenuOpen.value = false
+    colMenuOpen.value = false
     e.preventDefault()
     e.stopImmediatePropagation()
   }
@@ -101,6 +120,7 @@ watch(sidebarVisible, (visible) => {
   if (!visible) {
     statusMenuOpen.value = false
     sortMenuOpen.value = false
+    colMenuOpen.value = false
   }
 })
 
@@ -159,14 +179,17 @@ function pickTag(tag: string) {
 
 function pickCollection(collectionId: number | null) {
   store.setActiveCollection(collectionId)
+  colMenuOpen.value = false
 }
 
-async function handleDeleteCollection(col: CollectionItem) {
-  try {
-    await store.deleteCollection(col.id)
-  } catch (err) {
-    store.notify(err instanceof Error ? err.message : '删除分组失败', 'error')
-  }
+function openCreateCollectionFromMenu() {
+  colMenuOpen.value = false
+  store.openCreateCollectionModal()
+}
+
+function openEditCollectionFromMenu(col: CollectionItem) {
+  colMenuOpen.value = false
+  store.openEditCollectionModal(col.id)
 }
 
 function statusDotClass(status: string) {
@@ -414,27 +437,78 @@ function statusDotClass(status: string) {
       </div>
     </div>
 
-    <!-- 游戏库：自定义分组（与回廊双向同步） + 当前作品列表 -->
+    <!-- 游戏库：精简标题栏（按合集筛选浮层 + 排序）+ 作品列表 -->
     <div class="sb-games-wrap">
       <div class="sb-section-head">
-        <button class="sb-collapse-head" @click="collectionsOpen = !collectionsOpen">
-          <span class="sb-section-label">游戏库</span>
-          <svg
-            v-if="store.collections.length > 0"
-            class="collapse-chevron"
-            :class="{ rotated: collectionsOpen }"
-            viewBox="0 0 16 16"
-            width="12"
-            height="12"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-          >
-            <path d="M6 4l4 4-4 4" />
-          </svg>
-        </button>
+        <span class="sb-section-label">游戏库</span>
         <div class="sb-head-right">
           <span class="sb-list-count tabular-nums">{{ store.filteredGames.length }}</span>
+
+          <!-- 按合集筛选小图标浮层（默认收起，不占垂直空间） -->
+          <div class="sb-col-filter-wrap">
+            <button
+              type="button"
+              class="sb-add-col-btn"
+              :class="{ active: colMenuOpen || store.activeCollectionId !== null }"
+              :title="store.activeCollection ? `已按合集筛选：${store.activeCollection.name}` : '按系列合集筛选'"
+              aria-label="按合集筛选"
+              @click.stop="toggleColMenu"
+            >
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M2.5 5.2 8 2.5l5.5 2.7L8 8 2.5 5.2Z" stroke-linejoin="round" />
+                <path d="M2.5 8.4 8 11.1l5.5-2.7" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M2.5 11.4 8 14.1l5.5-2.7" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+
+            <Transition name="fade">
+              <div v-if="colMenuOpen" class="sb-sort-menu sb-col-menu" @click.stop>
+                <button
+                  type="button"
+                  class="sb-sort-item"
+                  :class="{ active: store.activeCollectionId === null }"
+                  @click="pickCollection(null)"
+                >
+                  <span>全部作品</span>
+                  <span class="sb-col-menu-count tabular-nums">{{ store.games.length }}</span>
+                </button>
+
+                <template v-if="store.collections.length > 0">
+                  <div class="sb-sort-divider" />
+                  <div class="sb-col-menu-list">
+                    <div
+                      v-for="col in store.collections"
+                      :key="col.id"
+                      class="sb-sort-item sb-col-menu-row"
+                      :class="{ active: store.activeCollectionId === col.id }"
+                      @click="pickCollection(col.id)"
+                    >
+                      <span class="sb-col-menu-name" :title="col.name">{{ col.name }}</span>
+                      <span class="sb-col-menu-right">
+                        <button
+                          type="button"
+                          class="sb-col-edit-mini"
+                          title="编辑合集"
+                          @click.stop="openEditCollectionFromMenu(col)"
+                        >
+                          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6">
+                            <path d="M11.2 2.8l2 2-7.4 7.4-2.6.6.6-2.6 7.4-7.4z" stroke-linejoin="round" />
+                          </svg>
+                        </button>
+                        <span class="sb-col-menu-count tabular-nums">{{ col.total_count ?? col.game_ids.length }}</span>
+                      </span>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="sb-sort-divider" />
+                <button type="button" class="sb-sort-item sb-sort-flip" @click="openCreateCollectionFromMenu">
+                  <span>+ 新建合集</span>
+                </button>
+              </div>
+            </Transition>
+          </div>
+
           <div class="sb-sort-wrap">
             <button
               type="button"
@@ -472,60 +546,24 @@ function statusDotClass(status: string) {
               </div>
             </Transition>
           </div>
-          <button
-            class="sb-add-col-btn"
-            title="新建回廊分组"
-            aria-label="新建分组"
-            @click="store.openCreateCollectionModal()"
-          >
-            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M8 3.2v9.6M3.2 8h9.6" stroke-linecap="round" />
-            </svg>
-          </button>
         </div>
       </div>
 
-      <!-- 无边框分组切换列表 -->
-      <div v-if="collectionsOpen && store.collections.length > 0" class="col-nav-list">
-        <button
-          class="col-nav-item"
-          :class="{ active: store.activeCollectionId === null }"
-          @click="pickCollection(null)"
-        >
-          <span class="col-nav-name">全部藏品</span>
-          <span class="nav-count tabular-nums">{{ store.games.length }}</span>
-        </button>
-
-        <div
-          v-for="col in store.collections"
-          :key="col.id"
-          class="col-nav-item"
-          :class="{ active: store.activeCollectionId === col.id }"
-          @click="pickCollection(col.id)"
-        >
-          <span class="col-nav-name" :title="col.name">{{ col.name }}</span>
-          <div class="col-row-actions">
-            <button
-              class="col-micro-btn"
-              title="重命名或管理成员"
-              @click.stop="store.openEditCollectionModal(col.id)"
-            >
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6">
-                <path d="M11.2 2.8l2 2-7.4 7.4-2.6.6.6-2.6 7.4-7.4z" stroke-linejoin="round" />
-              </svg>
-            </button>
-            <button
-              class="col-micro-btn danger"
-              title="删除分组（保留游戏）"
-              @click.stop="handleDeleteCollection(col)"
-            >
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6">
-                <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke-linecap="round" />
-              </svg>
-            </button>
-          </div>
-          <span class="nav-count col-count tabular-nums">{{ col.game_ids.length }}</span>
-        </div>
+      <!-- 仅当选中某合集时，在作品列表顶部显示可一键清除的小筛选标签 -->
+      <div v-if="store.activeCollection" class="sb-active-col-bar">
+        <span class="sb-active-col-chip" :title="store.activeCollection.name">
+          <span class="sb-active-col-tag">合集</span>
+          <span class="sb-active-col-name">{{ store.activeCollection.name }}</span>
+          <button
+            type="button"
+            class="sb-active-col-clear"
+            aria-label="清除合集筛选"
+            title="清除合集筛选"
+            @click="pickCollection(null)"
+          >
+            ×
+          </button>
+        </span>
       </div>
 
       <div class="sb-game-list">
@@ -1294,71 +1332,29 @@ function statusDotClass(status: string) {
   color: var(--text-primary);
 }
 
-/* Custom Collections List inside Game Library */
-.col-nav-list {
+/* Compact Collection Filter Popover & Active Chip */
+.sb-col-filter-wrap {
+  position: relative;
+}
+
+.sb-col-menu {
+  min-width: 192px;
+  max-width: 230px;
+}
+
+.sb-col-menu-list {
+  max-height: 200px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 118px;
-  overflow-y: auto;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--divider-subtle);
 }
 
-.col-nav-item {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 10px 6px 12px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12.5px;
+.sb-col-menu-row {
   cursor: pointer;
-  text-align: left;
-  transition:
-    background-color var(--duration-fast) var(--ease-out-expo),
-    color var(--duration-fast) var(--ease-out-expo);
 }
 
-.col-nav-item::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--active-bar);
-  opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out-expo);
-}
-
-.col-nav-item:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.048);
-  color: var(--text-primary);
-}
-
-.col-nav-item.active {
-  background: rgba(255, 255, 255, 0.125);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-  color: #ffffff;
-  font-weight: 500;
-}
-
-.col-nav-item.active:hover {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.col-nav-item.active::before {
-  opacity: 1;
-}
-
-.col-nav-name {
+.sb-col-menu-name {
   flex: 1;
   min-width: 0;
   white-space: nowrap;
@@ -1366,18 +1362,91 @@ function statusDotClass(status: string) {
   text-overflow: ellipsis;
 }
 
-.col-row-actions {
-  display: none;
+.sb-col-menu-right {
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
-.col-nav-item:hover .col-row-actions {
+.sb-col-menu-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sb-col-edit-mini {
+  display: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  align-items: center;
+  justify-content: center;
+}
+
+.sb-col-menu-row:hover .sb-col-edit-mini {
   display: inline-flex;
 }
 
-.col-nav-item:hover .col-count {
-  display: none;
+.sb-col-edit-mini:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+}
+
+.sb-active-col-bar {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 2px;
+}
+
+.sb-active-col-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 6px 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.sb-active-col-tag {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.sb-active-col-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.sb-active-col-clear {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sb-active-col-clear:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
 }
 
 .col-micro-btn {
