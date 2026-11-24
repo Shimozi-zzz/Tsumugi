@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.db.database import get_db
 from backend.db.models import Game
+from backend.services.backup_service import create_auto_snapshot
 from backend.services.importers import (
     DuplicateStrategy,
     ExternalSourceApp,
@@ -20,6 +22,7 @@ from backend.services.importers import (
     get_importer,
 )
 
+logger = logging.getLogger("tsumugi.api.import_external")
 router = APIRouter(prefix="/api/import/external", tags=["ExternalImport"])
 
 
@@ -117,6 +120,12 @@ async def execute_external_library_import(
         }
 
     chosen = [c for c in candidates if c.external_id in selected_set]
+    if chosen:
+        try:
+            await asyncio.to_thread(create_auto_snapshot, tag="pre_import", force=True)
+        except Exception as exc:
+            logger.warning("Pre-import safety snapshot skipped: %s", exc)
+
     summary = await execute_external_import(
         db=db,
         candidates=chosen,

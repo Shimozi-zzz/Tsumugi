@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { assetUrl, statsApi } from '@/api/client'
+import { assetUrl, fallbackToOriginalImage, mediaThumbUrl, statsApi } from '@/api/client'
 import JourneyCollagePanel from '@/components/JourneyCollagePanel.vue'
 import { useLibraryStore } from '@/stores/library'
 import type { LedgerHeatmapDay, TimeLedgerResponse } from '@/types'
@@ -411,9 +411,12 @@ onBeforeUnmount(() => {
                 <div class="row-thumb">
                   <img
                     v-if="g.cover_thumb_path"
-                    :src="assetUrl(g.cover_thumb_path, store.assetVersion)"
+                    :src="mediaThumbUrl(g.cover_thumb_path, 'sm', store.assetVersion)"
                     :class="{ 'privacy-blur-img': isGameBlurred(g.is_nsfw) }"
                     alt=""
+                    loading="lazy"
+                    decoding="async"
+                    @error="fallbackToOriginalImage($event, assetUrl(g.cover_thumb_path, store.assetVersion))"
                   />
                   <span v-else>{{ g.title.slice(0, 1) }}</span>
                 </div>
@@ -455,9 +458,12 @@ onBeforeUnmount(() => {
                 <div class="row-thumb">
                   <img
                     v-if="s.cover_thumb_path"
-                    :src="assetUrl(s.cover_thumb_path, store.assetVersion)"
+                    :src="mediaThumbUrl(s.cover_thumb_path, 'sm', store.assetVersion)"
                     :class="{ 'privacy-blur-img': isGameBlurred(s.is_nsfw) }"
                     alt=""
+                    loading="lazy"
+                    decoding="async"
+                    @error="fallbackToOriginalImage($event, assetUrl(s.cover_thumb_path, store.assetVersion))"
                   />
                   <span v-else>{{ s.title.slice(0, 1) }}</span>
                 </div>

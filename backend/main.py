@@ -1,11 +1,13 @@
+import asyncio
 from contextlib import asynccontextmanager
+import logging
 import mimetypes
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api import (
@@ -27,8 +29,13 @@ from backend.core.config import (
     ensure_data_dirs,
 )
 from backend.core.os_adapter import os_adapter
-from backend.db.database import get_db, init_db
+from backend.db.database import AsyncSessionLocal, get_db, init_db
+from backend.db.models import GameMediaPath
+from backend.services.backup_service import create_auto_snapshot
 from backend.services.process_tracker import process_tracker
+from backend.services.thumbnail_service import prewarm_cover_thumbnails
+
+logger = logging.getLogger("tsumugi.main")
 
 # 屏蔽 Windows 注册表 MIME 污染（避免 .js 被识别为 text/plain 导致 WebView2 拒绝执行 ES Module 黑屏）
 mimetypes.init()
@@ -47,12 +54,48 @@ for _ext, _mime in (
 ensure_data_dirs()
 
 
+async def _background_prewarm_thumbnails() -> None:
+    """后台低优先级预热现有游戏库本地封面的 sm (360px) WebP 缩略图，避免阻塞启动"""
+    try:
+        await asyncio.sleep(0.35)
+        async with AsyncSessionLocal() as session:
+            rows = (
+                await session.execute(
+                    select(GameMediaPath.cover_path).where(GameMediaPath.cover_path != "")
+                )
+            ).scalars().all()
+        cover_paths = [str(p).strip() for p in rows if p and str(p).strip()]
+        if not cover_paths:
+            return
+        stats = await asyncio.to_thread(prewarm_cover_thumbnails, cover_paths, size="sm")
+        logger.info("Background thumbnail prewarm finished: %s", stats)
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        logger.debug("Background thumbnail prewarm skipped: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # 启动完成后按 10 分钟节流策略自动执行 SQLite 在线热备快照（最多保留 5 份）
+    try:
+        snap = await asyncio.to_thread(create_auto_snapshot, tag="auto", force=False)
+        if snap:
+            logger.info("Startup SQLite auto-snapshot created: %s", snap["filename"])
+    except Exception as exc:
+        logger.warning("Startup SQLite auto-snapshot skipped: %s", exc)
+
+    prewarm_task = asyncio.create_task(_background_prewarm_thumbnails())
     try:
         yield
     finally:
+        if not prewarm_task.done():
+            prewarm_task.cancel()
+            try:
+                await prewarm_task
+            except asyncio.CancelledError:
+                pass
         # 应用关闭时强制落盘尚未写入的游玩时长
         await process_tracker.shutdown_flush()
 

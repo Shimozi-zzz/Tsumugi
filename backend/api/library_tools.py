@@ -1,4 +1,6 @@
+import asyncio
 from collections import Counter
+import logging
 import os
 from pathlib import Path
 import string
@@ -27,6 +29,7 @@ from backend.scrapers.aggregator import MetadataAggregator
 from backend.scrapers.base import normalize_platform_badge
 from backend.services.asset_downloader import download_game_assets
 from backend.services.backup_service import (
+    create_auto_snapshot,
     create_save_backup,
     delete_save_backup,
     list_save_backups,
@@ -36,6 +39,7 @@ from backend.services.batch_scanner import scan_game_directory
 from backend.services.media_service import generate_pinyin_initials
 from backend.services.process_tracker import process_tracker
 
+logger = logging.getLogger("tsumugi.api.library_tools")
 router = APIRouter(prefix="/api/library", tags=["LibraryTools"])
 
 
@@ -99,6 +103,11 @@ async def batch_import_games(
     """批量导入扫描出的本地游戏（支持可选自动并发刮削元数据与视觉资产）"""
     if not payload.items:
         return {"imported_count": 0, "games": []}
+
+    try:
+        await asyncio.to_thread(create_auto_snapshot, tag="pre_import", force=True)
+    except Exception as exc:
+        logger.warning("Pre-batch-import safety snapshot skipped: %s", exc)
 
     settings_rows = (await db.execute(select(AppStateSetting))).scalars().all()
     cfg = {**DEFAULT_SETTINGS, **{row.key: row.value for row in settings_rows}}

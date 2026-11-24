@@ -46,6 +46,12 @@ HIDDEN_IMPORTS = [
     "backend.services.importers.litedb_v4",
     "backend.services.importers.playnite",
     "backend.services.importers.vnite",
+    "backend.services.thumbnail_service",
+    "backend.services.backup_service",
+    "PIL",
+    "PIL.Image",
+    "PIL.ImageOps",
+    "PIL.WebPImagePlugin",
     "cramjam",
 ]
 
@@ -90,6 +96,8 @@ def main() -> None:
         "clr_loader",
         "--collect-all",
         "pythonnet",
+        "--collect-all",
+        "PIL",
         "--collect-all",
         "cramjam",
     ]

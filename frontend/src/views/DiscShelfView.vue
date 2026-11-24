@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { assetUrl, mediaApi, thumbUrl } from '@/api/client'
+import { assetUrl, fallbackToOriginalImage, mediaApi, mediaThumbUrl, thumbUrl } from '@/api/client'
 import BindExeModal from '@/components/BindExeModal.vue'
 import PhonographPill from '@/components/PhonographPill.vue'
 import { useAudioStore } from '@/stores/audio'
@@ -396,13 +396,21 @@ function devAbbrev(dev: string): string {
 function coverThumb(game: Game): string {
   const m = game.media
   if (!m) return ''
-  return assetUrl(m.cover_thumb_path || m.cover_path, store.assetVersion)
+  const raw = m.cover_path || m.cover_thumb_path
+  return raw ? mediaThumbUrl(raw, 'sm', store.assetVersion) : ''
+}
+
+function coverOriginalUrl(game: Game): string {
+  const m = game.media
+  if (!m) return ''
+  return assetUrl(m.cover_path || m.cover_thumb_path, store.assetVersion)
 }
 
 function spineTextureUrl(game: Game): string {
   const m = game.media
   if (!m) return ''
-  return assetUrl(m.custom_spine_path || m.cover_thumb_path || m.cover_path, store.assetVersion)
+  const raw = m.custom_spine_path || m.cover_path || m.cover_thumb_path
+  return raw ? mediaThumbUrl(raw, 'sm', store.assetVersion) : ''
 }
 
 // ─────────────── 联动氛围墙背景解析逻辑 ───────────────
@@ -431,12 +439,12 @@ const activeBackdropUrl = computed(() => {
   const g = currentGame.value
   if (!g?.media) return ''
   if (g.media.hero_bg_path) {
-    return thumbUrl(g.media.hero_bg_path, 960, store.assetVersion)
+    return mediaThumbUrl(g.media.hero_bg_path, 'md', store.assetVersion)
   }
   const ss = linkedScreenshotMap.value[g.id]
   if (ss) return ss
   const fallbackCover = g.media.cover_path || g.media.cover_thumb_path
-  return fallbackCover ? assetUrl(fallbackCover, store.assetVersion) : ''
+  return fallbackCover ? mediaThumbUrl(fallbackCover, 'md', store.assetVersion) : ''
 })
 
 const floorReflectionImg = computed(() => {
@@ -928,8 +936,10 @@ onBeforeUnmount(() => {
                 :src="coverThumb(entry.game)"
                 :alt="entry.game.title"
                 :class="{ 'privacy-blur-img': store.shouldBlurGame(entry.game) }"
+                loading="lazy"
                 decoding="async"
                 draggable="false"
+                @error="fallbackToOriginalImage($event, coverOriginalUrl(entry.game))"
               />
               <div v-else class="front-fallback">
                 <span>{{ entry.game.title }}</span>
@@ -987,10 +997,12 @@ onBeforeUnmount(() => {
                   <img
                     v-if="entry.game.media?.logo_path"
                     v-img-fade
-                    :src="assetUrl(entry.game.media.logo_path, store.assetVersion)"
+                    :src="mediaThumbUrl(entry.game.media.logo_path, 'sm', store.assetVersion)"
                     :alt="entry.game.title"
                     class="spine-mini-logo"
+                    loading="lazy"
                     decoding="async"
+                    @error="fallbackToOriginalImage($event, assetUrl(entry.game.media.logo_path, store.assetVersion))"
                   />
                   <span v-else class="spine-vertical-text">{{ entry.game.title }}</span>
                 </div>

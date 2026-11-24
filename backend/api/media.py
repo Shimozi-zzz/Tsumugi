@@ -15,14 +15,13 @@ from sqlalchemy.orm import selectinload
 from backend.core.config import DATA_DIR, WALLPAPERS_DIR
 from backend.core.os_adapter import os_adapter
 from backend.db.database import get_db
-from backend.db.models import AppStateSetting, Game
+from backend.db.models import AppStateSetting, Game, GameMediaPath
 from backend.schemas import GameOut
 from backend.scrapers.asset_search import search_asset_candidates
 from backend.services.media_service import (
     build_media_proxy_headers,
     delete_local_media_cache,
     format_download_error_zh,
-    get_or_create_thumbnail,
     is_hls_response,
     is_remote_http_url,
     normalize_steam_media_https,
@@ -32,6 +31,10 @@ from backend.services.media_service import (
     validate_proxy_target_url,
 )
 from backend.services.task_manager import task_manager
+from backend.services.thumbnail_service import (
+    get_or_create_webp_thumbnail,
+    invalidate_thumbnails_for_path,
+)
 
 logger = logging.getLogger("tsumugi.api.media")
 router = APIRouter(prefix="/api/media", tags=["Media"])
@@ -163,8 +166,15 @@ async def upload_game_asset(
         raise HTTPException(status_code=400, detail=f"文件解析或保存失败: {exc}")
 
     target_field = ASSET_FIELD_MAP[asset_type]
+    old_path = (getattr(game.media, target_field, "") or "").strip()
     setattr(game.media, target_field, saved["path"])
+    if old_path:
+        invalidate_thumbnails_for_path(old_path)
+    if saved.get("path"):
+        invalidate_thumbnails_for_path(saved["path"])
     if asset_type == "cover":
+        if game.media.cover_thumb_path:
+            invalidate_thumbnails_for_path(game.media.cover_thumb_path)
         game.media.cover_thumb_path = saved.get("thumb_path", "")
     elif asset_type == "pv":
         game.media.pv_mode = "download"
@@ -285,17 +295,54 @@ async def cache_remote_media_to_local(
 @router.get("/thumb")
 @router.get("/thumbnail")
 async def stream_thumbnail(
-    path: str = Query(..., description="data/ 下的相对路径或本地截图绝对路径"),
-    width: int = Query(360, ge=80, le=1200),
+    path: str = Query(..., description="DATA_DIR 允许图片目录内的相对路径或 /static/data/... 资产 URL"),
+    size: Literal["sm", "md"] | None = Query(None, description="预设缩略图规格: sm (360px) / md (720px)"),
+    width: int | None = Query(None, ge=80, le=1200, description="兼容旧版自定义宽度参数"),
+    db: AsyncSession = Depends(get_db),
 ):
-    """按需生成并返回 WebP 缩略图（同时兼容 /thumb 与 /thumbnail）"""
+    """
+    按需生成并返回 WebP 缩略图（同时兼容 /thumb 与 /thumbnail）：
+    - 严格限制路径在 DATA_DIR 允许的图片目录（assets / wallpapers）及已登记游戏截图目录内，防目录穿越；
+    - 命中 DATA_DIR/thumbs/ 直接返回并附带 1 年 immutable 强缓存头；
+    - 未命中时在线程池中实时生成并落盘；源文件损坏或非支持格式时安全降级返回原文件。
+    """
+    extra_roots: list[Path] | None = None
+    cleaned_raw = (path or "").strip()
+    if cleaned_raw and Path(cleaned_raw).is_absolute():
+        rows = (
+            await db.execute(
+                select(GameMediaPath.screenshot_dir).where(GameMediaPath.screenshot_dir != "")
+            )
+        ).scalars().all()
+        extra_roots = [_resolve_data_path(r) for r in rows if r and str(r).strip()]
+
     try:
-        thumb_path = get_or_create_thumbnail(path, width=width)
+        out_path, is_generated_thumb = await asyncio.to_thread(
+            get_or_create_webp_thumbnail,
+            path,
+            size=size,
+            width=width,
+            extra_allowed_roots=extra_roots,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"缩略图生成失败: {exc}")
-    return FileResponse(thumb_path, media_type="image/webp")
+
+    if is_generated_thumb:
+        return FileResponse(
+            out_path,
+            media_type="image/webp",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+    return FileResponse(
+        out_path,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get("/raw")

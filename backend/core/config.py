@@ -31,8 +31,10 @@ GITHUB_REPO: str = os.getenv("TSUMUGI_GITHUB_REPO", "Shimozi-zzz/Tsumugi")
 DB_PATH: Path = DATA_DIR / "tsumugi.db"
 SETTINGS_JSON_PATH: Path = DATA_DIR / "settings.json"
 ASSETS_DIR: Path = DATA_DIR / "assets"
+THUMBS_DIR: Path = DATA_DIR / "thumbs"
 THUMBS_CACHE_DIR: Path = DATA_DIR / "cache" / "thumbs"
 BACKUPS_DIR: Path = DATA_DIR / "backups"
+AUTO_BACKUPS_DIR: Path = BACKUPS_DIR / "auto"
 WALLPAPERS_DIR: Path = DATA_DIR / "wallpapers"
 
 DATABASE_URL: str = f"sqlite+aiosqlite:///{DB_PATH.as_posix()}"
@@ -40,5 +42,13 @@ DATABASE_URL: str = f"sqlite+aiosqlite:///{DB_PATH.as_posix()}"
 
 def ensure_data_dirs() -> None:
     """确保所有本地可写数据子目录存在"""
-    for directory in (DATA_DIR, ASSETS_DIR, THUMBS_CACHE_DIR, BACKUPS_DIR, WALLPAPERS_DIR):
+    for directory in (
+        DATA_DIR,
+        ASSETS_DIR,
+        THUMBS_DIR,
+        THUMBS_CACHE_DIR,
+        BACKUPS_DIR,
+        AUTO_BACKUPS_DIR,
+        WALLPAPERS_DIR,
+    ):
         directory.mkdir(parents=True, exist_ok=True)

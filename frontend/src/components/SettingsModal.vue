@@ -2,6 +2,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   isDesktopBridgeAvailable,
+  pickBackupOpenPath,
+  pickBackupSavePath,
   pickNativeFile,
   scraperApi,
   systemApi,
@@ -15,6 +17,7 @@ import {
 import { useLibraryStore } from '@/stores/library'
 import type {
   AppVersionInfo,
+  AutoSnapshotItem,
   BangumiMeResponse,
   ScraperSettingsResponse,
   ScraperTestResponse,
@@ -149,11 +152,31 @@ const versionInfo = ref<AppVersionInfo | null>(null)
 const checkingUpdate = ref(false)
 const updateResult = ref<UpdateCheckResponse | null>(null)
 
-// 运行环境存储治理状态
+// 运行环境存储治理与备份恢复状态
 const storageLoading = ref(false)
 const storageStats = ref<StorageUsageResponse | null>(null)
 const cleaningStorage = ref(false)
+const clearingThumbs = ref(false)
 const convertingWebp = ref(false)
+
+// 整库一键备份、恢复与自动快照回滚状态
+const includeVideosInBackup = ref(false)
+const exportingBackup = ref(false)
+const restoringBackup = ref(false)
+const snapshotsExpanded = ref(true)
+const backupFileInputRef = ref<HTMLInputElement | null>(null)
+
+interface PendingRestoreConfirmation {
+  kind: 'zip-path' | 'zip-file' | 'snapshot'
+  title: string
+  targetLabel: string
+  detail: string
+  path?: string
+  file?: File
+  snapshotFilename?: string
+}
+
+const pendingRestoreConfirm = ref<PendingRestoreConfirmation | null>(null)
 
 const sourceLinks = computed<Record<string, string | undefined>>(() => ({
   ...DEFAULT_SOURCE_LINKS,
@@ -230,7 +253,7 @@ function formatBytes(bytes: number): string {
 }
 
 interface StorageSegment {
-  key: keyof Pick<StorageUsageResponse, 'videos' | 'audios' | 'images' | 'backups' | 'database' | 'orphans'>
+  key: 'database' | 'images' | 'videos' | 'audios' | 'thumbs' | 'backups' | 'orphans'
   label: string
   color: string
   bytes: number
@@ -243,11 +266,12 @@ const storageSegments = computed<StorageSegment[]>(() => {
   if (!st) return []
   const total = Math.max(st.total_bytes, 1)
   const defs: { key: StorageSegment['key']; label: string; color: string }[] = [
+    { key: 'database', label: '数据库', color: '#a1a1aa' },
+    { key: 'images', label: '封面与背景图', color: '#c49a5c' },
     { key: 'videos', label: '宣传片视频', color: '#6088b8' },
     { key: 'audios', label: '主题曲音频', color: '#4f9c88' },
-    { key: 'images', label: '图片资产', color: '#c49a5c' },
-    { key: 'backups', label: '存档备份', color: '#7b8794' },
-    { key: 'database', label: '数据库', color: '#a1a1aa' },
+    { key: 'thumbs', label: '缩略图缓存', color: '#8f7cc4' },
+    { key: 'backups', label: '备份与快照', color: '#7b8794' },
     { key: 'orphans', label: '残留文件', color: '#b56565' },
   ]
   return defs.map((d) => {
@@ -261,10 +285,40 @@ const storageSegments = computed<StorageSegment[]>(() => {
   })
 })
 
+const thumbsCacheBytes = computed(() => {
+  const st = storageStats.value
+  if (!st) return 0
+  return st.thumbs_bytes ?? st.thumbs?.bytes ?? 0
+})
+
+const localAvCacheBytes = computed(() => {
+  const st = storageStats.value
+  if (!st) return 0
+  const v = st.videos_bytes ?? st.videos?.bytes ?? 0
+  const a = st.audios_bytes ?? st.audios?.bytes ?? 0
+  return v + a
+})
+
+const autoSnapshots = computed<AutoSnapshotItem[]>(() => storageStats.value?.snapshots || [])
+
 const hasReleasableOrphans = computed(() => {
   const o = storageStats.value?.orphans
   return Boolean(o && (o.bytes > 0 || o.files > 0 || (o.dirs || 0) > 0))
 })
+
+function formatSnapshotTime(iso?: string): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+function buildDefaultBackupName(): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `Tsumugi-Backup-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.zip`
+}
 
 function formatReleaseDate(iso?: string): string {
   if (!iso) return ''
@@ -327,6 +381,138 @@ async function handleCleanupOrphans() {
   }
 }
 
+async function handleClearThumbs() {
+  if (clearingThumbs.value) return
+  clearingThumbs.value = true
+  try {
+    const res = await systemApi.clearThumbs()
+    store.notify(
+      res.deleted_files > 0
+        ? `已清理 ${res.deleted_files} 个缩略图缓存，释放 ${formatBytes(res.freed_bytes)}`
+        : '当前缩略图缓存为空',
+      res.deleted_files > 0 ? 'success' : 'info',
+    )
+    store.bumpAssetVersion()
+    await loadStorageStats()
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '清理缩略图缓存失败', 'error')
+  } finally {
+    clearingThumbs.value = false
+  }
+}
+
+async function handleExportLibraryBackup() {
+  if (exportingBackup.value) return
+  exportingBackup.value = true
+  try {
+    if (hasDesktopBridge) {
+      const targetPath = await pickBackupSavePath(buildDefaultBackupName())
+      if (targetPath !== null) {
+        if (!targetPath) return
+        const res = await systemApi.exportBackupToPath(includeVideosInBackup.value, targetPath)
+        store.notify(
+          `整库备份已导出：${res.filename}（${formatBytes(res.size_bytes)}）`,
+          'success',
+        )
+        return
+      }
+    }
+    const dl = await systemApi.downloadBackupZip(includeVideosInBackup.value)
+    store.notify(`整库备份已导出：${dl.filename}（${formatBytes(dl.size_bytes)}）`, 'success')
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '导出整库备份失败', 'error')
+  } finally {
+    exportingBackup.value = false
+  }
+}
+
+async function handleChooseRestoreBackup() {
+  if (restoringBackup.value) return
+  if (hasDesktopBridge) {
+    const selected = await pickBackupOpenPath()
+    if (selected !== null) {
+      if (!selected) return
+      const displayName = selected.split(/[\\/]/).pop() || selected
+      pendingRestoreConfirm.value = {
+        kind: 'zip-path',
+        title: '确认从整库备份恢复？',
+        targetLabel: displayName,
+        detail: '恢复前会自动为当前游戏库留存安全快照，恢复后将刷新界面并重新加载数据。',
+        path: selected,
+      }
+      return
+    }
+  }
+  backupFileInputRef.value?.click()
+}
+
+function onBackupFileSelected(e: Event) {
+  const input = e.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (input) input.value = ''
+  if (!file) return
+  pendingRestoreConfirm.value = {
+    kind: 'zip-file',
+    title: '确认从整库备份恢复？',
+    targetLabel: file.name,
+    detail: '恢复前会自动为当前游戏库留存安全快照，恢复后将刷新界面并重新加载数据。',
+    file,
+  }
+}
+
+function requestSnapshotRollback(snap: AutoSnapshotItem) {
+  if (restoringBackup.value) return
+  pendingRestoreConfirm.value = {
+    kind: 'snapshot',
+    title: '确认回滚到此数据库快照？',
+    targetLabel: `${snap.filename}（${formatSnapshotTime(snap.created_at)}）`,
+    detail: '回滚前会自动为当前游戏库留存安全快照，回滚完成后将立即刷新界面数据。',
+    snapshotFilename: snap.filename,
+  }
+}
+
+async function confirmPendingRestore() {
+  const pending = pendingRestoreConfirm.value
+  if (!pending || restoringBackup.value) return
+  restoringBackup.value = true
+  try {
+    if (pending.kind === 'zip-path' && pending.path) {
+      const res = await systemApi.restoreBackupFromPath(pending.path)
+      store.notify(
+        res.safety_snapshot
+          ? `整库已恢复（已自动留存快照 ${res.safety_snapshot}）`
+          : '整库已恢复完成',
+        'success',
+      )
+    } else if (pending.kind === 'zip-file' && pending.file) {
+      const res = await systemApi.restoreBackupFromFile(pending.file)
+      store.notify(
+        res.safety_snapshot
+          ? `整库已恢复（已自动留存快照 ${res.safety_snapshot}）`
+          : '整库已恢复完成',
+        'success',
+      )
+    } else if (pending.kind === 'snapshot' && pending.snapshotFilename) {
+      const res = await systemApi.restoreSnapshot(pending.snapshotFilename)
+      store.notify(
+        res.safety_snapshot
+          ? `已回滚至 ${res.filename}（已留存当前快照 ${res.safety_snapshot}）`
+          : `已回滚至 ${res.filename}`,
+        'success',
+      )
+    }
+
+    pendingRestoreConfirm.value = null
+    await store.initialize()
+    store.bumpAssetVersion()
+    await loadStorageStats()
+  } catch (err) {
+    store.notify(err instanceof Error ? err.message : '恢复失败，原数据未受影响', 'error')
+  } finally {
+    restoringBackup.value = false
+  }
+}
+
 async function handleConvertWebp() {
   if (convertingWebp.value) return
   convertingWebp.value = true
@@ -356,9 +542,7 @@ watch(
     if (sec === 'sources') {
       void loadScraperSettings()
     } else if (sec === 'data') {
-      if (!storageStats.value) {
-        void loadStorageStats()
-      }
+      void loadStorageStats()
     } else if (sec === 'environment') {
       if (!versionInfo.value) {
         void loadVersionInfo()
@@ -1085,6 +1269,28 @@ async function saveAll() {
                     </div>
                   </div>
 
+                  <!-- 维护操作 0：清理缩略图缓存 -->
+                  <div class="group-row action-row">
+                    <div class="toggle-text">
+                      <div class="row-title">缩略图缓存</div>
+                      <div class="row-desc tabular-nums">
+                        {{
+                          storageStats
+                            ? `当前占用 ${formatBytes(thumbsCacheBytes)}，清理后将在浏览时自动按需重建`
+                            : '独立的 WebP 缩略图缓存，可随时清空重建'
+                        }}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :disabled="clearingThumbs || (Boolean(storageStats) && thumbsCacheBytes === 0)"
+                      @click="handleClearThumbs"
+                    >
+                      {{ clearingThumbs ? '清理中…' : '清理缩略图缓存' }}
+                    </button>
+                  </div>
+
                   <!-- 维护操作 1：清理残留文件 -->
                   <div class="group-row action-row">
                     <div class="toggle-text">
@@ -1122,6 +1328,110 @@ async function saveAll() {
                       @click="handleConvertWebp"
                     >
                       {{ convertingWebp ? '转换中…' : '开始转换' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 整库一键备份与恢复 -->
+              <div class="group-block">
+                <div class="group-label">整库备份与恢复</div>
+                <div class="grouped-card">
+                  <label class="group-row backup-check-row">
+                    <div class="backup-check-left">
+                      <input
+                        v-model="includeVideosInBackup"
+                        type="checkbox"
+                        class="backup-checkbox"
+                      />
+                      <div class="toggle-text">
+                        <div class="row-title">同时包含本地 PV/OP 影音缓存</div>
+                        <div class="row-desc tabular-nums">
+                          默认仅打包数据库、配置与封面/背景图片（当前本地影音缓存约 {{ formatBytes(localAvCacheBytes) }}）
+                        </div>
+                      </div>
+                    </div>
+                  </label>
+
+                  <div class="group-row backup-actions-row">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-primary"
+                      :disabled="exportingBackup || restoringBackup"
+                      @click="handleExportLibraryBackup"
+                    >
+                      {{ exportingBackup ? '正在打包导出…' : '导出整库备份 (.zip)' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :disabled="exportingBackup || restoringBackup"
+                      @click="handleChooseRestoreBackup"
+                    >
+                      {{ restoringBackup ? '正在恢复…' : '从备份恢复 (.zip)' }}
+                    </button>
+                    <input
+                      ref="backupFileInputRef"
+                      type="file"
+                      accept=".zip,application/zip"
+                      class="sr-only-input"
+                      @change="onBackupFileSelected"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <!-- 自动数据库快照回滚 -->
+              <div class="group-block">
+                <div class="group-label-row">
+                  <span class="group-label">自动数据库快照</span>
+                  <button
+                    type="button"
+                    class="snap-collapse-btn tabular-nums"
+                    @click="snapshotsExpanded = !snapshotsExpanded"
+                  >
+                    <span>{{ autoSnapshots.length }} 份</span>
+                    <svg
+                      class="snap-chevron"
+                      :class="{ open: snapshotsExpanded }"
+                      viewBox="0 0 16 16"
+                      width="12"
+                      height="12"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                    >
+                      <path d="M4.5 6.5 8 10l3.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div v-if="snapshotsExpanded" class="grouped-card">
+                  <div v-if="autoSnapshots.length === 0" class="group-row snap-empty-row">
+                    <span class="row-desc">暂无自动快照（应用启动与恢复/导入前会自动使用 SQLite 在线热备生成）</span>
+                  </div>
+                  <div
+                    v-for="snap in autoSnapshots"
+                    :key="snap.filename"
+                    class="group-row snap-item-row"
+                  >
+                    <div class="snap-meta">
+                      <div class="snap-top-line">
+                        <span class="snap-time tabular-nums">{{ formatSnapshotTime(snap.created_at) }}</span>
+                        <span class="snap-tag" :class="`tag-${snap.tag}`">{{ snap.tag_label }}</span>
+                      </div>
+                      <div class="snap-sub tabular-nums">
+                        <span class="snap-filename" :title="snap.filename">{{ snap.filename }}</span>
+                        <span class="snap-size">{{ formatBytes(snap.size_bytes) }}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :disabled="restoringBackup"
+                      @click="requestSnapshotRollback(snap)"
+                    >
+                      回滚
                     </button>
                   </div>
                 </div>
@@ -1262,12 +1572,44 @@ async function saveAll() {
           </div>
         </div>
       </div>
+
+      <!-- 恢复 / 快照回滚二次确认框 -->
+      <div
+        v-if="pendingRestoreConfirm"
+        class="restore-confirm-overlay"
+        @click.self="!restoringBackup && (pendingRestoreConfirm = null)"
+      >
+        <div class="restore-confirm-card" role="alertdialog" aria-modal="true">
+          <div class="restore-confirm-title">{{ pendingRestoreConfirm.title }}</div>
+          <div class="restore-confirm-target">{{ pendingRestoreConfirm.targetLabel }}</div>
+          <p class="restore-confirm-desc">{{ pendingRestoreConfirm.detail }}</p>
+          <div class="restore-confirm-actions">
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost"
+              :disabled="restoringBackup"
+              @click="pendingRestoreConfirm = null"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-danger"
+              :disabled="restoringBackup"
+              @click="confirmPendingRestore"
+            >
+              {{ restoringBackup ? '正在恢复…' : '确认恢复' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .settings-window {
+  position: relative;
   width: 760px;
   max-width: calc(100vw - 48px);
   height: 540px;
@@ -1990,6 +2332,205 @@ async function saveAll() {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+/* Backup & Snapshot Cards */
+.backup-check-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+.backup-check-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.backup-checkbox {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  accent-color: #f5f5f7;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.backup-actions-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sr-only-input {
+  display: none;
+}
+
+.group-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 4px;
+}
+
+.snap-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: color var(--duration-fast) var(--ease-out-expo), background-color var(--duration-fast) var(--ease-out-expo);
+}
+
+.snap-collapse-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.snap-chevron {
+  transition: transform var(--duration-fast) var(--ease-out-expo);
+}
+
+.snap-chevron.open {
+  transform: rotate(180deg);
+}
+
+.snap-empty-row {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.snap-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.snap-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.snap-top-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.snap-time {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.snap-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.snap-tag.tag-pre_restore {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--amber-text);
+}
+
+.snap-tag.tag-pre_import {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--emerald-text);
+}
+
+.snap-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.snap-filename {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+
+.snap-size {
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+/* Secondary Restore Confirmation Dialog */
+.restore-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(4, 4, 6, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.restore-confirm-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 20px 22px;
+  border-radius: 14px;
+  background: rgba(20, 20, 25, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.restore-confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.restore-confirm-target {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--amber-text);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 8px;
+  padding: 7px 10px;
+  word-break: break-all;
+}
+
+.restore-confirm-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.restore-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 /* Environment Rows */

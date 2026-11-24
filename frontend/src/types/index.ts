@@ -74,6 +74,8 @@ export interface Game {
   created_at: string
   media: GameMediaPath | null
   play_record: PlayRecord | null
+  cover_thumb_url?: string
+  background_thumb_url?: string
 }
 
 export interface GameCreatePayload {
@@ -520,15 +522,73 @@ export interface StorageBucket {
   dirs?: number
 }
 
+export interface AutoSnapshotItem {
+  filename: string
+  created_at: string
+  size_bytes: number
+  tag: 'auto' | 'pre_restore' | 'pre_import' | string
+  tag_label: string
+}
+
 export interface StorageUsageResponse {
   videos: StorageBucket
   audios: StorageBucket
   images: StorageBucket
+  thumbs?: StorageBucket
   backups: StorageBucket
   database: StorageBucket
   orphans: StorageBucket
   total_bytes: number
   total_files: number
+  db_bytes?: number
+  images_bytes?: number
+  videos_bytes?: number
+  audios_bytes?: number
+  thumbs_bytes?: number
+  backups_bytes?: number
+  snapshots?: AutoSnapshotItem[]
+}
+
+export interface ClearThumbsResponse {
+  cleared: boolean
+  deleted_files: number
+  freed_bytes: number
+}
+
+export interface LibraryBackupManifest {
+  app?: string
+  app_version?: string
+  backup_version?: number
+  created_at?: string
+  game_count?: number
+  include_videos?: boolean
+  files_count?: number
+}
+
+export interface LibraryBackupExportResponse {
+  exported: boolean
+  filename: string
+  path: string
+  size_bytes: number
+  file_count: number
+  manifest: LibraryBackupManifest
+}
+
+export interface LibraryBackupRestoreResponse {
+  restored: boolean
+  safety_snapshot: string | null
+  manifest?: LibraryBackupManifest
+  removed_sidecars?: string[]
+  restored_assets?: number
+  cleared_thumbs?: number
+}
+
+export interface SnapshotRestoreResponse {
+  restored: boolean
+  filename: string
+  safety_snapshot: string | null
+  removed_sidecars?: string[]
+  cleared_thumbs?: number
 }
 
 export interface StorageCleanupResponse {

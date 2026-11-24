@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ApiError, assetUrl, gamesApi, libraryApi, mediaApi, thumbUrl } from '@/api/client'
+import {
+  ApiError,
+  assetUrl,
+  fallbackToOriginalImage,
+  gamesApi,
+  libraryApi,
+  mediaApi,
+  rawImageUrl,
+  thumbUrl,
+} from '@/api/client'
 import BangumiBindModal from '@/components/BangumiBindModal.vue'
 import BindExeModal from '@/components/BindExeModal.vue'
 import LightboxModal from '@/components/LightboxModal.vue'
@@ -717,11 +726,12 @@ async function handleSyncBangumi() {
               >
                 <img
                   v-img-fade
-                  :src="thumbUrl(ss.path, 420)"
+                  :src="thumbUrl(ss.path, 'sm')"
                   :alt="ss.name"
                   :class="{ 'privacy-blur-img': blurred }"
                   loading="lazy"
                   decoding="async"
+                  @error="fallbackToOriginalImage($event, rawImageUrl(ss.path))"
                 />
               </button>
             </div>

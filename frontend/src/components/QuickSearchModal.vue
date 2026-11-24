@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { assetUrl } from '@/api/client'
+import { assetUrl, fallbackToOriginalImage, mediaThumbUrl } from '@/api/client'
 import { useLibraryStore } from '@/stores/library'
 import { normalizePlatformBadge } from '@/utils/platform'
 
@@ -94,10 +94,13 @@ onMounted(async () => {
         >
           <div class="qs-cover">
             <img
-              v-if="g.media?.cover_thumb_path || g.media?.cover_path"
-              :src="assetUrl(g.media.cover_thumb_path || g.media.cover_path, store.assetVersion)"
+              v-if="g.media?.cover_path || g.media?.cover_thumb_path"
+              :src="mediaThumbUrl(g.media?.cover_path || g.media?.cover_thumb_path, 'sm', store.assetVersion)"
               :class="{ 'privacy-blur-img': store.shouldBlurGame(g) }"
               alt=""
+              loading="lazy"
+              decoding="async"
+              @error="fallbackToOriginalImage($event, assetUrl(g.media?.cover_path || g.media?.cover_thumb_path, store.assetVersion))"
             />
             <span v-else>{{ g.title.slice(0, 1) }}</span>
           </div>

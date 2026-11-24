@@ -1,16 +1,21 @@
+import asyncio
 import logging
 import os
 from pathlib import Path
 import re
 import shutil
+import tempfile
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 import httpx
 from PIL import Image
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.background import BackgroundTask
 
 from backend.api.settings import DEFAULT_SETTINGS, SOURCE_TOKEN_LINKS
 from backend.core.config import (
@@ -20,6 +25,7 @@ from backend.core.config import (
     DATA_DIR,
     GITHUB_REPO,
     THUMBS_CACHE_DIR,
+    THUMBS_DIR,
     WALLPAPERS_DIR,
 )
 from backend.core.scraper_settings import (
@@ -27,12 +33,21 @@ from backend.core.scraper_settings import (
     mask_scraper_settings_for_client,
     save_scraper_settings,
 )
-from backend.db.database import get_db
+from backend.db.database import engine, get_db, init_db
 from backend.db.models import AppStateSetting, Game
 from backend.schemas import ScraperSettingsUpdateRequest
 from backend.scrapers.manager import ScraperManager
+from backend.services.backup_service import (
+    default_backup_zip_filename,
+    export_library_backup_zip,
+    list_auto_snapshots,
+    restore_database_from_snapshot,
+    restore_library_from_zip,
+)
 from backend.services.media_service import convert_image_to_webp, generate_cover_thumbnail
+from backend.services.process_tracker import process_tracker
 from backend.services.task_manager import task_manager
+from backend.services.thumbnail_service import clear_thumbnail_cache
 
 logger = logging.getLogger("tsumugi.api.system")
 
@@ -151,13 +166,14 @@ async def update_scraper_settings_endpoint(
 
 @router.get("/storage")
 async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    """递归扫描 DATA_DIR 并结合数据库有效 game_id，精确统计各分类磁盘占用"""
+    """递归扫描 DATA_DIR 并结合数据库有效 game_id，精确统计各分类磁盘占用与自动快照列表"""
     valid_game_ids = await _load_valid_game_ids(db)
 
     buckets: dict[str, dict[str, int]] = {
         "videos": {"bytes": 0, "files": 0},
         "audios": {"bytes": 0, "files": 0},
         "images": {"bytes": 0, "files": 0},
+        "thumbs": {"bytes": 0, "files": 0},
         "backups": {"bytes": 0, "files": 0},
         "database": {"bytes": 0, "files": 0},
         "orphans": {"bytes": 0, "files": 0, "dirs": 0},
@@ -168,6 +184,8 @@ async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any
     data_root = DATA_DIR.resolve()
     assets_root = ASSETS_DIR.resolve()
     backups_root = BACKUPS_DIR.resolve()
+    thumbs_root = THUMBS_DIR.resolve()
+    legacy_thumbs_root = THUMBS_CACHE_DIR.resolve()
     cache_root = (DATA_DIR / "cache").resolve()
     wallpapers_root = WALLPAPERS_DIR.resolve()
 
@@ -189,7 +207,7 @@ async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any
         fname = fpath.name
         suffix = fpath.suffix.lower()
 
-        # 1. 存档备份目录
+        # 1. 存档备份与数据库自动快照目录
         if resolved.is_relative_to(backups_root):
             buckets["backups"]["bytes"] += size
             buckets["backups"]["files"] += 1
@@ -197,7 +215,19 @@ async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any
             total_files += 1
             return
 
-        # 2. SQLite 数据库及 WAL / SHM 文件
+        # 2. 独立 WebP 缩略图缓存目录（DATA_DIR/thumbs 与旧版 data/cache/thumbs）
+        if resolved.is_relative_to(thumbs_root) or resolved.is_relative_to(legacy_thumbs_root):
+            if _is_temp_artifact(fpath):
+                buckets["orphans"]["bytes"] += size
+                buckets["orphans"]["files"] += 1
+            else:
+                buckets["thumbs"]["bytes"] += size
+                buckets["thumbs"]["files"] += 1
+            total_bytes += size
+            total_files += 1
+            return
+
+        # 3. SQLite 数据库及 WAL / SHM 文件
         if resolved.parent == data_root and fname.startswith("tsumugi.db"):
             buckets["database"]["bytes"] += size
             buckets["database"]["files"] += 1
@@ -205,7 +235,7 @@ async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any
             total_files += 1
             return
 
-        # 3. 孤儿游戏资产目录（数据库中已无对应 game_id）
+        # 4. 孤儿游戏资产目录（数据库中已无对应 game_id）
         if resolved.is_relative_to(assets_root):
             rel_assets = resolved.relative_to(assets_root)
             if len(rel_assets.parts) >= 2 and rel_assets.parts[0] not in valid_game_ids:
@@ -215,7 +245,7 @@ async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any
                 total_files += 1
                 return
 
-        # 4. 残留下载临时文件（.part / .downloading.* / .tmp / .ytdl）
+        # 5. 残留下载临时文件（.part / .downloading.* / .tmp / .ytdl）
         if _is_temp_artifact(fpath):
             buckets["orphans"]["bytes"] += size
             buckets["orphans"]["files"] += 1
@@ -223,7 +253,7 @@ async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any
             total_files += 1
             return
 
-        # 5. 无效缓存文件
+        # 6. 无效缓存文件
         if resolved.is_relative_to(cache_root) and suffix not in IMAGE_EXTS:
             buckets["orphans"]["bytes"] += size
             buckets["orphans"]["files"] += 1
@@ -231,7 +261,7 @@ async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any
             total_files += 1
             return
 
-        # 6. 正常媒体分类
+        # 7. 正常媒体分类
         if suffix in VIDEO_EXTS:
             buckets["videos"]["bytes"] += size
             buckets["videos"]["files"] += 1
@@ -253,8 +283,8 @@ async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any
         for db_file in data_root.glob("tsumugi.db*"):
             _record_file(db_file)
 
-    # 仅扫描 Tsumugi 自身管理的媒体/缓存/备份目录（避免误扫外部残留目录）
-    for managed_dir in (assets_root, backups_root, cache_root, wallpapers_root):
+    # 仅扫描 Tsumugi 自身管理的媒体/缩略图/缓存/备份目录（避免误扫外部残留目录）
+    for managed_dir in (assets_root, backups_root, thumbs_root, cache_root, wallpapers_root):
         if not managed_dir.exists() or not managed_dir.is_dir():
             continue
         for root_str, _dirs, files in os.walk(managed_dir):
@@ -262,10 +292,19 @@ async def get_storage_usage(db: AsyncSession = Depends(get_db)) -> dict[str, Any
             for fname in files:
                 _record_file(root_path / fname)
 
+    snapshots = list_auto_snapshots()
+
     return {
         **buckets,
         "total_bytes": total_bytes,
         "total_files": total_files,
+        "db_bytes": buckets["database"]["bytes"],
+        "images_bytes": buckets["images"]["bytes"],
+        "videos_bytes": buckets["videos"]["bytes"],
+        "audios_bytes": buckets["audios"]["bytes"],
+        "thumbs_bytes": buckets["thumbs"]["bytes"],
+        "backups_bytes": buckets["backups"]["bytes"],
+        "snapshots": snapshots,
     }
 
 
@@ -455,6 +494,170 @@ async def convert_existing_assets_to_webp(db: AsyncSession = Depends(get_db)) ->
         "saved_bytes": max(0, net_saved_bytes),
         "skipped_count": skipped_count,
     }
+
+
+# ──────────────────── 3.5 缩略图缓存清理 & 整库一键备份/恢复/自动快照 ────────────────────
+
+
+class LibraryBackupExportRequest(BaseModel):
+    include_videos: bool = False
+    target_path: str = ""
+
+
+class SnapshotRestoreRequest(BaseModel):
+    filename: str
+
+
+def _safe_unlink_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+@router.post("/cache/clear-thumbs")
+async def clear_thumbs_cache_endpoint() -> dict[str, Any]:
+    """一键清空 DATA_DIR/thumbs/（含旧版缓存）全部缩略图，后续访问时自动按需重建"""
+    stats = await asyncio.to_thread(clear_thumbnail_cache)
+    return {"cleared": True, **stats}
+
+
+@router.post("/backup/export")
+async def export_full_library_backup(
+    payload: LibraryBackupExportRequest | None = None,
+):
+    """
+    整库一键导出 (.zip)：
+    - 若传入 target_path（桌面端经原生文件保存框选定路径），直接原子落盘并返回 JSON 摘要；
+    - 否则（浏览器环境）流式返回 FileResponse 触发附件下载，完成后自动清理临时包。
+    """
+    include_videos = bool(payload.include_videos) if payload else False
+    target_raw = (payload.target_path or "").strip() if payload else ""
+
+    if target_raw:
+        if "\x00" in target_raw:
+            raise HTTPException(status_code=400, detail="无效的导出路径")
+        dest = Path(target_raw).expanduser()
+        if dest.suffix.lower() != ".zip":
+            dest = dest.with_suffix(".zip")
+        try:
+            summary = await asyncio.to_thread(
+                export_library_backup_zip,
+                dest,
+                include_videos=include_videos,
+            )
+            return summary
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except Exception as exc:
+            logger.exception("Full library export to %s failed: %s", dest, exc)
+            raise HTTPException(status_code=500, detail=f"导出整库备份失败: {exc}")
+
+    download_name = default_backup_zip_filename()
+    fd, tmp_name = tempfile.mkstemp(prefix="tsumugi_export_", suffix=".zip")
+    os.close(fd)
+    tmp_zip = Path(tmp_name)
+
+    try:
+        await asyncio.to_thread(
+            export_library_backup_zip,
+            tmp_zip,
+            include_videos=include_videos,
+        )
+    except FileNotFoundError as exc:
+        _safe_unlink_file(tmp_zip)
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        _safe_unlink_file(tmp_zip)
+        logger.exception("Full library streaming export failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"导出整库备份失败: {exc}")
+
+    return FileResponse(
+        tmp_zip,
+        media_type="application/zip",
+        filename=download_name,
+        background=BackgroundTask(_safe_unlink_file, tmp_zip),
+    )
+
+
+@router.post("/backup/restore")
+async def restore_full_library_backup(request: Request) -> dict[str, Any]:
+    """
+    整库安全恢复：
+    - 支持桌面端 JSON {"source_path": "..."} 直读本地 .zip，也支持浏览器 multipart/form-data 上传 .zip；
+    - 故意不注入 AsyncSession 依赖，确保恢复期间可通过 await engine.dispose() 彻底释放 Windows SQLite 文件锁。
+    """
+    content_type = (request.headers.get("content-type") or "").lower()
+    tmp_upload: Path | None = None
+    zip_path: Path | None = None
+
+    try:
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            upload = form.get("file")
+            source_field = str(form.get("source_path") or "").strip()
+            if upload is not None and hasattr(upload, "read"):
+                fd, tmp_name = tempfile.mkstemp(prefix="tsumugi_upload_", suffix=".zip")
+                os.close(fd)
+                tmp_upload = Path(tmp_name)
+                with tmp_upload.open("wb") as out_f:
+                    while True:
+                        chunk = await upload.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        out_f.write(chunk)
+                zip_path = tmp_upload
+            elif source_field:
+                zip_path = Path(source_field).expanduser()
+        else:
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            source_path = str((body or {}).get("source_path") or "").strip()
+            if source_path:
+                zip_path = Path(source_path).expanduser()
+
+        if zip_path is None:
+            raise HTTPException(status_code=400, detail="请提供备份文件路径或上传 .zip 备份文件")
+
+        if process_tracker.is_running:
+            await process_tracker.shutdown_flush()
+
+        result = await restore_library_from_zip(
+            zip_path,
+            dispose_engine=engine.dispose,
+            reinit_db=init_db,
+        )
+        return result
+    except HTTPException:
+        raise
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Full library restore failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"恢复整库备份失败: {exc}")
+    finally:
+        if tmp_upload is not None:
+            _safe_unlink_file(tmp_upload)
+
+
+@router.post("/backup/restore-snapshot")
+async def restore_auto_snapshot_endpoint(payload: SnapshotRestoreRequest) -> dict[str, Any]:
+    """按文件名回滚 DATA_DIR/backups/auto/ 下的指定自动数据库快照（回滚前自动保存 pre_restore 保护快照）"""
+    try:
+        if process_tracker.is_running:
+            await process_tracker.shutdown_flush()
+        return await restore_database_from_snapshot(
+            payload.filename,
+            dispose_engine=engine.dispose,
+            reinit_db=init_db,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Snapshot rollback failed for %s: %s", payload.filename, exc)
+        raise HTTPException(status_code=500, detail=f"回滚数据库快照失败: {exc}")
 
 
 # ──────────────────── 4. 版本信息与 GitHub Releases 检查更新 ────────────────────

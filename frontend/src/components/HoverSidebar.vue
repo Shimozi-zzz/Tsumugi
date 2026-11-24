@@ -1,10 +1,23 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { assetUrl } from '@/api/client'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { assetUrl, fallbackToOriginalImage, mediaThumbUrl } from '@/api/client'
 import { useLibraryStore } from '@/stores/library'
 import type { ActiveStatusFilter, CollectionItem, LibrarySortBy } from '@/types'
 import { normalizePlatformBadge } from '@/utils/platform'
 import { getSortOption, SORT_OPTIONS } from '@/utils/sortGames'
+
+interface StatusFilterOption {
+  key: ActiveStatusFilter
+  label: string
+  dotClass: string
+}
+
+const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
+  { key: 'all', label: '全部作品', dotClass: 'dot-all' },
+  { key: 'playing', label: '攻略中', dotClass: 'status-dot-playing' },
+  { key: 'completed', label: '已通关', dotClass: 'status-dot-done' },
+  { key: 'unplayed', label: '未开始', dotClass: 'status-dot-todo' },
+]
 
 const store = useLibraryStore()
 
@@ -13,10 +26,30 @@ const isPinned = ref(false)
 const tagsSectionOpen = ref(true)
 const tagsExpanded = ref(false)
 const collectionsOpen = ref(true)
+const statusMenuOpen = ref(false)
 const sortMenuOpen = ref(false)
 let hideTimer: number | null = null
 
 const activeSortOption = computed(() => getSortOption(store.sortBy))
+const activeStatusOption = computed(
+  () => STATUS_FILTER_OPTIONS.find((opt) => opt.key === store.activeStatus) ?? STATUS_FILTER_OPTIONS[0],
+)
+
+function statusFilterCount(key: ActiveStatusFilter): number {
+  return store.statusCounts[key] ?? 0
+}
+
+function toggleStatusMenu() {
+  const next = !statusMenuOpen.value
+  statusMenuOpen.value = next
+  if (next) sortMenuOpen.value = false
+}
+
+function toggleSortMenu() {
+  const next = !sortMenuOpen.value
+  sortMenuOpen.value = next
+  if (next) statusMenuOpen.value = false
+}
 
 function pickSortMode(key: LibrarySortBy) {
   store.setSort(key)
@@ -28,22 +61,48 @@ function flipSortOrder() {
   sortMenuOpen.value = false
 }
 
-function closeSortOnOutsideClick(e: MouseEvent) {
+function closeMenusOnOutsideClick(e: MouseEvent) {
   const target = e.target as HTMLElement | null
   if (!target?.closest('.sb-sort-wrap')) {
     sortMenuOpen.value = false
   }
+  if (!target?.closest('.sb-progress-wrap')) {
+    statusMenuOpen.value = false
+  }
+}
+
+function handleDropdownKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (statusMenuOpen.value || sortMenuOpen.value) {
+    statusMenuOpen.value = false
+    sortMenuOpen.value = false
+    e.preventDefault()
+    e.stopImmediatePropagation()
+  }
 }
 
 onMounted(() => {
-  window.addEventListener('click', closeSortOnOutsideClick)
+  window.addEventListener('click', closeMenusOnOutsideClick)
+  window.addEventListener('keydown', handleDropdownKeydown, true)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('click', closeSortOnOutsideClick)
+  if (hideTimer !== null) {
+    clearTimeout(hideTimer)
+    hideTimer = null
+  }
+  window.removeEventListener('click', closeMenusOnOutsideClick)
+  window.removeEventListener('keydown', handleDropdownKeydown, true)
 })
 
 const sidebarVisible = computed(() => isOpen.value || isPinned.value)
+
+watch(sidebarVisible, (visible) => {
+  if (!visible) {
+    statusMenuOpen.value = false
+    sortMenuOpen.value = false
+  }
+})
 
 const displayedTags = computed(() => {
   const limit = tagsExpanded.value ? 24 : 6
@@ -88,6 +147,7 @@ function openLedger() {
 
 function pickStatus(st: ActiveStatusFilter) {
   store.setActiveStatus(st)
+  statusMenuOpen.value = false
 }
 
 function pickTag(tag: string) {
@@ -231,57 +291,82 @@ function statusDotClass(status: string) {
       </div>
     </nav>
 
-    <!-- 攻略进度 -->
-    <div class="sb-section">
+    <!-- 攻略进度（单行紧凑毛玻璃下拉选择器） -->
+    <div class="sb-section sb-progress-section">
       <div class="sb-section-label">进度</div>
-      <div class="nav-list">
+      <div class="sb-progress-wrap">
         <button
-          class="nav-item"
-          :class="{ active: store.activeStatus === 'all' }"
-          @click="pickStatus('all')"
+          type="button"
+          class="sb-progress-trigger"
+          :class="{ open: statusMenuOpen }"
+          :aria-expanded="statusMenuOpen"
+          aria-haspopup="listbox"
+          aria-label="筛选攻略进度"
+          @click.stop="toggleStatusMenu"
         >
-          <span class="nav-item-left">
-            <span class="status-dot dot-all" />
-            <span>全部作品</span>
+          <span class="sb-progress-left">
+            <span class="status-dot" :class="activeStatusOption.dotClass" />
+            <span class="sb-progress-label">{{ activeStatusOption.label }}</span>
           </span>
-          <span class="nav-count tabular-nums">{{ store.statusCounts.all }}</span>
+          <span class="sb-progress-right">
+            <span class="sb-progress-badge tabular-nums">{{ statusFilterCount(activeStatusOption.key) }}</span>
+            <svg
+              class="sb-progress-chevron"
+              :class="{ rotated: statusMenuOpen }"
+              viewBox="0 0 16 16"
+              width="12"
+              height="12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              aria-hidden="true"
+            >
+              <path d="M4.2 6.2 8 10l3.8-3.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
         </button>
 
-        <button
-          class="nav-item"
-          :class="{ active: store.activeStatus === 'playing' }"
-          @click="pickStatus('playing')"
-        >
-          <span class="nav-item-left">
-            <span class="status-dot status-dot-playing" />
-            <span>攻略中</span>
-          </span>
-          <span class="nav-count tabular-nums">{{ store.statusCounts.playing }}</span>
-        </button>
-
-        <button
-          class="nav-item"
-          :class="{ active: store.activeStatus === 'completed' }"
-          @click="pickStatus('completed')"
-        >
-          <span class="nav-item-left">
-            <span class="status-dot status-dot-done" />
-            <span>已通关</span>
-          </span>
-          <span class="nav-count tabular-nums">{{ store.statusCounts.completed }}</span>
-        </button>
-
-        <button
-          class="nav-item"
-          :class="{ active: store.activeStatus === 'unplayed' }"
-          @click="pickStatus('unplayed')"
-        >
-          <span class="nav-item-left">
-            <span class="status-dot status-dot-todo" />
-            <span>未开始</span>
-          </span>
-          <span class="nav-count tabular-nums">{{ store.statusCounts.unplayed }}</span>
-        </button>
+        <Transition name="dropdown-pop">
+          <div
+            v-if="statusMenuOpen"
+            class="sb-progress-menu"
+            role="listbox"
+            aria-label="攻略进度选项"
+            @click.stop
+          >
+            <button
+              v-for="opt in STATUS_FILTER_OPTIONS"
+              :key="opt.key"
+              type="button"
+              role="option"
+              class="sb-progress-option"
+              :class="{ active: store.activeStatus === opt.key }"
+              :aria-selected="store.activeStatus === opt.key"
+              @click="pickStatus(opt.key)"
+            >
+              <span class="sb-progress-left">
+                <span class="status-dot" :class="opt.dotClass" />
+                <span>{{ opt.label }}</span>
+              </span>
+              <span class="sb-progress-option-right">
+                <span class="sb-progress-option-count tabular-nums">{{ statusFilterCount(opt.key) }}</span>
+                <span class="sb-progress-check" aria-hidden="true">
+                  <svg
+                    v-if="store.activeStatus === opt.key"
+                    viewBox="0 0 16 16"
+                    width="12"
+                    height="12"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M3.5 8.4 6.6 11.4 12.6 4.8" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </span>
+              </span>
+            </button>
+          </div>
+        </Transition>
       </div>
     </div>
 
@@ -357,7 +442,7 @@ function statusDotClass(status: string) {
               :class="{ active: sortMenuOpen }"
               :title="`排序：${activeSortOption.label}（${store.sortOrder === 'asc' ? '升序' : '降序'}）`"
               aria-label="切换排序方式"
-              @click.stop="sortMenuOpen = !sortMenuOpen"
+              @click.stop="toggleSortMenu"
             >
               <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.65">
                 <path d="M2.5 4.5h11M4.5 8h7M6.5 11.5h3" stroke-linecap="round" />
@@ -453,13 +538,14 @@ function statusDotClass(status: string) {
         >
           <div class="sb-game-thumb">
             <img
-              v-if="g.media?.cover_thumb_path || g.media?.cover_path"
+              v-if="g.media?.cover_path || g.media?.cover_thumb_path"
               v-img-fade
-              :src="assetUrl(g.media.cover_thumb_path || g.media.cover_path, store.assetVersion)"
+              :src="mediaThumbUrl(g.media?.cover_path || g.media?.cover_thumb_path, 'sm', store.assetVersion)"
               :class="{ 'privacy-blur-img': store.shouldBlurGame(g) }"
               alt=""
               loading="lazy"
               decoding="async"
+              @error="fallbackToOriginalImage($event, assetUrl(g.media?.cover_path || g.media?.cover_thumb_path, store.assetVersion))"
             />
             <span v-else class="sb-thumb-fallback">{{ g.title.slice(0, 1) }}</span>
           </div>
@@ -589,8 +675,8 @@ function statusDotClass(status: string) {
   z-index: 60;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: calc(20px + var(--titlebar-safe-top, 0px)) 14px 16px;
+  gap: 12px;
+  padding: calc(18px + var(--titlebar-safe-top, 0px)) 14px 16px;
   background: var(--bg-acrylic);
   backdrop-filter: var(--backdrop-acrylic);
   -webkit-backdrop-filter: var(--backdrop-acrylic);
@@ -810,15 +896,20 @@ function statusDotClass(status: string) {
     color var(--duration-fast) var(--ease-out-expo);
 }
 
-.sb-sort-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+.sb-sort-item:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.055);
   color: var(--text-primary);
 }
 
 .sb-sort-item.active {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
   color: #f5f5f7;
   font-weight: 500;
+}
+
+.sb-sort-item.active:hover {
+  background: rgba(255, 255, 255, 0.17);
 }
 
 .sb-sort-flip {
@@ -915,20 +1006,212 @@ function statusDotClass(status: string) {
     transform var(--duration-fast) var(--ease-out-expo);
 }
 
-.nav-item:hover {
-  background: var(--surface-hover);
+.nav-item:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.048);
   color: var(--text-primary);
 }
 
 .nav-item.active {
-  background: var(--surface-active);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.125);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  color: #ffffff;
   font-weight: 500;
+}
+
+.nav-item.active:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .nav-item.active::before {
   opacity: 1;
   transform: scaleY(1);
+}
+
+/* Compact Glassmorphic Progress Dropdown */
+.sb-progress-wrap {
+  position: relative;
+}
+
+.sb-progress-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px 0 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    border-color var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-fast) var(--ease-out-expo);
+}
+
+.sb-progress-trigger:hover {
+  background: rgba(255, 255, 255, 0.085);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.sb-progress-trigger.open {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 6px 20px rgba(0, 0, 0, 0.28);
+}
+
+.sb-progress-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sb-progress-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sb-progress-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sb-progress-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.sb-progress-chevron {
+  color: var(--text-muted);
+  transition:
+    transform var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
+}
+
+.sb-progress-trigger:hover .sb-progress-chevron,
+.sb-progress-trigger.open .sb-progress-chevron {
+  color: var(--text-primary);
+}
+
+.sb-progress-chevron.rotated {
+  transform: rotate(180deg);
+}
+
+.sb-progress-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 75;
+  padding: 5px;
+  border-radius: 11px;
+  background: rgba(16, 16, 20, 0.94);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sb-progress-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px 7px 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 450;
+  text-align: left;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
+}
+
+.sb-progress-option:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text-primary);
+}
+
+.sb-progress-option.active {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.sb-progress-option.active:hover {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.sb-progress-option-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sb-progress-option-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sb-progress-option.active .sb-progress-option-count {
+  color: var(--text-primary);
+}
+
+.sb-progress-check {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+}
+
+.dropdown-pop-enter-active,
+.dropdown-pop-leave-active {
+  transition:
+    opacity 150ms var(--ease-out-expo),
+    transform 150ms var(--ease-out-expo);
+  transform-origin: top center;
+}
+
+.dropdown-pop-enter-from,
+.dropdown-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.985);
 }
 
 .nav-item-left {
@@ -1055,15 +1338,20 @@ function statusDotClass(status: string) {
   transition: opacity var(--duration-fast) var(--ease-out-expo);
 }
 
-.col-nav-item:hover {
-  background: var(--surface-hover);
+.col-nav-item:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.048);
   color: var(--text-primary);
 }
 
 .col-nav-item.active {
-  background: var(--surface-active);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.125);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  color: #ffffff;
   font-weight: 500;
+}
+
+.col-nav-item.active:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .col-nav-item.active::before {
@@ -1164,12 +1452,17 @@ function statusDotClass(status: string) {
     transform var(--duration-fast) var(--ease-out-expo);
 }
 
-.sb-game-item:hover {
-  background: var(--surface-hover);
+.sb-game-item:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.048);
 }
 
 .sb-game-item.active {
-  background: var(--surface-active);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.075);
+}
+
+.sb-game-item.active:hover {
+  background: rgba(255, 255, 255, 0.145);
 }
 
 .sb-game-item.active::before {

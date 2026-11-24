@@ -9,6 +9,7 @@ import type {
   BangumiSyncResponse,
   BatchImportItemPayload,
   BatchScanCandidate,
+  ClearThumbsResponse,
   CollectionItem,
   ConvertWebpResponse,
   DownloadTasksResponse,
@@ -22,6 +23,8 @@ import type {
   GameUpdatePayload,
   HealthInfo,
   JourneyCollageResponse,
+  LibraryBackupExportResponse,
+  LibraryBackupRestoreResponse,
   MediaSaveMode,
   MetadataDetailResponse,
   MetadataSearchResponse,
@@ -44,6 +47,7 @@ import type {
   ScraperSourceDescriptor,
   ScraperTestResponse,
   ScreenshotItem,
+  SnapshotRestoreResponse,
   StorageCleanupResponse,
   StorageUsageResponse,
   TimeLedgerResponse,
@@ -102,9 +106,44 @@ export function assetUrl(relOrUrl?: string | null, cacheBust?: string | number):
   return cacheBust ? `${base}?v=${cacheBust}` : base
 }
 
-export function thumbUrl(path: string, width = 400, cacheBust?: string | number): string {
-  const base = `/api/media/thumb?path=${encodeURIComponent(path)}&width=${width}`
+export function thumbUrl(path: string, width: number | 'sm' | 'md' = 'sm', cacheBust?: string | number): string {
+  const sizeParam =
+    width === 'sm' || width === 'md'
+      ? `size=${width}`
+      : `width=${width}`
+  const base = `/api/media/thumb?path=${encodeURIComponent(path)}&${sizeParam}`
   return cacheBust ? `${base}&v=${cacheBust}` : base
+}
+
+export function mediaThumbUrl(
+  relOrUrl?: string | null,
+  size: 'sm' | 'md' = 'sm',
+  cacheBust?: string | number,
+): string {
+  if (!relOrUrl) return ''
+  const trimmed = relOrUrl.trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+    return trimmed
+  }
+  const clean = trimmed
+    .split('#', 1)[0]
+    .split('?', 1)[0]
+    .replace(/^\/?static\/data\//, '')
+    .replace(/^\/+/, '')
+  if (!clean) return ''
+  const base = `/api/media/thumb?path=${encodeURIComponent(clean)}&size=${size}`
+  return cacheBust ? `${base}&v=${cacheBust}` : base
+}
+
+export function fallbackToOriginalImage(event: Event, originalSrc?: string | null): void {
+  const img = event.target as HTMLImageElement | null
+  if (!img || img.dataset.thumbFallbackDone === '1') return
+  img.dataset.thumbFallbackDone = '1'
+  const fallback = (originalSrc || '').trim()
+  if (fallback && img.getAttribute('src') !== fallback) {
+    img.src = fallback
+  }
 }
 
 export function rawImageUrl(path: string): string {
@@ -161,6 +200,43 @@ export async function pickNativeFolder(title?: string): Promise<string | null> {
   }
 }
 
+export async function pickBackupSavePath(defaultName?: string): Promise<string | null> {
+  const fn = window.pywebview?.api?.select_backup_save_path
+  if (!fn) return null
+  try {
+    return (await fn(defaultName)) || ''
+  } catch {
+    return null
+  }
+}
+
+export async function pickBackupOpenPath(): Promise<string | null> {
+  const fn = window.pywebview?.api?.select_backup_open_path
+  if (!fn) return null
+  try {
+    return (await fn()) || ''
+  } catch {
+    return null
+  }
+}
+
+function _parseDownloadFilename(contentDisposition: string | null, fallback: string): string {
+  if (!contentDisposition) return fallback
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;\n]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim().replace(/^["']|["']$/g, ''))
+    } catch {
+      // ignore malformed encoding
+    }
+  }
+  const plainMatch = contentDisposition.match(/filename=([^;\n]+)/i)
+  if (plainMatch?.[1]) {
+    return plainMatch[1].trim().replace(/^["']|["']$/g, '') || fallback
+  }
+  return fallback
+}
+
 export const systemApi = {
   health: () => request<HealthInfo>('/api/health'),
   version: () => request<AppVersionInfo>('/api/system/version'),
@@ -170,6 +246,65 @@ export const systemApi = {
     request<StorageCleanupResponse>('/api/system/storage/cleanup', { method: 'POST' }),
   convertWebp: () =>
     request<ConvertWebpResponse>('/api/system/storage/convert-webp', { method: 'POST' }),
+  clearThumbs: () =>
+    request<ClearThumbsResponse>('/api/system/cache/clear-thumbs', { method: 'POST' }),
+  exportBackupToPath: (includeVideos: boolean, targetPath: string) =>
+    request<LibraryBackupExportResponse>('/api/system/backup/export', {
+      method: 'POST',
+      body: JSON.stringify({ include_videos: includeVideos, target_path: targetPath }),
+    }),
+  downloadBackupZip: async (includeVideos: boolean): Promise<{ filename: string; size_bytes: number }> => {
+    const res = await fetch('/api/system/backup/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ include_videos: includeVideos }),
+    })
+    if (!res.ok) {
+      let detail = `导出备份失败 (${res.status})`
+      try {
+        const body = await res.json()
+        if (body?.detail) detail = String(body.detail)
+      } catch {
+        // ignore
+      }
+      throw new ApiError(detail, res.status)
+    }
+    const blob = await res.blob()
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const fallbackName = `Tsumugi-Backup-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.zip`
+    const filename = _parseDownloadFilename(res.headers.get('content-disposition'), fallbackName)
+    const blobUrl = URL.createObjectURL(blob)
+    try {
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1500)
+    }
+    return { filename, size_bytes: blob.size }
+  },
+  restoreBackupFromPath: (sourcePath: string) =>
+    request<LibraryBackupRestoreResponse>('/api/system/backup/restore', {
+      method: 'POST',
+      body: JSON.stringify({ source_path: sourcePath }),
+    }),
+  restoreBackupFromFile: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<LibraryBackupRestoreResponse>('/api/system/backup/restore', {
+      method: 'POST',
+      body: form,
+    })
+  },
+  restoreSnapshot: (filename: string) =>
+    request<SnapshotRestoreResponse>('/api/system/backup/restore-snapshot', {
+      method: 'POST',
+      body: JSON.stringify({ filename }),
+    }),
   sourceLinks: () => request<Record<string, string>>('/api/system/source-links'),
   getScraperSettings: () => request<ScraperSettingsResponse>('/api/system/scraper-settings'),
   updateScraperSettings: (payload: ScraperSettingsUpdatePayload) =>

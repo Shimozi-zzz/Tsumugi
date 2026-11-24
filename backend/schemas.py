@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Any, Literal
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field
+
+from backend.services.thumbnail_service import build_thumb_api_url
 
 
 MediaSaveMode = Literal["none", "link_only", "download"]
@@ -141,6 +143,22 @@ class GameOut(BaseModel):
     created_at: datetime
     media: MediaPathSchema | None = None
     play_record: PlayRecordSchema | None = None
+
+    @computed_field
+    @property
+    def cover_thumb_url(self) -> str:
+        if not self.media:
+            return ""
+        src = (self.media.cover_path or self.media.cover_thumb_path or "").strip()
+        return build_thumb_api_url(src, "sm")
+
+    @computed_field
+    @property
+    def background_thumb_url(self) -> str:
+        if not self.media:
+            return ""
+        src = (self.media.hero_bg_path or "").strip()
+        return build_thumb_api_url(src, "md")
 
 
 class SettingUpdate(BaseModel):

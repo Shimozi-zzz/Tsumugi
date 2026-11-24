@@ -20,6 +20,10 @@ import yt_dlp
 from backend.core.config import ASSETS_DIR, DATA_DIR, THUMBS_CACHE_DIR
 from backend.scrapers.bilibili import BILIBILI_REFERER, BILIBILI_USER_AGENT
 from backend.services.task_manager import task_manager
+from backend.services.thumbnail_service import (
+    get_or_create_webp_thumbnail,
+    invalidate_thumbnails_for_path,
+)
 
 logger = logging.getLogger("tsumugi.services.media_service")
 
@@ -282,9 +286,14 @@ def save_game_asset_bytes(
     if storage_type in WEBP_IMAGE_ASSET_TYPES:
         final_content, ext = convert_image_to_webp(content, storage_type)
 
-    # 清理同类型旧后缀文件，避免目录中同时残留 cover.jpg 和 cover.webp
+    # 清理同类型旧后缀文件及对应缩略图缓存，避免目录中同时残留旧图与旧缩略图
     for old_file in game_dir.glob(f"{storage_type}.*"):
         if old_file.name != f"{storage_type}_thumb.webp" and old_file.is_file():
+            try:
+                old_rel = old_file.resolve().relative_to(DATA_DIR.resolve()).as_posix()
+                invalidate_thumbnails_for_path(old_rel)
+            except Exception:
+                pass
             try:
                 old_file.unlink()
             except OSError:
@@ -294,6 +303,8 @@ def save_game_asset_bytes(
     target_file.write_bytes(final_content)
 
     rel_path = target_file.relative_to(DATA_DIR).as_posix()
+    if storage_type in WEBP_IMAGE_ASSET_TYPES:
+        invalidate_thumbnails_for_path(rel_path)
     result = {"path": rel_path}
 
     if storage_type == "cover":
@@ -303,38 +314,9 @@ def save_game_asset_bytes(
 
 
 def get_or_create_thumbnail(raw_path: str, width: int = 360) -> Path:
-    """
-    按需生成 WebP 缩略图并缓存至 data/cache/thumbs/。
-    支持传入 data/ 下的相对路径，也支持本地截图文件夹的绝对路径。
-    """
-    candidate = Path(raw_path)
-    if not candidate.is_absolute():
-        candidate = DATA_DIR / candidate
-
-    if not candidate.exists() or not candidate.is_file():
-        raise FileNotFoundError(f"目标图片不存在: {raw_path}")
-
-    THUMBS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-    mtime = candidate.stat().st_mtime
-    cache_key = hashlib.sha256(
-        f"{candidate.resolve()}:{mtime}:{width}".encode("utf-8")
-    ).hexdigest()
-    cached_thumb = THUMBS_CACHE_DIR / f"{cache_key}.webp"
-
-    if not cached_thumb.exists():
-        with Image.open(candidate) as img:
-            if img.mode in ("RGBA", "LA", "P"):
-                img = img.convert("RGBA")
-            else:
-                img = img.convert("RGB")
-            if img.width > width:
-                ratio = width / img.width
-                new_height = max(int(img.height * ratio), 1)
-                img = img.resize((width, new_height), Image.Resampling.LANCZOS)
-            img.save(cached_thumb, format="WEBP", quality=85)
-
-    return cached_thumb
+    """兼容旧版调用入口，统一委托至 thumbnail_service（DATA_DIR/thumbs/）"""
+    out_path, _ = get_or_create_webp_thumbnail(raw_path, width=width)
+    return out_path
 
 
 # ──────────────────── PV / OP 本地缓存下载与释放（直链优先 + HLS 兼容 + 中文报错） ────────────────────

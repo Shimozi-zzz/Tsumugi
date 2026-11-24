@@ -1,15 +1,47 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import WindowResizeHandles from '@/components/WindowResizeHandles.vue'
 import { useLibraryStore } from '@/stores/library'
+
+type WindowMode = 'normal' | 'maximized' | 'fullscreen'
+
+interface NativeWindowStateDetail {
+  is_desktop?: boolean
+  mode?: WindowMode
+  is_maximized?: boolean
+  is_fullscreen?: boolean
+}
 
 const store = useLibraryStore()
 
 const isDesktop = ref(false)
-const isMaximized = ref(false)
-const isFullscreen = ref(false)
+const windowMode = ref<WindowMode>('normal')
+
+const isMaximized = computed(() => windowMode.value === 'maximized')
+const isFullscreen = computed(() => windowMode.value === 'fullscreen')
+const showResizeHandles = computed(() => isDesktop.value && windowMode.value === 'normal')
 
 function getDesktopApi() {
   return window.pywebview?.api
+}
+
+function applyWindowState(detail: NativeWindowStateDetail | null | undefined) {
+  if (!detail) return
+  if (typeof detail.is_desktop === 'boolean') {
+    isDesktop.value = detail.is_desktop
+  }
+  if (detail.mode === 'normal' || detail.mode === 'maximized' || detail.mode === 'fullscreen') {
+    windowMode.value = detail.mode
+  } else if (typeof detail.is_fullscreen === 'boolean' || typeof detail.is_maximized === 'boolean') {
+    if (detail.is_fullscreen) {
+      windowMode.value = 'fullscreen'
+    } else if (detail.is_maximized) {
+      windowMode.value = 'maximized'
+    } else {
+      windowMode.value = 'normal'
+    }
+  }
+  syncSafeTopOffset()
 }
 
 function syncSafeTopOffset() {
@@ -28,9 +60,8 @@ async function syncDesktopState() {
   try {
     const state = await api.get_window_state?.()
     if (state) {
-      isDesktop.value = Boolean(state.is_desktop)
-      isMaximized.value = Boolean(state.is_maximized)
-      isFullscreen.value = Boolean(state.is_fullscreen)
+      applyWindowState(state)
+      return
     }
   } catch {
     // ignore transient bridge error
@@ -48,12 +79,7 @@ async function handleMinimize() {
 
 async function handleToggleMaximize() {
   try {
-    const next = await getDesktopApi()?.toggle_maximize?.()
-    if (typeof next === 'boolean') {
-      isMaximized.value = next
-    } else {
-      isMaximized.value = !isMaximized.value
-    }
+    await getDesktopApi()?.toggle_maximize?.()
     await syncDesktopState()
   } catch {
     // ignore
@@ -64,8 +90,7 @@ async function handleToggleFullscreen() {
   const api = getDesktopApi()
   if (isDesktop.value && api?.toggle_fullscreen) {
     try {
-      const next = await api.toggle_fullscreen()
-      isFullscreen.value = typeof next === 'boolean' ? next : !isFullscreen.value
+      await api.toggle_fullscreen()
       await syncDesktopState()
     } catch {
       // ignore
@@ -78,10 +103,10 @@ async function handleToggleFullscreen() {
   try {
     if (document.fullscreenElement) {
       await document.exitFullscreen()
-      isFullscreen.value = false
+      windowMode.value = 'normal'
     } else {
       await document.documentElement.requestFullscreen()
-      isFullscreen.value = true
+      windowMode.value = 'fullscreen'
     }
   } catch {
     // ignore browser fullscreen restriction
@@ -95,7 +120,6 @@ async function handleExitFullscreen() {
   if (isDesktop.value && api?.exit_fullscreen) {
     try {
       await api.exit_fullscreen()
-      isFullscreen.value = false
       await syncDesktopState()
     } catch {
       // ignore
@@ -107,7 +131,7 @@ async function handleExitFullscreen() {
     if (document.fullscreenElement) {
       await document.exitFullscreen()
     }
-    isFullscreen.value = false
+    windowMode.value = 'normal'
   } catch {
     // ignore
   }
@@ -151,7 +175,7 @@ function onDragStripMouseDown(e: MouseEvent) {
       cleanup()
       const wasMaximized = isMaximized.value
       if (wasMaximized) {
-        isMaximized.value = false
+        windowMode.value = 'normal'
       }
       const api = getDesktopApi()
       if (api?.start_drag) {
@@ -187,6 +211,7 @@ function hasAnyModalOpen(): boolean {
     store.showCollectionModal ||
     store.showTimeLedger ||
     store.showEditModal ||
+    store.showExternalImportModal ||
     store.showImportModal ||
     store.showSettingsModal
   ) {
@@ -197,7 +222,7 @@ function hasAnyModalOpen(): boolean {
 
 function onBrowserFullscreenChange() {
   if (!isDesktop.value) {
-    isFullscreen.value = Boolean(document.fullscreenElement)
+    windowMode.value = document.fullscreenElement ? 'fullscreen' : 'normal'
     syncSafeTopOffset()
   }
 }
@@ -220,22 +245,18 @@ function onPywebviewReady() {
 }
 
 function onNativeWindowState(e: Event) {
-  const detail = (e as CustomEvent<{ is_desktop?: boolean; is_maximized?: boolean; is_fullscreen?: boolean }>).detail
-  if (!detail) return
-  if (typeof detail.is_desktop === 'boolean') isDesktop.value = detail.is_desktop
-  if (typeof detail.is_maximized === 'boolean') isMaximized.value = detail.is_maximized
-  if (typeof detail.is_fullscreen === 'boolean') isFullscreen.value = detail.is_fullscreen
-  syncSafeTopOffset()
+  const detail = (e as CustomEvent<NativeWindowStateDetail>).detail
+  applyWindowState(detail)
 }
 
-watch([isDesktop, isFullscreen], () => {
+watch([isDesktop, windowMode], () => {
   syncSafeTopOffset()
 })
 
 onMounted(() => {
   void syncDesktopState()
   if (!isDesktop.value) {
-    isFullscreen.value = Boolean(document.fullscreenElement)
+    windowMode.value = document.fullscreenElement ? 'fullscreen' : 'normal'
   }
   syncSafeTopOffset()
   window.addEventListener('pywebviewready', onPywebviewReady)
@@ -255,6 +276,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- 仅在桌面端且 normal 常规态挂载 8 方向自由拉伸边缘热区 -->
+  <WindowResizeHandles :visible="showResizeHandles" />
+
   <!-- 桌面端无边框沉浸式顶部拖拽栏与右上角极简窗口控件 -->
   <div v-if="isDesktop && !isFullscreen" class="window-titlebar">
     <div
@@ -392,7 +416,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-right: 8px;
+  margin-right: 11px;
   padding: 2px;
   border-radius: 9px;
   pointer-events: auto;

@@ -18,6 +18,10 @@ from backend.schemas import BangumiSyncRequest, GameCreate, GameOut, GameUpdate,
 from backend.scrapers.bangumi import BANGUMI_USER_AGENT, BGM_BASE_URL
 from backend.services.media_service import generate_pinyin_initials
 from backend.services.process_tracker import process_tracker
+from backend.services.thumbnail_service import (
+    invalidate_thumbnails_for_game,
+    invalidate_thumbnails_for_path,
+)
 
 router = APIRouter(prefix="/api/games", tags=["games"])
 
@@ -180,9 +184,18 @@ async def update_game(
     if media_updates:
         if not game.media:
             game.media = GameMediaPath(game_id=game.id)
+        old_image_paths = {
+            f: (getattr(game.media, f, "") or "").strip()
+            for f in ("cover_path", "cover_thumb_path", "hero_bg_path", "logo_path", "custom_spine_path")
+        }
         for m_field, m_val in media_updates.items():
             if m_val is not None and hasattr(game.media, m_field):
                 setattr(game.media, m_field, m_val)
+        for img_field, old_val in old_image_paths.items():
+            if img_field in media_updates:
+                new_val = (getattr(game.media, img_field, "") or "").strip()
+                if old_val and old_val != new_val:
+                    invalidate_thumbnails_for_path(old_val)
 
         # 保持 pv_url_or_path / pv_remote_url / pv_mode 一致性（兼容旧表单仅传 pv_url_or_path）
         if "pv_url_or_path" in media_updates and media_updates["pv_url_or_path"] is not None:
@@ -236,6 +249,7 @@ async def delete_game(game_id: int, db: AsyncSession = Depends(get_db)):
     await db.delete(game)
     await db.commit()
 
+    invalidate_thumbnails_for_game(game_id)
     asset_folder = ASSETS_DIR / str(game_id)
     if asset_folder.exists():
         shutil.rmtree(asset_folder, ignore_errors=True)
