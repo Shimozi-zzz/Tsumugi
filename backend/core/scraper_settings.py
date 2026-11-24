@@ -4,11 +4,28 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 from backend.core.config import DATA_DIR, SETTINGS_JSON_PATH
 
 logger = logging.getLogger("tsumugi.core.scraper_settings")
+
+_BEARER_PREFIX_RE = re.compile(r"^(?:bearer(?:\s+|$))+", re.IGNORECASE)
+
+
+def sanitize_touchgal_token(raw: str | None) -> str:
+    """
+    清洗 TouchGal 开发者 API Token：
+    - 去除首尾空白与换行符；
+    - 若用户误粘贴了 'Bearer '（含大小写或重复）前缀，自动剥离，避免拼出重复的 'Bearer Bearer ...'。
+    """
+    if not raw:
+        return ""
+    cleaned = str(raw).strip()
+    cleaned = _BEARER_PREFIX_RE.sub("", cleaned).strip()
+    cleaned = re.sub(r"[\r\n]+", "", cleaned).strip()
+    return cleaned
 
 DEFAULT_KUNGAL_BASE_URL = "https://www.kungal.com"
 
@@ -189,6 +206,8 @@ def load_scraper_settings(
 
         if field == "kungal_base_url" and not val:
             val = DEFAULT_KUNGAL_BASE_URL
+        elif field == "touchgal_api_key":
+            val = sanitize_touchgal_token(val)
         result[field] = val
 
     return result
@@ -231,6 +250,8 @@ def save_scraper_settings(
             continue
         if field == "kungal_base_url":
             current[field] = val.rstrip("/") if val else DEFAULT_KUNGAL_BASE_URL
+        elif field == "touchgal_api_key":
+            current[field] = sanitize_touchgal_token(val)
         else:
             current[field] = val
 

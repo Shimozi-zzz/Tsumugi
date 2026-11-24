@@ -16,6 +16,7 @@ from backend.core.scraper_settings import (
     SECRET_CREDENTIAL_FIELDS,
     is_masked_placeholder,
     load_scraper_settings,
+    sanitize_touchgal_token,
 )
 from backend.db.database import AsyncSessionLocal, get_db
 from backend.db.models import AppStateSetting, Game, GameMediaPath, PlayRecord
@@ -373,6 +374,8 @@ async def test_scraper_source(
             val = str(overrides[field]).strip()
             if field in SECRET_CREDENTIAL_FIELDS and is_masked_placeholder(val):
                 continue
+            if field == "touchgal_api_key":
+                val = sanitize_touchgal_token(val)
             if val:
                 effective_cfg[field] = val
 

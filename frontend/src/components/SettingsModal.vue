@@ -30,7 +30,7 @@ const DEFAULT_SOURCE_LINKS: Record<string, string> = {
   ymgal: 'https://www.ymgal.games/developer',
   kungal: 'https://www.kungal.com',
   bangumi: 'https://next.bgm.tv/demo/access-token',
-  touchgal: 'https://www.touchgal.io',
+  touchgal: 'https://developer.touchgal.com',
   steamgriddb: 'https://www.steamgriddb.com/profile/preferences/api',
   igdb: 'https://dev.twitch.tv/console/apps',
 }

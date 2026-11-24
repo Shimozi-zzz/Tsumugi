@@ -150,13 +150,13 @@ export const SCRAPER_SOURCES: ScraperSourceConfig[] = [
       {
         key: 'touchgal_api_key',
         label: 'API Key',
-        placeholder: '输入 TouchGal 第三方 API Key',
+        placeholder: '输入 tgal_live_<id>-<secret> 格式 API Key',
         isSecret: true,
       },
     ],
-    docUrl: 'https://www.touchgal.io',
-    docLinkLabel: '访问 TouchGal ↗',
-    docHint: '填写第三方 API Key 后将自动加入「综合推荐」聚合搜索，并支持 touchgal.io 链接直查。',
+    docUrl: 'https://developer.touchgal.com',
+    docLinkLabel: '前往开发者平台 ↗',
+    docHint: '在 TouchGal 开发者平台申请 API Key（格式 tgal_live_<id>-<secret>，注意中间连字符 -）后自动加入聚合搜索。',
   },
   {
     id: 'steamgriddb',

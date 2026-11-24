@@ -13,6 +13,7 @@ from backend.core import scraper_settings as scraper_settings_mod
 from backend.core.scraper_settings import (
     load_scraper_settings,
     mask_scraper_settings_for_client,
+    sanitize_touchgal_token,
     save_scraper_settings,
 )
 from backend.db.database import Base, get_db
@@ -36,7 +37,7 @@ from backend.scrapers.manager import (
 )
 from backend.scrapers.steam import SteamScraper
 from backend.scrapers.steamgriddb import SteamGridDBScraper
-from backend.scrapers.touchgal import TouchGalScraper
+from backend.scrapers.touchgal import TOUCHGAL_API_BASE, TouchGalScraper
 from backend.scrapers.vndb import VNDBScraper
 from backend.scrapers.ymgal import YMGalScraper
 
@@ -766,9 +767,178 @@ class ScraperSettingsAndApiTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(res_vndb["ok"])
             self.assertIn("超时", res_vndb["detail"])
 
-            res_tgal = await TouchGalScraper(api_key="demo_key").test_connection(timeout=6.0)
+        with patch.object(httpx.AsyncClient, "get", side_effect=_raise_timeout):
+            res_tgal = await TouchGalScraper(api_key="tgal_live_demo-secret").test_connection(timeout=6.0)
             self.assertFalse(res_tgal["ok"])
             self.assertIn("超时", res_tgal["detail"])
+
+
+class TouchGalDeveloperApiV1TestCase(unittest.IsolatedAsyncioTestCase):
+    """验证 TouchGal 官方开发者 API v1 规范对齐、Token 清洗、data.items 解析与连通性提示"""
+
+    def test_bearer_prefix_and_whitespace_sanitization(self) -> None:
+        self.assertEqual(
+            sanitize_touchgal_token("  Bearer tgal_live_abc123-xyz987 \n"),
+            "tgal_live_abc123-xyz987",
+        )
+        self.assertEqual(
+            sanitize_touchgal_token("bearer   Bearer  tgal_live_id-sec\r\n"),
+            "tgal_live_id-sec",
+        )
+        self.assertEqual(sanitize_touchgal_token("   Bearer   "), "")
+
+        scraper = TouchGalScraper(api_key="  Bearer tgal_live_1234-abcd5678\n")
+        self.assertEqual(scraper.api_key, "tgal_live_1234-abcd5678")
+        headers = scraper._headers()
+        self.assertEqual(headers["Authorization"], "Bearer tgal_live_1234-abcd5678")
+        self.assertNotIn("Bearer Bearer", headers["Authorization"])
+        self.assertEqual(headers["Accept"], "application/json")
+        self.assertTrue(headers["User-Agent"])
+
+        # 仅含 Bearer 前缀无真实 Token 时视为未配置
+        self.assertFalse(TouchGalScraper(api_key="Bearer   ").is_configured())
+
+        # 保存与读取 settings.json 均自动清洗 Bearer 前缀与换行
+        with tempfile.TemporaryDirectory() as tmp:
+            fp = Path(tmp) / "settings.json"
+            saved = save_scraper_settings(
+                {"touchgal_api_key": "  Bearer tgal_live_save-test99\n"},
+                path=fp,
+            )
+            self.assertEqual(saved["touchgal_api_key"], "tgal_live_save-test99")
+
+            # 手动写入带 Bearer 前缀的旧文件，读取时同样自动清洗
+            fp.write_text(
+                '{"scraper_sources": {"touchgal_api_key": "Bearer tgal_live_read-test88\\n"}}',
+                encoding="utf-8",
+            )
+            loaded = load_scraper_settings(path=fp)
+            self.assertEqual(loaded["touchgal_api_key"], "tgal_live_read-test88")
+
+    async def test_search_and_detail_parse_developer_api_v1(self) -> None:
+        captured_requests: list[tuple[str, dict[str, str], dict[str, str]]] = []
+
+        async def _mock_get(self_client, url: str, *, params=None, **_kwargs):
+            captured_requests.append((str(url), dict(params or {}), dict(self_client.headers)))
+            req = httpx.Request("GET", url, params=params)
+            if url.endswith("/games/search"):
+                return httpx.Response(
+                    200,
+                    request=req,
+                    json={
+                        "success": True,
+                        "data": {
+                            "items": [
+                                {
+                                    "uniqueId": "tg_sp_001",
+                                    "name": "Summer Pockets REFLECTION BLUE",
+                                    "originalName": "サマーポケッツ",
+                                    "banner": "https://cdn.touchgal.com/sp.webp",
+                                    "developer": "Key",
+                                    "releaseDate": "2020-06-26",
+                                    "introduction": "<p>夏日海岛物语</p>",
+                                    "tags": [{"name": "催泪"}, "日常"],
+                                    "nsfw": False,
+                                }
+                            ],
+                            "total": 1,
+                        },
+                    },
+                )
+            if url.endswith("/games/tg_sp_001"):
+                return httpx.Response(
+                    200,
+                    request=req,
+                    json={
+                        "success": True,
+                        "data": {
+                            "uniqueId": "tg_sp_001",
+                            "name": "Summer Pockets REFLECTION BLUE",
+                            "originalName": "サマーポケッツ",
+                            "banner": "https://cdn.touchgal.com/sp_detail.webp",
+                            "developer": "Key",
+                            "introduction": "完整详情简介",
+                            "nsfw": False,
+                        },
+                    },
+                )
+            return httpx.Response(404, request=req, json={"success": False})
+
+        scraper = TouchGalScraper(api_key="Bearer tgal_live_abc-def")
+        with patch.object(httpx.AsyncClient, "get", new=_mock_get):
+            results = await scraper.search("Summer Pockets", limit=5)
+            detail = await scraper.get_detail("tg_sp_001")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].source_id, "tg_sp_001")
+        self.assertEqual(results[0].title, "Summer Pockets REFLECTION BLUE")
+        self.assertEqual(results[0].developers, ["Key"])
+        self.assertEqual(results[0].cover_url, "https://cdn.touchgal.com/sp.webp")
+        self.assertIn("催泪", results[0].tags)
+
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        self.assertEqual(detail.source_id, "tg_sp_001")
+        self.assertEqual(detail.description, "完整详情简介")
+
+        # 校验请求均打向官方开发者 API v1 且鉴权头无重复 Bearer
+        self.assertEqual(captured_requests[0][0], f"{TOUCHGAL_API_BASE}/games/search")
+        self.assertEqual(
+            captured_requests[0][1],
+            {"keyword": "Summer Pockets", "page": 1, "limit": 5},
+        )
+        self.assertEqual(captured_requests[0][2].get("authorization"), "Bearer tgal_live_abc-def")
+        self.assertEqual(captured_requests[1][0], f"{TOUCHGAL_API_BASE}/games/tg_sp_001")
+
+        # success=False 时不误解析
+        async def _mock_fail_body(self_client, url: str, *, params=None, **_kwargs):
+            return httpx.Response(
+                200,
+                request=httpx.Request("GET", url, params=params),
+                json={"success": False, "data": {"items": [{"uniqueId": "bad", "name": "Bad"}]}},
+            )
+
+        with patch.object(httpx.AsyncClient, "get", new=_mock_fail_body):
+            self.assertEqual(await scraper.search("Summer", limit=3), [])
+
+    async def test_connectivity_probe_uses_summer_and_guides_401_403_format(self) -> None:
+        seen_calls: list[tuple[str, dict[str, str]]] = []
+
+        async def _mock_ok(self_client, url: str, *, params=None, **_kwargs):
+            seen_calls.append((str(url), dict(params or {})))
+            return httpx.Response(
+                200,
+                request=httpx.Request("GET", url, params=params),
+                json={
+                    "success": True,
+                    "data": {"items": [{"uniqueId": "tg_1", "name": "Summer Pockets"}]},
+                },
+            )
+
+        scraper = TouchGalScraper(api_key="Bearer tgal_live_001-sec002")
+        with patch.object(httpx.AsyncClient, "get", new=_mock_ok):
+            res_ok = await scraper.test_connection(timeout=6.0)
+
+        self.assertTrue(res_ok["ok"])
+        self.assertEqual(res_ok["sample_count"], 1)
+        self.assertEqual(seen_calls[0][0], "https://developer.touchgal.com/api/v1/games/search")
+        self.assertEqual(seen_calls[0][1], {"keyword": "summer", "page": 1, "limit": 1})
+
+        # 401 / 403 应明确提示核对 tgal_live_<id>-<secret> 格式（含中间连字符 -）
+        for status_code in (401, 403):
+            async def _mock_auth_err(self_client, url: str, *, params=None, _code=status_code, **_kwargs):
+                return httpx.Response(
+                    _code,
+                    request=httpx.Request("GET", url, params=params),
+                    json={"success": False, "message": "Unauthorized"},
+                )
+
+            with patch.object(httpx.AsyncClient, "get", new=_mock_auth_err):
+                res_err = await scraper.test_connection(timeout=6.0)
+            self.assertFalse(res_err["ok"])
+            self.assertIn(f"HTTP {status_code}", res_err["detail"])
+            self.assertIn("tgal_live_<id>-<secret>", res_err["detail"])
+            self.assertIn("-", res_err["detail"])
 
 
 if __name__ == "__main__":

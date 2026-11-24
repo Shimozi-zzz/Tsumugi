@@ -8,6 +8,7 @@ from backend.core.scraper_settings import (
     load_scraper_settings,
     mask_scraper_settings_for_client,
     mask_secret,
+    sanitize_touchgal_token,
     save_scraper_settings,
 )
 from backend.db.database import get_db
@@ -21,7 +22,7 @@ SOURCE_TOKEN_LINKS: dict[str, str] = {
     "ymgal": "https://www.ymgal.games/developer",
     "kungal": "https://www.kungal.com",
     "bangumi": "https://next.bgm.tv/demo/access-token",
-    "touchgal": "https://www.touchgal.io",
+    "touchgal": "https://developer.touchgal.com",
     "steamgriddb": "https://www.steamgriddb.com/profile/preferences/api",
     "igdb": "https://dev.twitch.tv/console/apps",
 }
@@ -134,6 +135,8 @@ async def update_setting(
             if k == "steamgriddb":
                 scraper_updates["steamgriddb_api_key"] = s
             elif k == "touchgal":
+                s = sanitize_touchgal_token(s)
+                current_keys[k] = s
                 scraper_updates["touchgal_api_key"] = s
             elif k == "bangumi":
                 scraper_updates["bangumi_token"] = s

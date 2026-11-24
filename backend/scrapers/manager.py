@@ -142,8 +142,8 @@ SCRAPER_METADATA_CATALOG: dict[str, dict[str, Any]] = {
         "description": "中文 Galgame 社区资料库，专精中文译名、汉化简介与宽幅横版封面（支持第三方 API Key）",
         "requires_key": True,
         "categories": ["galgame"],
-        "doc_url": "https://www.touchgal.io",
-        "doc_hint": "填写 TouchGal 第三方 API Key 后自动加入「综合推荐」聚合搜索，并支持 touchgal.io 链接直查。",
+        "doc_url": "https://developer.touchgal.com",
+        "doc_hint": "填写 TouchGal 官方开发者 API Key（tgal_live_<id>-<secret>）后自动加入「综合推荐」聚合搜索。",
     },
     "steamgriddb": {
         "name": "SteamGridDB",
