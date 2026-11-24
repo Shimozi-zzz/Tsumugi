@@ -398,9 +398,14 @@ class AssetApplyRequest(BaseModel):
 
 
 class BangumiSyncRequest(BaseModel):
-    """单作手动单向推送游玩状态到 Bangumi"""
+    """单作手动单向推送游玩状态、评分与短评到 Bangumi"""
 
     bangumi_id: str | None = None
+    sync_rating: bool = True
+    rate: int | None = Field(default=None, ge=0, le=10)
+    sync_comment: bool = True
+    comment: str | None = Field(default=None, max_length=200)
+    private: bool | None = None
 
 
 class ScraperEnrichRequest(BaseModel):

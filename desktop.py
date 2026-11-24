@@ -12,6 +12,7 @@ Tsumugi 轻量桌面端单进程入口（PyWebView 无边框沉浸窗口 + 内�
 from __future__ import annotations
 
 import asyncio
+import base64
 import ctypes
 import inspect
 import json
@@ -1928,6 +1929,72 @@ class DesktopWindowApi:
         except Exception as exc:
             self._logger.debug("select_backup_open_path failed: %s", exc)
             return ""
+
+    def select_save_file_path(
+        self,
+        default_name: str = "",
+        file_types: list[str] | None = None,
+        default_ext: str = "",
+    ) -> str:
+        """弹出原生保存文件对话框，支持 PNG 图片、Markdown 与纯文本等任意格式导出"""
+        if not self._window:
+            return ""
+        try:
+            import webview
+
+            clean_ext = str(default_ext or "").strip()
+            if clean_ext and not clean_ext.startswith("."):
+                clean_ext = f".{clean_ext}"
+
+            clean_name = Path(str(default_name or "").strip()).name or "tsumugi-export"
+            if clean_ext and not clean_name.lower().endswith(clean_ext.lower()):
+                clean_name = f"{clean_name}{clean_ext}"
+
+            ft = tuple(file_types) if file_types else ("All files (*.*)",)
+            dialog_type = getattr(webview, "FileDialog", None)
+            save_flag = dialog_type.SAVE if dialog_type else webview.SAVE_DIALOG
+            result = self._window.create_file_dialog(
+                save_flag,
+                save_filename=clean_name,
+                file_types=ft,
+            )
+            if not result:
+                return ""
+            raw_path = result if isinstance(result, str) else str(result[0])
+            if not raw_path.strip():
+                return ""
+            chosen = Path(raw_path.strip())
+            if clean_ext and chosen.suffix.lower() != clean_ext.lower():
+                chosen = chosen.with_suffix(clean_ext)
+            return str(chosen)
+        except Exception as exc:
+            self._logger.debug("select_save_file_path failed: %s", exc)
+            return ""
+
+    def write_export_file(self, target_path: str, content_base64: str) -> dict[str, Any]:
+        """将前端生成的 Base64 字节数据安全写入用户选定的目标路径（原子替换防半截文件）"""
+        raw_target = str(target_path or "").strip()
+        if not raw_target:
+            return {"saved": False, "detail": "未指定保存路径"}
+        try:
+            raw_bytes = base64.b64decode(str(content_base64 or ""), validate=True)
+        except Exception as exc:
+            return {"saved": False, "detail": f"导出数据编码无效: {exc}"}
+
+        try:
+            dest = Path(raw_target).expanduser()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+            tmp_path.write_bytes(raw_bytes)
+            os.replace(tmp_path, dest)
+            return {
+                "saved": True,
+                "path": str(dest),
+                "size_bytes": len(raw_bytes),
+            }
+        except Exception as exc:
+            self._logger.debug("write_export_file failed: %s", exc)
+            return {"saved": False, "detail": f"写入导出文件失败: {exc}"}
 
 
 def main() -> None:

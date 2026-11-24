@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  ApiError,
   assetUrl,
   fallbackToOriginalImage,
   gamesApi,
@@ -12,6 +11,7 @@ import {
   thumbUrl,
 } from '@/api/client'
 import BangumiBindModal from '@/components/BangumiBindModal.vue'
+import BangumiSyncModal from '@/components/BangumiSyncModal.vue'
 import BindExeModal from '@/components/BindExeModal.vue'
 import GameNotesReviewPanel from '@/components/GameNotesReviewPanel.vue'
 import LightboxModal from '@/components/LightboxModal.vue'
@@ -51,7 +51,7 @@ const showBackups = ref(false)
 const showSessions = ref(false)
 const showBindExeModal = ref(false)
 const showBangumiBindModal = ref(false)
-const syncingBangumi = ref(false)
+const showBangumiSyncModal = ref(false)
 const refreshingMeta = ref(false)
 const creatingBackup = ref(false)
 const lightboxIndex = ref<number | null>(null)
@@ -514,30 +514,24 @@ function handleLaunchClick() {
   void store.launchGame(game.value.id)
 }
 
-async function handleSyncBangumi() {
-  if (!game.value || syncingBangumi.value) return
-  syncingBangumi.value = true
-  try {
-    const res = await gamesApi.syncBangumi(game.value.id)
-    store.notify(`已同步至 Bangumi · ${res.bangumi_type_label}`, 'success')
-  } catch (err) {
-    if (err instanceof ApiError) {
-      if (err.code === 'MISSING_BANGUMI_TOKEN') {
-        store.notify('尚未配置 Bangumi Access Token', 'warning', 5000, {
-          label: '前往设置',
-          onClick: () => store.openSettings('sources', 'bangumi'),
-        })
-        return
-      }
-      if (err.code === 'MISSING_BANGUMI_ID') {
-        showBangumiBindModal.value = true
-        return
-      }
-    }
-    store.notify(err instanceof Error ? err.message : '同步至 Bangumi 失败', 'error')
-  } finally {
-    syncingBangumi.value = false
+function handleSyncBangumi() {
+  if (!game.value) return
+  const hasToken = Boolean(store.settings.bangumi_token || store.settings.api_keys?.bangumi)
+  if (!hasToken) {
+    store.notify('尚未配置 Bangumi Access Token', 'warning', 5000, {
+      label: '前往设置',
+      onClick: () => store.openSettings('sources', 'bangumi'),
+    })
+    return
   }
+  const resolvedBgmId =
+    (game.value.bangumi_id || '').trim() ||
+    String(game.value.external_ids?.bgm || game.value.external_ids?.bangumi || '').trim()
+  if (!resolvedBgmId) {
+    showBangumiBindModal.value = true
+    return
+  }
+  showBangumiSyncModal.value = true
 }
 </script>
 
@@ -791,18 +785,17 @@ async function handleSyncBangumi() {
               </Transition>
             </div>
 
-            <!-- 克制次按钮：单向同步进度至 Bangumi -->
+            <!-- 克制次按钮：单向同步进度、评分与短评至 Bangumi -->
             <button
               class="hero-bgm-btn"
-              :disabled="syncingBangumi"
-              :title="`上传为「${bangumiTargetLabel}」至 Bangumi`"
+              :title="`同步至 Bangumi（默认状态：${bangumiTargetLabel}）`"
               @click="handleSyncBangumi"
             >
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7">
                 <path d="M10 13.5V4.5M6.5 8L10 4.5 13.5 8" stroke-linecap="round" stroke-linejoin="round" />
                 <path d="M4 13.5v1.5a1.5 1.5 0 0 0 1.5 1.5h9a1.5 1.5 0 0 0 1.5-1.5v-1.5" stroke-linecap="round" />
               </svg>
-              <span>{{ syncingBangumi ? '同步中…' : '同步至 Bangumi' }}</span>
+              <span>同步至 Bangumi</span>
             </button>
           </div>
         </div>
@@ -1263,6 +1256,17 @@ async function handleSyncBangumi() {
         :game="game"
         @close="showBangumiBindModal = false"
         @synced="showBangumiBindModal = false"
+      />
+    </Transition>
+
+    <!-- 同步状态、评分与吐槽评论至 Bangumi -->
+    <Transition name="modal-pop">
+      <BangumiSyncModal
+        v-if="showBangumiSyncModal && game"
+        :game="game"
+        @close="showBangumiSyncModal = false"
+        @need-bind="showBangumiSyncModal = false; showBangumiBindModal = true"
+        @synced="showBangumiSyncModal = false"
       />
     </Transition>
 

@@ -38,6 +38,15 @@ interface PyWebviewAPI {
   pick_folder?: (title?: string) => Promise<string>
   select_backup_save_path?: (defaultName?: string) => Promise<string>
   select_backup_open_path?: () => Promise<string>
+  select_save_file_path?: (
+    defaultName?: string,
+    fileTypes?: string[],
+    defaultExt?: string,
+  ) => Promise<string>
+  write_export_file?: (
+    targetPath: string,
+    contentBase64: string,
+  ) => Promise<{ saved: boolean; path?: string; size_bytes?: number; detail?: string }>
   resolve_dropped_path?: (rawPath: string) => Promise<{
     kind: string
     folder_path: string

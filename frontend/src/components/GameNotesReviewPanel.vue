@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { gamesApi } from '@/api/client'
+import BangumiBindModal from '@/components/BangumiBindModal.vue'
+import BangumiSyncModal from '@/components/BangumiSyncModal.vue'
+import NoteExportModal from '@/components/NoteExportModal.vue'
 import { useLibraryStore } from '@/stores/library'
 import type { Game, GameNote, NoteType, RatingDimensionKey } from '@/types'
 import { renderNoteMarkdown, toggleSpoilerFromEvent } from '@/utils/markdown'
@@ -200,7 +203,20 @@ const activeTypeFilter = ref<TypeFilterKey>('all')
 const editorMode = ref<EditorViewMode>('edit')
 const noteSaveState = ref<'idle' | 'dirty' | 'saving' | 'saved'>('idle')
 const confirmDeleteNoteId = ref<number | null>(null)
-const exportingMd = ref(false)
+const showExportModal = ref(false)
+const showBangumiSyncModal = ref(false)
+const showBangumiBindModal = ref(false)
+
+const hasBangumiToken = computed(() =>
+  Boolean(store.settings.bangumi_token || store.settings.api_keys?.bangumi),
+)
+const resolvedBangumiId = computed(() => {
+  const g = props.game
+  return (
+    (g.bangumi_id || '').trim() ||
+    String(g.external_ids?.bgm || g.external_ids?.bangumi || '').trim()
+  )
+})
 
 // 右栏统一创作状态
 const draftNewMode = ref(false)
@@ -603,21 +619,31 @@ function insertMarkdownSnippet(kind: 'h2' | 'bold' | 'quote' | 'list' | 'spoiler
   })
 }
 
-async function handleExportMarkdown() {
-  if (exportingMd.value) return
-  exportingMd.value = true
-  try {
-    if (ratingSaveTimer !== null) {
-      await persistRating(props.game.id)
-    }
-    await flushNoteSave()
-    const dl = await gamesApi.downloadNotesMarkdown(props.game.id, undefined, `${props.game.title}-手记`)
-    store.notify(`已导出 Markdown：${dl.filename}`, 'success')
-  } catch (err) {
-    store.notify(err instanceof Error ? err.message : '导出 Markdown 失败', 'error')
-  } finally {
-    exportingMd.value = false
+async function openExportDialog() {
+  if (ratingSaveTimer !== null) {
+    await persistRating(props.game.id)
   }
+  await flushNoteSave()
+  showExportModal.value = true
+}
+
+async function openBangumiSyncFlow() {
+  if (ratingSaveTimer !== null) {
+    await persistRating(props.game.id)
+  }
+  await flushNoteSave()
+  if (!hasBangumiToken.value) {
+    store.notify('尚未配置 Bangumi Access Token', 'warning', 5000, {
+      label: '前往设置',
+      onClick: () => store.openSettings('sources', 'bangumi'),
+    })
+    return
+  }
+  if (!resolvedBangumiId.value) {
+    showBangumiBindModal.value = true
+    return
+  }
+  showBangumiSyncModal.value = true
 }
 
 function handleKeydown(ev: KeyboardEvent) {
@@ -768,7 +794,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 底部一行：一句话短评 -->
+      <!-- 底部一行：一句话短评 + 同步入口 -->
       <div class="short-review-row">
         <input
           v-model="shortReview"
@@ -782,6 +808,15 @@ onBeforeUnmount(() => {
         <span v-if="ratingSaveState !== 'idle'" class="save-hint">
           {{ ratingSaveState === 'saving' ? '保存中…' : '已保存' }}
         </span>
+        <button
+          v-if="hasBangumiToken"
+          type="button"
+          class="rating-bgm-sync-btn"
+          title="同步评分与短评至 Bangumi"
+          @click="openBangumiSyncFlow"
+        >
+          同步至 Bangumi
+        </button>
       </div>
     </section>
 
@@ -869,14 +904,14 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="export-md-btn"
-              :disabled="exportingMd || (notes.length === 0 && !hasAnyRating)"
-              title="导出评分、短评与全部手记为 Markdown (.md)"
-              @click="handleExportMarkdown"
+              :disabled="notes.length === 0 && !hasAnyRating"
+              title="选择位置导出分享长图 (.png) 或纯文档 (.md / .txt)"
+              @click="openExportDialog"
             >
               <svg viewBox="0 0 18 18" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.65">
                 <path d="M9 3v8.5M5.8 8.5 9 11.7l3.2-3.2M3.5 14.2h11" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span>{{ exportingMd ? '导出中…' : '导出 .md' }}</span>
+              <span>导出手记</span>
             </button>
           </div>
         </aside>
@@ -1243,6 +1278,37 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </section>
+
+    <Transition name="modal-pop">
+      <NoteExportModal
+        v-if="showExportModal"
+        :game="game"
+        :notes="notes"
+        :active-note="activeNote"
+        @close="showExportModal = false"
+      />
+    </Transition>
+
+    <Transition name="modal-pop">
+      <BangumiSyncModal
+        v-if="showBangumiSyncModal"
+        :game="game"
+        :notes="notes"
+        :active-note="activeNote"
+        @close="showBangumiSyncModal = false"
+        @need-bind="showBangumiSyncModal = false; showBangumiBindModal = true"
+        @synced="showBangumiSyncModal = false"
+      />
+    </Transition>
+
+    <Transition name="modal-pop">
+      <BangumiBindModal
+        v-if="showBangumiBindModal"
+        :game="game"
+        @close="showBangumiBindModal = false"
+        @synced="showBangumiBindModal = false"
+      />
+    </Transition>
   </div>
 </template>
 
@@ -1504,6 +1570,24 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+
+.rating-bgm-sync-btn {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.rating-bgm-sync-btn:hover {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
 }
 
 /* ──────────────────── 下半区：双栏手记工作台 ──────────────────── */

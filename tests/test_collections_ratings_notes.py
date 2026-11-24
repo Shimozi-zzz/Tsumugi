@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import httpx
 from sqlalchemy import text
@@ -453,6 +454,69 @@ class SeriesCollectionsRatingsAndNotesApiTestCase(unittest.IsolatedAsyncioTestCa
             self.assertEqual(r_del_note.status_code, 200)
             r_game_after = await client.get(f"/api/games/{g1}", params={"record_active": "false"})
             self.assertEqual(r_game_after.json()["notes_count"], 1)
+
+    async def test_bangumi_sync_with_rating_comment_and_safe_omission(self) -> None:
+        g1, _g2, g3 = await self._seed_games()
+        sent_payloads: list[tuple[str, dict]] = []
+
+        orig_post = httpx.AsyncClient.post
+
+        async def _fake_bgm_post(self_client, url, **kwargs):
+            if "api.bgm.tv" in str(url):
+                sent_payloads.append((str(url), dict(kwargs.get("json") or {})))
+                return httpx.Response(202, request=httpx.Request("POST", str(url)))
+            return await orig_post(self_client, url, **kwargs)
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # 给 g1 设置 Bangumi ID、0.5 步进评分 8.5 与短评
+            r_patch = await client.patch(f"/api/games/{g1}", json={"bangumi_id": "234157"})
+            self.assertEqual(r_patch.status_code, 200)
+            r_rate = await client.put(
+                f"/api/games/{g1}/rating",
+                json={"rating_overall": 8.5, "short_review": "鸟白岛的夏日记忆"},
+            )
+            self.assertEqual(r_rate.status_code, 200)
+
+            r_patch_g3 = await client.patch(f"/api/games/{g3}", json={"bangumi_id": "1195"})
+            self.assertEqual(r_patch_g3.status_code, 200)
+
+            with (
+                patch("backend.api.games.resolve_bangumi_token", return_value="bgm_token_test"),
+                patch.object(httpx.AsyncClient, "post", new=_fake_bgm_post),
+            ):
+                # 1. 自动从本地评分四舍五入(8.5->9) + 同步短评 + 仅自己可见
+                r_sync1 = await client.post(
+                    f"/api/games/{g1}/sync/bangumi",
+                    json={"private": True},
+                )
+                self.assertEqual(r_sync1.status_code, 200)
+                body1 = r_sync1.json()
+                self.assertEqual(body1["synced_rate"], 9)
+                self.assertEqual(body1["synced_comment"], "鸟白岛的夏日记忆")
+                self.assertTrue(body1["private"])
+                self.assertEqual(
+                    sent_payloads[-1][1],
+                    {
+                        "type": 2,
+                        "rate": 9,
+                        "comment": "鸟白岛的夏日记忆",
+                        "private": True,
+                    },
+                )
+
+                # 2. 显式关闭评分与评论同步时，仅传收藏状态 type
+                r_sync2 = await client.post(
+                    f"/api/games/{g1}/sync/bangumi",
+                    json={"sync_rating": False, "sync_comment": False},
+                )
+                self.assertEqual(r_sync2.status_code, 200)
+                self.assertEqual(sent_payloads[-1][1], {"type": 2})
+
+                # 3. 本地未评分且无短评的作品（g3）默认同步时绝不发送 rate/comment 覆盖远端
+                r_sync3 = await client.post(f"/api/games/{g3}/sync/bangumi", json={})
+                self.assertEqual(r_sync3.status_code, 200)
+                self.assertEqual(sent_payloads[-1][1], {"type": 1})
 
 
 if __name__ == "__main__":

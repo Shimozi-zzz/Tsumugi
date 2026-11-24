@@ -6,6 +6,7 @@ import type {
   AssetSearchResponse,
   BackupItem,
   BangumiMeResponse,
+  BangumiSyncPayload,
   BangumiSyncResponse,
   BatchImportItemPayload,
   BatchScanCandidate,
@@ -356,11 +357,18 @@ export const gamesApi = {
     }>(`/api/games/${id}/launch`, { method: 'POST' }),
   sessions: (id: number, limit = 20) =>
     request<PlaySession[]>(`/api/games/${id}/sessions?limit=${limit}`),
-  syncBangumi: (id: number, bangumiId?: string) =>
-    request<BangumiSyncResponse>(`/api/games/${id}/sync/bangumi`, {
+  syncBangumi: (id: number, payloadOrId?: string | BangumiSyncPayload) => {
+    const body: BangumiSyncPayload =
+      typeof payloadOrId === 'string'
+        ? payloadOrId
+          ? { bangumi_id: payloadOrId }
+          : {}
+        : payloadOrId || {}
+    return request<BangumiSyncResponse>(`/api/games/${id}/sync/bangumi`, {
       method: 'POST',
-      body: JSON.stringify(bangumiId ? { bangumi_id: bangumiId } : {}),
-    }),
+      body: JSON.stringify(body),
+    })
+  },
   updateRating: (
     id: number,
     payload: {
@@ -400,6 +408,21 @@ export const gamesApi = {
       `/api/games/${id}/notes/${noteId}`,
       { method: 'DELETE' },
     ),
+  fetchNotesMarkdown: async (id: number, noteId?: number): Promise<string> => {
+    const qs = noteId != null ? `?note_id=${encodeURIComponent(String(noteId))}` : ''
+    const res = await fetch(`/api/games/${id}/notes/export${qs}`)
+    if (!res.ok) {
+      let detail = `导出 Markdown 失败 (${res.status})`
+      try {
+        const body = await res.json()
+        if (body?.detail) detail = String(body.detail)
+      } catch {
+        // ignore
+      }
+      throw new ApiError(detail, res.status)
+    }
+    return await res.text()
+  },
   downloadNotesMarkdown: async (
     id: number,
     noteId?: number,

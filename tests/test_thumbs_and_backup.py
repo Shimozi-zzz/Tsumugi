@@ -580,12 +580,29 @@ class FullLibraryBackupAndRestoreTestCase(unittest.TestCase):
 
 
 class DesktopBackupDialogGuardTestCase(unittest.TestCase):
-    """4. 验证 desktop.py 新增原生备份保存/打开文件对话框方法在非 Windows/Linux 下的安全性"""
+    """4. 验证 desktop.py 新增原生文件对话框及导出直写方法在非 Windows/Linux 下的安全性"""
 
     def test_dialog_methods_safe_when_detached_or_mocked(self) -> None:
         api = DesktopWindowApi(logging.getLogger("test.desktop.backup_dialogs"), platform="linux")
         self.assertEqual(api.select_backup_save_path("test_backup"), "")
         self.assertEqual(api.select_backup_open_path(), "")
+        self.assertEqual(api.select_save_file_path("note_card", ["PNG Image (*.png)"], ".png"), "")
+
+    def test_write_export_file_binary_and_validation(self) -> None:
+        import base64
+
+        api = DesktopWindowApi(logging.getLogger("test.desktop.export_write"), platform="linux")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "nested" / "note-share.png"
+            payload = base64.b64encode(b"\x89PNG\r\n\x1a\nfake-png-body").decode("ascii")
+            res = api.write_export_file(str(target), payload)
+            self.assertTrue(res["saved"])
+            self.assertEqual(target.read_bytes(), b"\x89PNG\r\n\x1a\nfake-png-body")
+
+            err_empty = api.write_export_file("", payload)
+            self.assertFalse(err_empty["saved"])
+            err_bad_b64 = api.write_export_file(str(target), "not-valid-base64!!!")
+            self.assertFalse(err_bad_b64["saved"])
 
 
 if __name__ == "__main__":

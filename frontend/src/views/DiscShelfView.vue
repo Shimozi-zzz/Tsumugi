@@ -77,6 +77,46 @@ const isCurrentRunning = computed(
 
 const activeCollectionLabel = computed(() => store.activeCollection?.name || '全部')
 
+const currentGameSeriesTag = computed<string>(() => {
+  const g = currentGame.value
+  if (!g || store.collections.length === 0) return ''
+  let targetCol = store.activeCollection
+  if (!targetCol) {
+    const orderedCols = [...store.collections].sort((a, b) => {
+      const aSeries = a.collection_type !== 'custom' ? 0 : 1
+      const bSeries = b.collection_type !== 'custom' ? 0 : 1
+      if (aSeries !== bSeries) return aSeries - bSeries
+      if ((a.sort_order ?? 0) !== (b.sort_order ?? 0)) {
+        return (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      }
+      return a.id - b.id
+    })
+    targetCol =
+      orderedCols.find(
+        (c) => (c.items || []).some((it) => it.game_id === g.id) || (c.game_ids || []).includes(g.id),
+      ) || null
+  }
+  if (!targetCol) return ''
+
+  const orderedItems =
+    targetCol.items && targetCol.items.length > 0
+      ? [...targetCol.items].sort((x, y) => (x.position ?? 0) - (y.position ?? 0))
+      : []
+  let idx = orderedItems.findIndex((it) => it.game_id === g.id)
+  let total = orderedItems.length
+  let relLabel = idx >= 0 ? (orderedItems[idx].relation_label || '').trim() : ''
+
+  if (idx < 0) {
+    const ids = targetCol.game_ids || []
+    idx = ids.indexOf(g.id)
+    total = ids.length
+  }
+  if (idx < 0 || total <= 0) return ''
+  return relLabel
+    ? `${targetCol.name} · ${relLabel} · ${idx + 1}/${total}`
+    : `${targetCol.name} · ${idx + 1}/${total}`
+})
+
 const watermarkText = computed(() => {
   const g = currentGame.value
   if (!g) return ''
@@ -237,6 +277,14 @@ function handleLaunchCurrent() {
 
 function selectCollectionFromDropdown(collectionId: number | null) {
   store.setActiveCollection(collectionId)
+  colDropdownOpen.value = false
+}
+
+function openAllWorksTab() {
+  galleryTab.value = 'works'
+  if (store.activeCollectionId !== null) {
+    store.setActiveCollection(null)
+  }
   colDropdownOpen.value = false
 }
 
@@ -712,9 +760,9 @@ onBeforeUnmount(() => {
             type="button"
             role="tab"
             class="gallery-seg-btn"
-            :class="{ active: galleryTab === 'works' }"
-            :aria-selected="galleryTab === 'works'"
-            @click="galleryTab = 'works'"
+            :class="{ active: galleryTab === 'works' && store.activeCollectionId === null }"
+            :aria-selected="galleryTab === 'works' && store.activeCollectionId === null"
+            @click="openAllWorksTab"
           >
             全部作品
           </button>
@@ -738,6 +786,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="gallery-title-trigger"
+              :class="{ 'is-filtered': store.activeCollectionId !== null }"
               @click.stop="colDropdownOpen = !colDropdownOpen"
             >
               <span class="gallery-title-cn">回廊</span>
@@ -1140,6 +1189,9 @@ onBeforeUnmount(() => {
             <span v-if="currentGame.developer">{{ currentGame.developer }}</span>
             <span v-if="releaseYear" class="meta-dot tabular-nums">{{ releaseYear }}</span>
             <span class="meta-dot tabular-nums">{{ formatPlayDuration(currentPlaySeconds) }}</span>
+            <span v-if="currentGameSeriesTag" class="meta-dot meta-series-tag tabular-nums">
+              {{ currentGameSeriesTag }}
+            </span>
           </div>
 
           <!-- 第三行：诗意引言（1~2 句，斜体柔白） -->
@@ -1617,15 +1669,28 @@ onBeforeUnmount(() => {
   align-items: baseline;
   gap: 7px;
   padding: 6px 12px;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
   color: var(--text-primary);
-  transition: background-color var(--duration-fast) var(--ease-out-expo);
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    border-color var(--duration-fast) var(--ease-out-expo);
 }
 
 .gallery-title-trigger:hover {
   background: rgba(255, 255, 255, 0.07);
+}
+
+.gallery-title-trigger.is-filtered {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.gallery-title-trigger.is-filtered .gallery-col-label {
+  color: #ffffff;
+  font-weight: 600;
 }
 
 .gallery-title-cn {
@@ -2613,6 +2678,10 @@ onBeforeUnmount(() => {
   gap: 8px;
   font-size: 12.5px;
   color: var(--text-secondary);
+}
+
+.meta-series-tag {
+  color: rgba(244, 244, 245, 0.72);
 }
 
 .meta-dot::before {

@@ -1,4 +1,5 @@
 import json
+import math
 import re
 import shutil
 from datetime import datetime
@@ -849,6 +850,30 @@ async def sync_game_status_to_bangumi(
     local_status = (game.status or "todo").strip().lower()
     mapped_type, mapped_label = BANGUMI_COLLECTION_TYPE_MAP.get(local_status, (1, "想玩"))
 
+    bgm_body: dict[str, Any] = {"type": mapped_type}
+
+    sync_rating = payload.sync_rating if payload is not None else True
+    explicit_rate = payload.rate if payload is not None else None
+    if explicit_rate is not None:
+        bgm_body["rate"] = int(explicit_rate)
+    elif sync_rating and game.rating_overall is not None:
+        bgm_body["rate"] = min(
+            10,
+            max(1, int(math.floor(float(game.rating_overall) + 0.5))),
+        )
+
+    sync_comment = payload.sync_comment if payload is not None else True
+    explicit_comment = payload.comment if payload is not None else None
+    if explicit_comment is not None:
+        cleaned_comment = explicit_comment.strip()[:200]
+        if cleaned_comment:
+            bgm_body["comment"] = cleaned_comment
+    elif sync_comment and (game.short_review or "").strip():
+        bgm_body["comment"] = (game.short_review or "").strip()[:200]
+
+    if payload is not None and payload.private is not None:
+        bgm_body["private"] = bool(payload.private)
+
     headers = {
         "User-Agent": BANGUMI_USER_AGENT,
         "Authorization": f"Bearer {token}",
@@ -864,7 +889,7 @@ async def sync_game_status_to_bangumi(
             follow_redirects=True,
             proxy=proxy_url or None,
         ) as client:
-            resp = await client.post(url, json={"type": mapped_type})
+            resp = await client.post(url, json=bgm_body)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"连接 Bangumi 推送接口失败: {exc}")
 
@@ -884,4 +909,7 @@ async def sync_game_status_to_bangumi(
         "local_status": game.status,
         "bangumi_type": mapped_type,
         "bangumi_type_label": mapped_label,
+        "synced_rate": bgm_body.get("rate"),
+        "synced_comment": bgm_body.get("comment", ""),
+        "private": bgm_body.get("private"),
     }

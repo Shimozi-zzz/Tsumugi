@@ -1,4 +1,4 @@
-import type { Game, LibrarySortBy, LibrarySortOrder } from '@/types'
+import type { CollectionItem, Game, LibrarySortBy, LibrarySortOrder } from '@/types'
 
 export interface SortModeOption {
   key: LibrarySortBy
@@ -101,24 +101,86 @@ function compareByName(a: Game, b: Game): number {
   return zhCollator.compare((a.title || '').trim(), (b.title || '').trim())
 }
 
+interface CollectionClusterInfo {
+  collectionId: number
+  name: string
+  position: number
+}
+
+function buildGameCollectionMap(
+  collections: CollectionItem[] = [],
+): Map<number, CollectionClusterInfo> {
+  const map = new Map<number, CollectionClusterInfo>()
+  if (!collections || collections.length === 0) return map
+
+  const orderedCols = [...collections].sort((a, b) => {
+    const aSeries = a.collection_type !== 'custom' ? 0 : 1
+    const bSeries = b.collection_type !== 'custom' ? 0 : 1
+    if (aSeries !== bSeries) return aSeries - bSeries
+    if ((a.sort_order ?? 0) !== (b.sort_order ?? 0)) {
+      return (a.sort_order ?? 0) - (b.sort_order ?? 0)
+    }
+    return a.id - b.id
+  })
+
+  for (const col of orderedCols) {
+    const entries =
+      col.items && col.items.length > 0
+        ? [...col.items].sort((x, y) => (x.position ?? 0) - (y.position ?? 0))
+        : (col.game_ids || []).map((gid, idx) => ({ game_id: gid, position: idx }))
+
+    for (let i = 0; i < entries.length; i++) {
+      const gid = entries[i].game_id
+      if (!map.has(gid)) {
+        map.set(gid, {
+          collectionId: col.id,
+          name: (col.name || '').trim(),
+          position: entries[i].position ?? i,
+        })
+      }
+    }
+  }
+  return map
+}
+
 /**
- * 统一游戏库排序引擎（回廊与侧边栏共享同一份排序结果）
+ * 统一游戏库排序引擎（回廊与侧边栏共享同一份排序结果）：
+ * - 在 `series_name` 模式下，优先将同一合集/系列的作品按合集名穿插聚拢，合集内严格按 position 排列
  */
 export function sortGames(
   games: Game[],
   sortBy: LibrarySortBy = 'series_name',
   order: LibrarySortOrder = 'asc',
+  collections: CollectionItem[] = [],
 ): Game[] {
   const dir = order === 'desc' ? -1 : 1
   const list = [...games]
+  const gameCollectionMap =
+    sortBy === 'series_name' ? buildGameCollectionMap(collections) : new Map<number, CollectionClusterInfo>()
 
   list.sort((a, b) => {
     if (sortBy === 'series_name') {
-      const keyA = getSeriesKey(a)
-      const keyB = getSeriesKey(b)
+      const colA = gameCollectionMap.get(a.id)
+      const colB = gameCollectionMap.get(b.id)
+
+      if (colA && colB && colA.collectionId === colB.collectionId) {
+        if (colA.position !== colB.position) {
+          return colA.position - colB.position
+        }
+        return compareByName(a, b)
+      }
+
+      const keyA = colA ? colA.name : getSeriesKey(a)
+      const keyB = colB ? colB.name : getSeriesKey(b)
       const keyCmp = zhCollator.compare(keyA, keyB)
       if (keyCmp !== 0) {
         return keyCmp * dir
+      }
+
+      if (colA && !colB) return -1
+      if (!colA && colB) return 1
+      if (colA && colB && colA.collectionId !== colB.collectionId) {
+        return colA.collectionId - colB.collectionId
       }
 
       // 同一系列内部：始终按发售日从早到晚升序（缺失日期排在有日期之后）

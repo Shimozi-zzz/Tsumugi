@@ -697,12 +697,24 @@ export interface BangumiMeResponse {
   detail?: string
 }
 
+export interface BangumiSyncPayload {
+  bangumi_id?: string
+  sync_rating?: boolean
+  rate?: number | null
+  sync_comment?: boolean
+  comment?: string | null
+  private?: boolean
+}
+
 export interface BangumiSyncResponse {
   synced: boolean
   bangumi_id: string
   local_status: string
   bangumi_type: number
   bangumi_type_label: string
+  synced_rate?: number | null
+  synced_comment?: string
+  private?: boolean | null
 }
 
 export type MetadataSourceKey =

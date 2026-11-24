@@ -223,7 +223,8 @@ export const useLibraryStore = defineStore('library', () => {
       }
       return true
     })
-    return sortGames(matched, sortBy.value, sortOrder.value)
+    const sortCollections = activeCollection.value ? [activeCollection.value] : collections.value
+    return sortGames(matched, sortBy.value, sortOrder.value, sortCollections)
   })
 
   const activeGame = computed<Game | null>(() => {
